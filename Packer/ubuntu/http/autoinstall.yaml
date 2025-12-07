@@ -1,0 +1,52 @@
+#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+    variant: ''
+  identity:
+    hostname: ubuntu-server
+    username: ubuntu
+    # PASSWORD_HASH must be replaced with actual SHA-512 hash string
+    password: "PASSWORD_HASH"
+    realname: "Ubuntu Server User"
+  ssh:
+    install-server: true
+    enable: true
+    allow-pw: false
+    # To allow key-based login, add your public SSH keys below:
+    authorized-keys:
+      - "ssh-rsa AAAA...INSERT_YOUR_PUBLIC_SSH_KEY_HERE... user@host"
+  network:
+    version: 2
+    ethernets:
+      eth0:
+        dhcp4: true
+        # For static IP override, comment out dhcp4 and uncomment & adjust below:
+        # dhcp4: false
+        # addresses: [ "192.168.22.123/24" ]
+        # gateway4: "192.168.22.1"
+        # nameservers:
+        #   addresses: [ "192.168.22.1", "8.8.8.8" ]
+  storage:
+    layout:
+      name: lvm
+  packages:
+    - zsh
+    - git
+    - curl
+    - wget
+    - unzip
+    - htop
+  late-commands:
+    # Example: grant sudo without password for ubuntu user
+    - |
+      curtin in-target --target /target -- bash -c "echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99_ubuntu_nopasswd"
+    # Example: set default shell to zsh for ubuntu user
+    - |
+      curtin in-target --target /target -- chsh -s /usr/bin/zsh ubuntu
+  user-data:
+    timezone: America/Denver
+    locale: en_US.UTF-8
+    ssh_pwauth: false
