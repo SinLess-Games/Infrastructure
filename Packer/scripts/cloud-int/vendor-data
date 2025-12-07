@@ -1,0 +1,29 @@
+#cloud-config
+write_files:
+  - path: /etc/update-motd.d/99-sinless-warning
+    permissions: '0755'
+    owner: 'root:root'
+    content: |
+      #!/bin/sh
+      cat << 'EOF'
+      ############################################################
+      #               WELCOME TO SinLess Games LLC                 #
+      ############################################################
+      #                                                          #
+      # By accessing this server, you acknowledge and agree to    #
+      # the Terms of Use and Privacy Policy of SinLess Games LLC #
+      #                                                          #
+      # All actions on this system are logged and actively        #
+      # monitored. Unauthorized access or misuse is strictly      #
+      # prohibited.                                               #
+      #                                                          #
+      # If you are not an authorized user, exit immediately.     #
+      ############################################################
+      EOF
+
+runcmd:
+  # Ensure our MOTD script is executable (should already be via write_files permissions)
+  - [ chmod, "+x", /etc/update-motd.d/99-sinless-warning ]
+
+  # (Optional) Clean up default /etc/motd if statically present — force dynamic MOTD
+  - if [ -f /etc/motd ]; then rm -f /etc/motd; fi

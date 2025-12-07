@@ -1,0 +1,65 @@
+{
+  "builders": [
+    {
+      "type": "proxmox-iso",
+      "proxmox_url": "{{ user `proxmox_url` }}",
+      "proxmox_api_token_id": "{{ user `proxmox_api_token_id` }}",
+      "proxmox_api_token_secret": "{{ user `proxmox_api_token_secret` }}",
+      "insecure_skip_tls_verify": "{{ user `insecure_skip_tls_verify` }}",
+      "node": "{{ user `proxmox_node` }}",
+      "storage_pool": "{{ user `proxmox_storage_pool` }}",
+      "template_pool": "{{ user `proxmox_template_pool` }}",
+      "vm_name": "{{ user `template_name` }}",
+      "template_description": "Flatcar Container Linux template for Proxmox (automated build)",
+      "memory": "{{ user `vm_memory` }}",
+      "cores": "{{ user `vm_cores` }}",
+      "disks": [
+        {
+          "disk_size": "{{ user `vm_disk_size` }}",
+          "type": "virtio",
+          "storage_pool": "{{ user `proxmox_storage_pool` }}",
+          "storage_type": "lvm"
+        }
+      ],
+      "network_adapters": [
+        {
+          "model": "virtio",
+          "bridge": "{{ user `vm_network_bridge` }}"
+        }
+      ],
+      "iso_url": "{{ user `flatcar_img_url` }}",
+      "iso_checksum": "{{ user `flatcar_img_checksum` }}",
+      "iso_storage_pool": "{{ user `proxmox_storage_pool` }}",
+      "unmount_iso": true,
+
+      "ssh_username": "{{ user `ssh_username` }}",
+      "ssh_private_key_file": "{{ user `ssh_private_key_file` }}",
+      "ssh_timeout": "{{ user `ssh_timeout` }}",
+
+      "shutdown_command": "shutdown -P now"
+    }
+  ],
+
+  "provisioners": [
+    {
+      "type": "file",
+      "source": "http/",
+      "destination": "/tmp/flatcar-ignition"
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "mkdir -p /boot/flatcar-ignition",
+        "cp /tmp/flatcar-ignition/*.ign /boot/flatcar-ignition/",
+        "sync"
+      ]
+    }
+  ],
+
+  "post-processors": [
+    {
+      "type": "proxmox-template",
+      "convert_to_template": true
+    }
+  ]
+}

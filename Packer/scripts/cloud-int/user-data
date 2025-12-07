@@ -1,0 +1,19 @@
+#cloud-config
+ssh_pwauth: true
+users:
+  - name: sinless777
+    shell: /usr/bin/zsh
+    lock_passwd: false
+    passwd: "$6$eMC98twLjjBpkSjI$S4MYS990E9vjvScWaH9NN3oggdw3LrhKo.eWDYeVp36sRaXQrgkAAKLMKm8wlIH3RXiWGyiHieCfm6Wf37f8D/"
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: [sudo]
+    ssh_authorized_keys: []
+package_upgrade: true
+packages:
+  - zsh
+  - git
+  - curl
+  - wget
+  # add other default packages as needed
+runcmd:
+  - [ chsh, -s, /usr/bin/zsh, sinless777 ]
