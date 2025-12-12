@@ -1,0 +1,21 @@
+version: '3'
+
+includes:
+  ansible:
+    taskfile: .taskfiles/Ansible/Taskfile.yaml
+    aliases:
+      - ans
+  packer:
+    taskfile: .taskfiles/Packer/Taskfile.yaml
+    # optional: false  # fail if missing
+
+tasks:
+  init:
+    desc: "Bootstrap Ansible environment (Python venv + deps + Galaxy content)"
+    cmds:
+      - task ansible:init
+
+  default:
+    desc: "List all available tasks"
+    cmds:
+      - task --list

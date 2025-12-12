@@ -1,0 +1,84 @@
+# =============================================================================
+# Python Requirements for Ansible Tooling
+# -----------------------------------------------------------------------------
+# This file defines the Python execution environment for:
+#   - Ansible Core + Galaxy
+#   - Proxmox automation
+#   - RKE2 / Kubernetes management
+#   - CI linting and documentation
+#
+# Always install inside a virtual environment.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core Ansible
+# -----------------------------------------------------------------------------
+
+ansible==10.1.0                # Meta-package (includes ansible-core)
+ansible-core==2.17.3           # Explicit pin for execution engine
+ansible-lint==24.6.1           # Best-practice enforcement
+ansible-creator==24.6.1        # Role & collection scaffolding
+
+# -----------------------------------------------------------------------------
+# Networking / Infra APIs
+# -----------------------------------------------------------------------------
+
+requests==2.32.4               # HTTP client (shared dependency)
+urllib3==2.2.3                 # Explicit pin to avoid indirect breakage
+netaddr==1.3.0                 # IP/CIDR manipulation
+cloudflare==3.0.1              # Cloudflare API client (DNS, Tunnels)
+
+# -----------------------------------------------------------------------------
+# Proxmox
+# -----------------------------------------------------------------------------
+
+proxmoxer==2.0.1               # Proxmox VE API client
+# NOTE: Requires 'requests' and 'urllib3'
+
+# -----------------------------------------------------------------------------
+# Cryptography / Auth
+# -----------------------------------------------------------------------------
+
+cryptography==45.0.5           # TLS, SSH, PKI (community.crypto)
+passlib[bcrypt]==1.7.4         # Secure password hashing
+
+# -----------------------------------------------------------------------------
+# Kubernetes / RKE2
+# -----------------------------------------------------------------------------
+
+kubernetes==31.0.0             # Official Kubernetes Python client
+openshift==0.13.2              # Required for k8s dynamic client
+pyyaml==6.0.2                  # YAML parsing
+jmespath==1.0.1                # JSON queries for facts and filters
+
+# -----------------------------------------------------------------------------
+# Documentation / Diagrams
+# -----------------------------------------------------------------------------
+
+mkdocs==1.6.1
+mkdocs-material==9.5.42
+mkdocs-mermaid2-plugin==1.2.1
+
+# -----------------------------------------------------------------------------
+# Optional (CI / Quality Gates)
+# -----------------------------------------------------------------------------
+# Uncomment if used in pipelines
+# yamllint==1.35.1
+# pre-commit==3.8.0
+# rich==13.9.2
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - Install with:
+#     python -m venv .venv
+#     source .venv/bin/activate
+#     pip install --upgrade pip setuptools wheel
+#     pip install -r Ansible/requirements.txt
+#
+# - Versions pinned as of 2025-09
+# - Upgrade ONLY alongside:
+#     * ansible-core
+#     * galaxy collections
+#     * kubernetes.core
+# =============================================================================

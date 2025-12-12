@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# Generate SSH Certificate Authority (CA) Keys (Local Only)
+# -----------------------------------------------------------------------------
+# Generates an SSH CA keypair used to sign user and/or host certificates.
+# Runs ONLY on the Ansible control node.
+#
+# Output layout:
+#   {{ ssh_ca_output_dir }}/
+#     ├── ssh_ca
+#     └── ssh_ca.pub
+# =============================================================================
+
+- name: Ensure SSH CA output directory exists
+  ansible.builtin.file:
+    path: "{{ ssh_ca_output_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  run_once: true
+
+- name: Generate SSH CA keypair (idempotent)
+  ansible.builtin.command: >
+    ssh-keygen
+    -t {{ ssh_ca_key_type }}
+    {% if ssh_ca_key_type == 'rsa' %}-b {{ ssh_ca_key_bits }}{% endif %}
+    -C "{{ ssh_ca_comment }}"
+    -f {{ ssh_ca_output_dir }}/ssh_ca
+    -N ""
+  args:
+    creates: "{{ ssh_ca_output_dir }}/ssh_ca"
+  delegate_to: localhost
+  run_once: true
+  when: not ssh_ca_force_regenerate
+
+- name: Force regenerate SSH CA keypair
+  ansible.builtin.command: >
+    ssh-keygen
+    -t {{ ssh_ca_key_type }}
+    {% if ssh_ca_key_type == 'rsa' %}-b {{ ssh_ca_key_bits }}{% endif %}
+    -C "{{ ssh_ca_comment }}"
+    -f {{ ssh_ca_output_dir }}/ssh_ca
+    -N ""
+  delegate_to: localhost
+  run_once: true
+  when: ssh_ca_force_regenerate
+
+- name: Set permissions on SSH CA private key
+  ansible.builtin.file:
+    path: "{{ ssh_ca_output_dir }}/ssh_ca"
+    state: file
+    mode: "{{ ssh_ca_key_mode_private }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Set permissions on SSH CA public key
+  ansible.builtin.file:
+    path: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
+    state: file
+    mode: "{{ ssh_ca_key_mode_public }}"
+  delegate_to: localhost
+  run_once: true

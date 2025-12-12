@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# Users Role – Ensure users and groups
+# =============================================================================
+
+- name: Validate users configuration
+  ansible.builtin.import_tasks: validate.yaml
+
+- name: Ensure groups exist
+  ansible.builtin.group:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ users | map(attribute='groups') | flatten | unique | list }}"
+  when:
+    - item is defined
+    - item | length > 0
+
+- name: Ensure users exist
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    comment: "{{ item.comment | default(omit) }}"
+    shell: "{{ item.shell | default(users_default_shell) }}"
+    system: "{{ item.system | default(false) }}"
+    create_home: "{{ users_create_home }}"
+    groups: "{{ item.groups | default(omit) }}"
+    append: true
+    state: present
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Lock password if requested
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    password_lock: true
+  when: item.password_lock | default(false)
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Configure sudoers entries
+  ansible.builtin.copy:
+    dest: "{{ users_sudoers_dir }}/{{ item.name }}"
+    content: |
+      {{ item.name }} ALL=(ALL) {{ 'NOPASSWD:' if item.sudo_nopasswd | default(false) else '' }}ALL
+    owner: root
+    group: root
+    mode: "0440"
+  when: item.sudo | default(false)
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"

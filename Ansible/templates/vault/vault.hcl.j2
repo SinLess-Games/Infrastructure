@@ -1,0 +1,123 @@
+# =====================================================================
+# Vault Configuration Template
+# Location: Ansible/templates/vault/vault.hcl.j2
+# =====================================================================
+
+ui = true
+disable_mlock = false
+cluster_name = "{{ vault_cluster_name | default('vault-cluster') }}"
+
+# ---------------------------------------------------------------------
+# Storage Backend (Integrated Storage - Raft)
+# ---------------------------------------------------------------------
+storage "raft" {
+  path    = "{{ vault_storage_path | default('/opt/vault/data') }}"
+  node_id = "{{ inventory_hostname }}"
+
+  {% if vault_raft_retry_join is defined %}
+  {% for join in vault_raft_retry_join %}
+  retry_join {
+    leader_api_addr = "{{ join.leader_api_addr }}"
+    {% if join.leader_ca_cert is defined %}
+    leader_ca_cert  = "{{ join.leader_ca_cert }}"
+    {% endif %}
+    {% if join.auto_join is defined %}
+    auto_join        = "{{ join.auto_join }}"
+    auto_join_scheme = "{{ join.auto_join_scheme | default('https') }}"
+    {% endif %}
+  }
+  {% endfor %}
+  {% endif %}
+}
+
+# ---------------------------------------------------------------------
+# Listener
+# ---------------------------------------------------------------------
+listener "tcp" {
+  address          = "{{ vault_listener_address | default('0.0.0.0:8200') }}"
+  tls_disable      = {{ vault_tls_disable | default('0') }}
+
+  {% if not vault_tls_disable %}
+  tls_cert_file    = "{{ vault_tls_cert_file }}"
+  tls_key_file     = "{{ vault_tls_key_file }}"
+  {% endif %}
+}
+
+# ---------------------------------------------------------------------
+# Telemetry
+# ---------------------------------------------------------------------
+telemetry {
+  prometheus_retention_time = "24h"
+  disable_hostname = true
+}
+
+# ---------------------------------------------------------------------
+# API & Cluster Addresses
+# ---------------------------------------------------------------------
+api_addr     = "{{ vault_api_addr }}"
+cluster_addr = "{{ vault_cluster_addr }}"
+
+# ---------------------------------------------------------------------
+# Auto-Unseal
+# ---------------------------------------------------------------------
+
+{% if vault_seal_type == 'transit' %}
+seal "transit" {
+  address            = "{{ vault_transit_address }}"
+  token              = "{{ vault_transit_token }}"
+  disable_renewal    = "false"
+  key_name           = "{{ vault_transit_key_name }}"
+  mount_path         = "{{ vault_transit_mount_path | default('transit') }}"
+  tls_skip_verify    = "{{ vault_transit_skip_verify | default('false') }}"
+}
+{% elif vault_seal_type == 'awskms' %}
+seal "awskms" {
+  region     = "{{ vault_aws_region }}"
+  kms_key_id = "{{ vault_aws_kms_key_id }}"
+}
+{% elif vault_seal_type == 'azurekeyvault' %}
+seal "azurekeyvault" {
+  tenant_id      = "{{ vault_azure_tenant_id }}"
+  client_id      = "{{ vault_azure_client_id }}"
+  client_secret  = "{{ vault_azure_client_secret }}"
+  vault_name     = "{{ vault_azure_vault_name }}"
+  key_name       = "{{ vault_azure_key_name }}"
+}
+{% endif %}
+
+# ---------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------
+log_level = "{{ vault_log_level | default('info') }}"
+
+# ---------------------------------------------------------------------
+# Plugin Directory
+# ---------------------------------------------------------------------
+plugin_directory = "{{ vault_plugin_directory | default('/opt/vault/plugins') }}"
+
+# ---------------------------------------------------------------------
+# Audit Logging
+# ---------------------------------------------------------------------
+
+{% if vault_audit_file_enabled | default(true) %}
+audit {
+  type = "file"
+  path = "{{ vault_audit_file_path | default('/opt/vault/logs/audit.log') }}"
+  description = "Vault audit log (file backend)"
+  options = {
+    log_raw = "{{ vault_audit_log_raw | default(false) }}"
+    mode    = "{{ vault_audit_file_mode | default('0640') }}"
+  }
+}
+{% endif %}
+
+{% if vault_audit_syslog_enabled | default(false) %}
+audit {
+  type = "syslog"
+  path = "vault"
+  description = "Vault audit log (syslog backend)"
+  options = {
+    facility = "{{ vault_audit_syslog_facility | default('LOCAL6') }}"
+  }
+}
+{% endif %}

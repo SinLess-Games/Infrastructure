@@ -1,0 +1,206 @@
+# =====================================================================
+# Vault Bootstrap Configuration
+# Location: Ansible/templates/vault/bootstrap.yaml.j2
+# Purpose: Enable auth methods, create secrets engines, create policies,
+#          and set up roles for environment-wide integration.
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# Enable Secret Engines
+# ---------------------------------------------------------------------
+secrets:
+  kv_v2:
+    - path: "secret/"
+      description: "General environment KV store (Helix, API keys, configs)"
+    - path: "tokens/"
+      description: "API tokens and system credentials"
+
+  pki:
+    - path: "pki/"
+      description: "Certificate Authority for Kubernetes, services, internal TLS"
+      config:
+        default_ttl: "8760h"
+        max_ttl: "17520h"
+    - path: "pki_int/"
+      description: "Intermediate PKI used for signing service certificates"
+      config:
+        default_ttl: "4380h"
+        max_ttl: "8760h"
+
+  ssh:
+    - path: "ssh/"
+      description: "SSH signing + OTP login backend"
+
+# ---------------------------------------------------------------------
+# Enable Authentication Methods
+# ---------------------------------------------------------------------
+auth:
+  token:
+    description: "Token auth (default admin + ops login)"
+
+  approle:
+    description: "Service → Vault authentication"
+
+  kubernetes:
+    description: "Kubernetes service accounts login"
+    config:
+      kubernetes_host: "{{ vault_kubernetes_api }}"
+      kubernetes_ca_cert: "{{ vault_kubernetes_ca_cert }}"
+      token_reviewer_jwt: "{{ vault_kubernetes_reviewer_jwt }}"
+
+  github:
+    description: "GitHub team authentication (optional)"
+    config:
+      organization: "{{ vault_github_org | default('SinLess-Games') }}"
+
+# ---------------------------------------------------------------------
+# RBAC Policies
+# ---------------------------------------------------------------------
+policies:
+
+  admin:
+    description: "Full administrative rights"
+    rules: |
+      path "*" {
+        capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+      }
+
+  ops:
+    description: "Operations: rotate secrets, manage services, no root"
+    rules: |
+      path "secret/data/*" {
+        capabilities = ["read", "update", "list"]
+      }
+      path "tokens/*" {
+        capabilities = ["read", "update", "list"]
+      }
+      path "pki/*" {
+        capabilities = ["read", "list"]
+      }
+      path "auth/token/create" {
+        capabilities = ["create", "read", "update"]
+      }
+
+  readonly:
+    description: "Auditors and read-only viewers"
+    rules: |
+      path "secret/data/*" {
+        capabilities = ["read", "list"]
+      }
+      path "pki/cert/*" {
+        capabilities = ["read", "list"]
+      }
+
+  kubernetes-service:
+    description: "Kubernetes services retrieving secrets"
+    rules: |
+      path "secret/data/k8s/*" {
+        capabilities = ["read", "list"]
+      }
+      path "pki_int/issue/k8s" {
+        capabilities = ["create", "read"]
+      }
+
+  helix-service:
+    description: "Helix AI platform secrets + service identity"
+    rules: |
+      path "secret/data/helix/*" {
+        capabilities = ["read", "list"]
+      }
+      path "tokens/data/helix/*" {
+        capabilities = ["read", "list"]
+      }
+      path "pki_int/issue/helix" {
+        capabilities = ["create", "read"]
+      }
+
+# ---------------------------------------------------------------------
+# Role Definitions (AppRole, Kubernetes)
+# ---------------------------------------------------------------------
+roles:
+
+  approle:
+    helix:
+      policies: ["helix-service"]
+      token_ttl: "24h"
+      token_max_ttl: "168h"
+
+    kubernetes-service:
+      policies: ["kubernetes-service"]
+      token_ttl: "1h"
+      token_max_ttl: "24h"
+
+  kubernetes:
+    helix:
+      bound_service_account_names: ["helix"]
+      bound_service_account_namespaces: ["helix"]
+      policies: ["helix-service"]
+      ttl: "1h"
+
+    default-app:
+      bound_service_account_names: ["default"]
+      bound_service_account_namespaces: ["default"]
+      policies: ["readonly"]
+      ttl: "30m"
+
+# ---------------------------------------------------------------------
+# Precreated Secret Paths (Optional)
+# ---------------------------------------------------------------------
+initial_secrets:
+  secret/data/helix/app:
+    HELIX_ENV: "{{ helix_env | default('production') }}"
+    HELIX_API_URL: "{{ helix_api_url }}"
+    HELIX_JWT_SECRET: "{{ helix_jwt_secret }}"
+    DATABASE_URL: "{{ helix_database_url }}"
+    REDIS_URL: "{{ helix_redis_url }}"
+
+  tokens/data/helix/github:
+    GITHUB_TOKEN: "{{ helix_github_token }}"
+
+  tokens/data/helix/cloudflare:
+    CLOUDFLARE_API_TOKEN: "{{ helix_cloudflare_api_token }}"
+
+  secret/data/k8s/cluster:
+    CLUSTER_NAME: "{{ kubernetes_cluster_name }}"
+    ISTIO_REVISION: "{{ istio_revision | default('default') }}"
+
+# ---------------------------------------------------------------------
+# PKI Issuer Setup
+# ---------------------------------------------------------------------
+pki_configuration:
+
+  root:
+    common_name: "{{ vault_pki_root_cn | default('SinLess Root CA') }}"
+
+  intermediate:
+    common_name: "{{ vault_pki_int_cn | default('SinLess Intermediate CA') }}"
+    roles:
+      k8s:
+        allowed_domains: ["{{ kubernetes_cluster_domain }}"]
+        allow_subdomains: true
+        max_ttl: "8760h"
+
+      helix:
+        allowed_domains:
+          - "helix.local.sinlessgamesllc.com"
+          - "*.helix.svc"
+        allow_subdomains: true
+        max_ttl: "8760h"
+
+# ---------------------------------------------------------------------
+# SSH Secrets (CA or OTP)
+# ---------------------------------------------------------------------
+ssh_setup:
+  otp_role:
+    name: "otp_hosts"
+    settings:
+      key_type: "otp"
+      default_user: "ubuntu"
+      cidr_list: "0.0.0.0/0"
+
+  ca_role:
+    name: "host_signer"
+    settings:
+      allow_host_certificates: true
+      allowed_domains: ["sinlessgames.com"]
+      max_ttl: "48h"

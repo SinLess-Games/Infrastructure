@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# Configure Localhost
+# -----------------------------------------------------------------------------
+# Prepares the local control node (dev-01) for infrastructure automation.
+# This playbook ONLY runs roles that are safe for localhost execution.
+# =============================================================================
+
+- name: Configure local Ansible control node
+  hosts: dev
+  connection: local
+  gather_facts: true
+  become: true
+
+  vars_files:
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/groups.yaml
+
+  roles:
+    - users
+    - ssh

@@ -1,0 +1,73 @@
+---
+# =============================================================================
+# SSH Role Defaults
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# User SSH key settings
+# ---------------------------------------------------------------------------
+ssh_key_type: ed25519
+ssh_key_comment_suffix: "@sinlessgames"
+ssh_key_bits: 4096                 # Only used for RSA
+ssh_key_mode_private: "0600"
+ssh_key_mode_public: "0644"
+ssh_force_regenerate: false
+ssh_outputs_persist: true
+
+
+# =============================================================================
+# Persistent SSH Output Paths (Repo Root Anchored)
+# =============================================================================
+
+# Absolute path to repo root (git-based, execution-safe)
+ssh_repo_root: "{{ lookup('ansible.builtin.pipe', 'git rev-parse --show-toplevel') | trim }}"
+
+# Persistent outputs directory (gitignored)
+ssh_output_root: "{{ ssh_repo_root }}/.outputs"
+ssh_output_base: "{{ ssh_output_root }}/ssh"
+ssh_ca_output_dir: "{{ ssh_output_root }}/ssh-ca"
+
+
+# ---------------------------------------------------------------------------
+# Supported key types
+# ---------------------------------------------------------------------------
+ssh_supported_key_types:
+  - ed25519
+  - rsa
+  - ecdsa
+
+# ---------------------------------------------------------------------------
+# SSH Certificate Authority (CA) settings
+# ---------------------------------------------------------------------------
+ssh_ca_enabled: true
+
+ssh_ca_key_type: ed25519
+ssh_ca_key_bits: 4096              # Only used if ssh_ca_key_type == rsa
+ssh_ca_comment: "sinlessgames-ssh-ca"
+
+ssh_ca_force_regenerate: false
+
+ssh_ca_key_mode_private: "0600"
+ssh_ca_key_mode_public: "0644"
+
+
+# Certificate validity period (ssh-keygen -V)
+# Examples: 52w, 180d, 24h, +8h
+ssh_ca_cert_validity: "+52w"
+
+# SSH certificate principals
+# Defaults to username unless overridden per-user
+ssh_ca_default_principals: []
+
+# SSH certificate extensions
+ssh_ca_cert_extensions:
+  - permit-pty
+  - permit-user-rc
+  - permit-X11-forwarding
+  - permit-agent-forwarding
+  - permit-port-forwarding
+
+# Force re-signing of user certificates even if a valid cert already exists
+ssh_ca_force_resign: false
+
+ssh_disable_password_auth: true

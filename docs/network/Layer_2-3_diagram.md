@@ -50,11 +50,14 @@ For each /24:
 - 10.10.10.2 – Core Switch (USW-24-1) mgmt  
 - 10.10.10.3 – Access Switch (USW-24-2) mgmt  
 - 10.10.10.4 – Aggregation Switch mgmt  
-- 10.10.10.5 – pve-01 mgmt (vmbr0 / NIC1)  
-- 10.10.10.6 – pve-02 mgmt  
-- 10.10.10.7 – pve-03 mgmt  
-- 10.10.10.8 – pve-01 iDRAC  
-- 10.10.10.9 – (Reserved for possible lights-out mgmt of tower/others)  
+- 10.10.10.5 – pve-01 mgmt (done)
+- 10.10.10.6 – pve-02 mgmt
+- 10.10.10.7 – pve-03 mgmt (done)  
+- 10.10.10.8 – pve-04 mgmt (done)
+- 10.10.10.9 - pve-05 mgmt (done)
+\
+- 10.10.10.10 - iDRAC-01 (pve-01)
+- 10.10.10.11 - Unifi AP LR
 - 10.10.10.100–10.10.10.199 – DHCP (optional, for temporary mgmt devices / laptops on mgmt net)  
 
 ### 2.3 VLAN 20 – Infra / Services (10.10.20.0/24)

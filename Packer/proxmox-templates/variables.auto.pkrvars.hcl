@@ -21,3 +21,10 @@ vm_network_bridge = "vmbr0"
 ssh_username           = "sinless777"
 ssh_private_key_file   = "~/.ssh/id_ed25565"
 ssh_timeout            = "30m"
+
+
+# Flatcar Linux image settings
+flatcar_img_url       = "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_image.bin.bz2"
+flatcar_img_checksum  = "sha256:YOUR_FLATCAR_IMAGE_CHECKSUM_HERE"
+flatcar_template_name = "flatcar-template"
+

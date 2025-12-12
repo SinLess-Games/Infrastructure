@@ -1,0 +1,51 @@
+version: '3'
+
+vars:
+  PACKER_DIR: "Packer"
+  PROXMOX_VARS: "${PACKER_DIR}/proxmox-templates/variables.pkr.hcl"
+  UBUNTU_TEMPLATE: "${PACKER_DIR}/ubuntu/ubuntu.pkr.hcl"
+  FLATCAR_TEMPLATE: "${PACKER_DIR}/flatcar/flatcar.json"
+
+tasks:
+
+  default:
+    desc: "Show available Packer tasks"
+    cmds:
+      - task --list
+
+  validate:
+    desc: "Validate both Ubuntu and Flatcar Packer templates"
+    cmds:
+      - packer validate -var-file="${PROXMOX_VARS}" "${UBUNTU_TEMPLATE}"
+      - packer validate -var-file="${PROXMOX_VARS}" "${FLATCAR_TEMPLATE}"
+
+  build-ubuntu:
+    desc: "Build Ubuntu Server template on Proxmox"
+    cmds:
+      - packer init "${PACKER_DIR}"
+      - packer build -var-file="${PROXMOX_VARS}" "${UBUNTU_TEMPLATE}"
+
+  build-flatcar:
+    desc: "Build Flatcar Container Linux template on Proxmox"
+    cmds:
+      - packer init "${PACKER_DIR}"
+      - packer build -var-file="${PROXMOX_VARS}" "${FLATCAR_TEMPLATE}"
+
+  clean:
+    desc: "Remove temporary Packer cache and logs (locally)"
+    cmds:
+      - rm -rf .packer.d/ .packer.cache/ .packer.logs/ || true
+
+  rebuild-ubuntu:
+    desc: "Re-validate and rebuild Ubuntu template"
+    deps: [clean, validate]
+    cmds:
+      - task validate
+      - task build-ubuntu
+
+  rebuild-flatcar:
+    desc: "Re-validate and rebuild Flatcar template"
+    deps: [clean, validate]
+    cmds:
+      - task validate
+      - task build-flatcar

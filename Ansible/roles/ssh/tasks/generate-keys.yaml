@@ -1,0 +1,80 @@
+---
+# =============================================================================
+# Generate SSH Keys (Local Only)
+# -----------------------------------------------------------------------------
+# Generates per-user SSH keypairs on the Ansible control node.
+# Never touches remote hosts.
+#
+# Output layout:
+#   {{ ssh_output_base }}/
+#     └── <username>/
+#         ├── id_<type>
+#         └── id_<type>.pub
+# =============================================================================
+
+- name: Ensure SSH output base directory exists
+  ansible.builtin.file:
+    path: "{{ ssh_output_base }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+
+- name: Ensure per-user SSH directories exist
+  ansible.builtin.file:
+    path: "{{ ssh_output_base }}/{{ item.name }}"
+    state: directory
+    mode: "0700"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+
+- name: Generate SSH keypair for user (idempotent)
+  ansible.builtin.command: >
+    ssh-keygen
+    -t {{ ssh_key_type }}
+    {% if ssh_key_type == 'rsa' %}-b {{ ssh_key_bits }}{% endif %}
+    -C "{{ item.name }}{{ ssh_key_comment_suffix }}"
+    -f {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}
+    -N ""
+  args:
+    creates: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: not ssh_force_regenerate
+  delegate_to: localhost
+
+- name: Force regenerate SSH keypair for user
+  ansible.builtin.command: >
+    ssh-keygen
+    -t {{ ssh_key_type }}
+    {% if ssh_key_type == 'rsa' %}-b {{ ssh_key_bits }}{% endif %}
+    -C "{{ item.name }}{{ ssh_key_comment_suffix }}"
+    -f {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}
+    -N ""
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ssh_force_regenerate
+  delegate_to: localhost
+
+- name: Set permissions on private key
+  ansible.builtin.file:
+    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
+    state: file
+    mode: "{{ ssh_key_mode_private }}"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+
+- name: Set permissions on public key
+  ansible.builtin.file:
+    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
+    state: file
+    mode: "{{ ssh_key_mode_public }}"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost

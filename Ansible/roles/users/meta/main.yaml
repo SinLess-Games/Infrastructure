@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: users
+  description: Manage system users and group membership
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+    - name: Ubuntu
+    - name: EL
+dependencies: []

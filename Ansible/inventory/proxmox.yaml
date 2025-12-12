@@ -1,0 +1,38 @@
+all:
+  vars:
+    ansible_user: root
+    ansible_python_interpreter: /usr/bin/python3
+    proxmox_cluster_name: sinless-pve
+    proxmox_cluster_network: 10.10.10.0/24
+    proxmox_ceph_network: 10.20.20.0/24
+
+proxmox:
+  children:
+    pve_nodes:
+      hosts:
+        pve-01:
+          ansible_host: 10.10.10.5
+        # pve-02:
+        #   ansible_host: 10.10.10.6
+        pve-03:
+          ansible_host: 10.10.10.7
+        pve-04:
+          ansible_host: 10.10.10.8
+        pve-05:
+          ansible_host: 10.10.10.9
+
+    pve_bootstrap:
+      hosts:
+        pve-01:
+
+    pve_cluster_members:
+      hosts:
+        pve-03:
+        pve-04:
+        pve-05:
+
+    pve_ceph:
+      hosts:
+        pve-01:
+        pve-04:
+        pve-05:

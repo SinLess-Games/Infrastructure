@@ -1,0 +1,72 @@
+---
+# =============================================================================
+# Global Group Definitions
+# -----------------------------------------------------------------------------
+# These groups are created on ALL managed hosts unless overridden.
+# Groups here are intended for:
+#   - Privilege delegation
+#   - Service access (docker, monitoring, etc.)
+#   - Consistent GID usage across nodes
+# =============================================================================
+
+groups:
+
+  # ---------------------------------------------------------------------------
+  # Administrative / Privileged Groups
+  # ---------------------------------------------------------------------------
+
+  - name: sudo
+    system: true
+    state: present
+
+  - name: adm
+    system: true
+    state: present
+
+  # ---------------------------------------------------------------------------
+  # Container / Runtime Access
+  # ---------------------------------------------------------------------------
+
+  - name: docker
+    system: true
+    state: present
+
+  # ---------------------------------------------------------------------------
+  # Automation / Infrastructure
+  # ---------------------------------------------------------------------------
+
+  - name: automation
+    system: true
+    state: present
+
+  # ---------------------------------------------------------------------------
+  # Observability / Operations (future-safe)
+  # ---------------------------------------------------------------------------
+
+  - name: monitoring
+    system: true
+    state: present
+
+  - name: logging
+    system: true
+    state: present
+
+# =============================================================================
+# Defaults
+# =============================================================================
+
+group_defaults:
+  state: present
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - Group creation should be handled by a dedicated role:
+#     roles/common_groups
+#
+# - Do NOT place environment-specific groups here.
+#   Use:
+#     group_vars/<env>/groups.yaml
+#
+# - Avoid assigning GIDs unless required for NFS / shared storage.
+# =============================================================================

@@ -1,0 +1,38 @@
+---
+# =============================================================================
+# SSH Role – Task Orchestration
+# -----------------------------------------------------------------------------
+# Orchestrates SSH key, CA, signing, and distribution tasks.
+#
+# Execution model:
+#   1. validate       → fail fast on bad input
+#   2. generate-keys  → local user key generation
+#   3. generate-ca   → local CA generation (optional)
+#   4. sign          → local cert signing (optional)
+#   5. copy          → deploy keys/certs to hosts
+#
+# Local-only tasks are explicitly delegated to localhost inside task files.
+# =============================================================================
+
+- name: Validate SSH role inputs
+  ansible.builtin.import_tasks: validate.yaml
+
+- name: Generate SSH user keys
+  ansible.builtin.import_tasks: generate-keys.yaml
+
+- name: Generate SSH Certificate Authority
+  ansible.builtin.import_tasks: generate-ca.yaml
+  when: ssh_ca_enabled | bool
+
+- name: Sign SSH user keys with CA
+  ansible.builtin.import_tasks: sign.yaml
+  when: ssh_ca_enabled | bool
+
+- name: Copy SSH keys and certificates to users
+  ansible.builtin.import_tasks: copy.yaml
+
+- name: Configure SSH Daemon to trust User CA
+  ansible.builtin.import_tasks: configure.yaml
+
+- name: Fix SSH output permissions
+  ansible.builtin.import_tasks: fix-permissions.yaml

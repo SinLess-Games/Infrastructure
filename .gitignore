@@ -1,1 +1,6 @@
 Packer/proxmox-templates/variables.auto.pkrvars.hcl
+
+.outputs/
+Ansible/.venv/
+.ansible/
+Ansible/.collections/

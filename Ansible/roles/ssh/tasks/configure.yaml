@@ -1,0 +1,84 @@
+---
+# =============================================================================
+# Configure SSH Daemon to Trust User CA
+# -----------------------------------------------------------------------------
+# - Installs SSH CA public key
+# - Configures sshd to trust signed user certificates
+# - Reloads sshd safely
+#
+# Assumptions:
+# - ssh_ca_enabled = true
+# - ssh_ca_output_dir contains ssh_ca.pub
+# =============================================================================
+
+- name: Ensure SSH CA is enabled
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_enabled | bool
+    fail_msg: "SSH CA configuration requested but ssh_ca_enabled is false"
+
+# -----------------------------------------------------------------------------
+# Install CA public key
+# -----------------------------------------------------------------------------
+
+- name: Ensure SSH CA directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/ca
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install SSH User CA public key
+  ansible.builtin.copy:
+    src: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
+    dest: /etc/ssh/ca/user_ca.pub
+    owner: root
+    group: root
+    mode: "0644"
+    remote_src: true
+
+# -----------------------------------------------------------------------------
+# SSHD configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure sshd to trust User CA
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^TrustedUserCAKeys'
+    line: 'TrustedUserCAKeys /etc/ssh/ca/user_ca.pub'
+    state: present
+    insertafter: EOF
+    validate: 'sshd -T -f %s'
+
+- name: Ensure SSH certificate authentication is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^PubkeyAuthentication'
+    line: 'PubkeyAuthentication yes'
+    state: present
+    insertafter: EOF
+    validate: 'sshd -T -f %s'
+
+# -----------------------------------------------------------------------------
+# Optional hardening (safe defaults)
+# -----------------------------------------------------------------------------
+
+- name: Disable password authentication (optional)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^PasswordAuthentication'
+    line: 'PasswordAuthentication no'
+    state: present
+    insertafter: EOF
+    validate: 'sshd -T -f %s'
+  when: ssh_disable_password_auth | default(true)
+
+# -----------------------------------------------------------------------------
+# Reload SSH daemon safely
+# -----------------------------------------------------------------------------
+
+- name: Reload SSH daemon
+  ansible.builtin.service:
+    name: ssh
+    state: reloaded

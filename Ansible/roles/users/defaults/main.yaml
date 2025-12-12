@@ -1,0 +1,14 @@
+---
+# =============================================================================
+# Users Role Defaults
+# =============================================================================
+
+users: []
+
+users_manage_home: true
+users_create_home: true
+
+users_default_shell: /bin/bash
+
+users_sudo_group: sudo
+users_sudoers_dir: /etc/sudoers.d

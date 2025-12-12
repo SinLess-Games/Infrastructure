@@ -1,0 +1,13 @@
+---
+# =============================================================================
+# Fix SSH Output Ownership (Repo Local)
+# =============================================================================
+
+- name: Fix ownership of SSH outputs for repo user
+  ansible.builtin.file:
+    path: "{{ ssh_output_root }}"
+    owner: "{{ lookup('env', 'USER') }}"
+    group: "{{ lookup('env', 'USER') }}"
+    recurse: true
+  delegate_to: localhost
+  run_once: true

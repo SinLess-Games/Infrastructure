@@ -1,0 +1,64 @@
+version: '3'
+
+vars:
+  ANSIBLE_DIR: "Ansible"
+  VENV_DIR: "{{.ANSIBLE_DIR}}/.venv"
+  VENV_PYTHON: "{{.VENV_DIR}}/bin/python"
+  VENV_PIP: "{{.VENV_DIR}}/bin/pip"
+  VENV_ANSIBLE_GALAXY: "{{.VENV_DIR}}/bin/ansible-galaxy"
+  REQUIREMENTS_FILE: "{{.ANSIBLE_DIR}}/requirements.txt"
+  GALAXY_REQUIREMENTS_FILE: "{{.ANSIBLE_DIR}}/requirements.yaml"
+  PYTHON_BIN: '{{default "python3" .PYTHON_BIN}}'
+
+tasks:
+
+  default:
+    desc: "Show available Ansible tasks"
+    cmds:
+      - task --list
+
+  create-venv:
+    desc: "Create Python virtual environment for Ansible tooling (no-op if it exists)"
+    cmds:
+      - |
+        set -e
+        if [ ! -d "{{.VENV_DIR}}" ]; then
+          {{.PYTHON_BIN}} -m venv "{{.VENV_DIR}}"
+        fi
+
+  install-python-deps:
+    desc: "Install Python requirements for Ansible into the venv"
+    deps: [create-venv]
+    cmds:
+      - |
+        set -e
+        {{.VENV_PIP}} install --no-user --upgrade pip setuptools wheel
+        {{.VENV_PIP}} install --no-user --upgrade -r "{{.REQUIREMENTS_FILE}}"
+
+  install-galaxy-content:
+    desc: "Install Ansible collections and roles from requirements.yaml"
+    deps: [install-python-deps]
+    cmds:
+      - |
+        set -e
+        {{.VENV_ANSIBLE_GALAXY}} collection install -r "{{.GALAXY_REQUIREMENTS_FILE}}" --collections-path Ansible/.collections/ansible_collections
+        {{.VENV_ANSIBLE_GALAXY}} role install -r "{{.GALAXY_REQUIREMENTS_FILE}}" --roles-path Ansible/.collections/roles
+
+  init:
+    desc: "Prepare full Ansible environment (venv, Python deps, Galaxy content)"
+    cmds:
+      - task: install-galaxy-content
+
+  # =============================================================================
+  # Playbook Tasks
+  # -----------------------------------------------------------------------------
+  # Tasks to run specific Ansible playbooks.
+  # =============================================================================
+
+  configure-localhost:
+    desc: "Configure the local Ansible control node (localhost)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/configure-localhost.yaml" --ask-become-pass

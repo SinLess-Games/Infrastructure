@@ -1,9 +1,6 @@
 ---
 # =============================================================================
 # Copy SSH Keys and Certificates to Users
-# -----------------------------------------------------------------------------
-# Copies locally-generated SSH keys and certificates to target hosts.
-# Source files live on the Ansible controller.
 # =============================================================================
 
 - name: Ensure ~/.ssh directory exists for each user
@@ -24,10 +21,10 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "{{ ssh_key_mode_private }}"
+    remote_src: true
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
-  delegate_to: localhost
 
 - name: Copy public SSH key to user
   ansible.builtin.copy:
@@ -36,10 +33,10 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "{{ ssh_key_mode_public }}"
+    remote_src: true
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
-  delegate_to: localhost
 
 - name: Copy SSH certificate to user
   ansible.builtin.copy:
@@ -48,8 +45,8 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0644"
+    remote_src: true
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
   when: ssh_ca_enabled | bool
-  delegate_to: localhost

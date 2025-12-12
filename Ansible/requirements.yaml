@@ -1,0 +1,94 @@
+---
+# =============================================================================
+# Ansible Galaxy Requirements
+# -----------------------------------------------------------------------------
+# Pinned collections and roles for deterministic infrastructure automation.
+# This stack supports:
+#   - Proxmox VE (cluster + Ceph)
+#   - Linux system baselining
+#   - Kubernetes via RKE2 (HA-ready, CNCF compliant)
+#   - Container tooling
+# =============================================================================
+
+collections:
+  # ---------------------------------------------------------------------------
+  # Core / Utility
+  # ---------------------------------------------------------------------------
+
+  # POSIX-level system management (users, mounts, sysctl, services)
+  - name: ansible.posix
+    version: "1.6.2"
+
+  # Filters, lookups, ipaddr, validation helpers
+  - name: ansible.utils
+    version: "5.1.2"
+
+  # Broad community modules:
+  # - Proxmox integration
+  # - Filesystem, hardware, networking helpers
+  - name: community.general
+    version: "9.1.0"
+
+  # Cryptography:
+  # - TLS certs
+  # - SSH keys
+  # - PKI workflows
+  - name: community.crypto
+    version: "2.22.3"
+
+  # Docker / container runtime management
+  - name: community.docker
+    version: "3.13.1"
+
+  # ---------------------------------------------------------------------------
+  # Kubernetes
+  # ---------------------------------------------------------------------------
+
+  # Canonical Kubernetes collection
+  # - k8s / k8s_info
+  # - Helm
+  # - CRDs
+  - name: kubernetes.core
+    version: "5.0.0"
+
+  # Supplemental Kubernetes helpers
+  # NOTE: Prefer kubernetes.core when possible
+  - name: community.kubernetes
+    version: "2.0.1"
+
+# =============================================================================
+# Roles
+# =============================================================================
+
+roles:
+  # Rancher Kubernetes Engine 2 (RKE2)
+  # Used for:
+  # - HA production clusters
+  # - Staging clusters
+  # - Proxmox-backed VMs or bare metal
+  - name: lablabs.rke2
+    src: https://github.com/lablabs/ansible-role-rke2
+    version: "1.24.4"
+
+# =============================================================================
+# Notes
+# =============================================================================
+# Python dependencies (install separately):
+#
+# Proxmox:
+#   - proxmoxer
+#   - requests
+#
+# Kubernetes:
+#   - kubernetes
+#   - openshift
+#   - pyyaml
+#   - jmespath
+#
+# RKE2 notes:
+# - Embedded etcd (no external datastore required)
+# - Supports CIS hardening
+# - Native support for Cilium (recommended)
+#
+# Last reviewed: 2025-09
+# =============================================================================
