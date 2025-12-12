@@ -15,7 +15,9 @@
   vars_files:
     - ../group_vars/all/users.yaml
     - ../group_vars/all/groups.yaml
+    - ../group_vars/all/zsh.yaml
 
   roles:
     - users
     - ssh
+    - shell-config

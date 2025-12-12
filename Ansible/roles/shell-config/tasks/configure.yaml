@@ -1,0 +1,81 @@
+---
+# =============================================================================
+# shell-config — configure
+# -----------------------------------------------------------------------------
+# Applies user-level shell configuration:
+#   - Starship config
+#   - Zsh environment files
+#   - Aliases
+#
+# Templates are sourced from:
+#   Ansible/templates/
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Ensure XDG config directories exist
+# -----------------------------------------------------------------------------
+
+- name: Ensure XDG config directories exist
+  ansible.builtin.file:
+    path: "{{ item.0.home_directory }}/.config/{{ item.1 }}"
+    state: directory
+    owner: "{{ item.0.name }}"
+    group: "{{ item.0.name }}"
+    mode: "0755"
+  loop: "{{ shell_config_users | product(['starship']) | list }}"
+
+# -----------------------------------------------------------------------------
+# Starship configuration
+# -----------------------------------------------------------------------------
+
+- name: Install Starship config
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/starship/starship.toml.j2"
+    dest: "{{ item.home_directory }}/.config/starship/starship.toml"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0644"
+  loop: "{{ shell_config_users }}"
+  vars:
+    user: "{{ item }}"
+  when: shell_install_starship
+
+# -----------------------------------------------------------------------------
+# Zsh environment files
+# -----------------------------------------------------------------------------
+
+- name: Install .zshenv
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/zsh/.zshenv.j2"
+    dest: "{{ item.home_directory }}/.zshenv"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0644"
+  loop: "{{ shell_config_users }}"
+  vars:
+    user: "{{ item }}"
+  when: item.shell is defined and item.shell.endswith('zsh')
+
+- name: Install .zshrc
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/zsh/.zshrc.j2"
+    dest: "{{ item.home_directory }}/.zshrc"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0644"
+  loop: "{{ shell_config_users }}"
+  vars:
+    user: "{{ item }}"
+  when: item.shell is defined and item.shell.endswith('zsh')
+
+- name: Install aliases
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/zsh/aliases.zsh.j2"
+    dest: "{{ item.home_directory }}/.zsh_aliases"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0644"
+  loop: "{{ shell_config_users }}"
+  vars:
+    user: "{{ item }}"
+  when: item.shell is defined and item.shell.endswith('zsh')

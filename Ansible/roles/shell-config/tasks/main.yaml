@@ -1,0 +1,71 @@
+---
+# =============================================================================
+# shell-config — main task dispatcher
+# -----------------------------------------------------------------------------
+# Execution order is intentional:
+#   0. derive users     → normalize inputs from global users.yaml
+#   1. validate        → fail fast, no mutation
+#   2. install         → system + core tooling
+#   3. install-plugins → Oh My Zsh / Zsh plugins
+#   4. configure       → dotfiles, starship, aliases
+#   5. set-default-shell → optional, explicit shell change
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Derive shell_config_users from global users.yaml
+# -----------------------------------------------------------------------------
+# Rules:
+# - Source of truth: group_vars/all/users.yaml
+# - Only users with real interactive shells
+# - home_directory is derived, never stored in group_vars
+# -----------------------------------------------------------------------------
+
+- name: Initialize shell_config_users
+  ansible.builtin.set_fact:
+    shell_config_users: []
+
+- name: Build shell_config_users from global users
+  ansible.builtin.set_fact:
+    shell_config_users: >-
+      {{
+        shell_config_users + [
+          item | combine({
+            'home_directory': '/home/' ~ item.name
+          })
+        ]
+      }}
+  loop: "{{ users }}"
+  when:
+    - item.shell is defined
+    - item.shell is not search('nologin')
+
+# -----------------------------------------------------------------------------
+# Validation (fail fast)
+# -----------------------------------------------------------------------------
+
+- name: Validate shell configuration inputs
+  ansible.builtin.import_tasks: validate.yaml
+
+# -----------------------------------------------------------------------------
+# Installation
+# -----------------------------------------------------------------------------
+
+- name: Install shell tooling (zsh, oh-my-zsh, starship)
+  ansible.builtin.import_tasks: install.yaml
+
+- name: Install Zsh / Oh My Zsh plugins
+  ansible.builtin.import_tasks: install-plugins.yaml
+
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure shell environment and dotfiles
+  ansible.builtin.import_tasks: configure.yaml
+
+# -----------------------------------------------------------------------------
+# Optional shell change
+# -----------------------------------------------------------------------------
+
+- name: Set default shell for users (optional)
+  ansible.builtin.import_tasks: set-default-shell.yaml

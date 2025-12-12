@@ -1,0 +1,83 @@
+# =====================================================================
+# zshenv — minimal, fast, non-interactive safe environment setup
+# This file is sourced by *every* zsh (login, interactive, non-interactive).
+# Keep it tiny: exports and PATH only. Heavy logic goes in .zshrc/.zprofile.
+# =====================================================================
+
+# -------- Home shortcuts (templated by Ansible) -----------------------
+export HOME="{{ user.home_directory }}"
+export USER="{{ user.name }}"
+
+# -------- Locale ------------------------------------------------------
+export LANG="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"
+
+# -------- XDG Base Directories ---------------------------------------
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_STATE_HOME="$HOME/.local/state"
+
+[[ -d "$XDG_CONFIG_HOME" ]] || mkdir -p "$XDG_CONFIG_HOME"
+[[ -d "$XDG_CACHE_HOME"  ]] || mkdir -p "$XDG_CACHE_HOME"
+[[ -d "$XDG_DATA_HOME"   ]] || mkdir -p "$XDG_DATA_HOME"
+[[ -d "$XDG_STATE_HOME"  ]] || mkdir -p "$XDG_STATE_HOME"
+
+# -------- Editor / Pager defaults ------------------------------------
+export EDITOR="${EDITOR:-nvim}"
+export VISUAL="${VISUAL:-$EDITOR}"
+export PAGER="${PAGER:-less}"
+export LESS="${LESS:--RFM}"
+
+# -------- Common CLI preferences -------------------------------------
+export GPG_TTY="$(/usr/bin/tty 2>/dev/null || true)"
+export DOTNET_CLI_TELEMETRY_OPTOUT=1
+export HOMEBREW_NO_ENV_HINTS=1
+
+# -------- Language & tooling homes (no managers executed here) --------
+export GOPATH="${GOPATH:-$HOME/go}"
+[[ -d "$GOPATH" ]] || mkdir -p "$GOPATH"
+
+export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+
+export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-$HOME/.npm-global}"
+[[ -d "$NPM_CONFIG_PREFIX/bin" ]] || mkdir -p "$NPM_CONFIG_PREFIX/bin"
+
+export PYTHONUSERBASE="${PYTHONUSERBASE:-$HOME/.local}"
+export PIP_USER=${PIP_USER:-1}
+
+# -------- Homebrew prefixes (Linux/macOS) ----------------------------
+_LINUXBREW="/home/linuxbrew/.linuxbrew"
+_MACBREW="/opt/homebrew"
+_MACBREW_INTEL="/usr/local"
+
+# -------- Base PATH composition (idempotent) -------------------------
+typeset -Ua _path
+_path=(
+  "$HOME/bin"
+  "$HOME/.local/bin"
+  "$NPM_CONFIG_PREFIX/bin"
+  "$_LINUXBREW/bin" "$_LINUXBREW/sbin"
+  "$_MACBREW/bin" "$_MACBREW/sbin"
+  "$_MACBREW_INTEL/bin" "$_MACBREW_INTEL/sbin"
+  "/usr/local/bin" "/usr/local/sbin"
+  "/usr/bin" "/usr/sbin"
+  "/bin" "/sbin"
+)
+
+[[ -d "$CARGO_HOME/bin" ]] && _path=("$CARGO_HOME/bin" $_path)
+[[ -d "$GOPATH/bin"   ]] && _path=("$GOPATH/bin" $_path)
+
+export PATH="${(j.:.)_path}"
+
+# -------- Oh My Zsh / Starship hints (no sourcing here) --------------
+export ZSH="{{ user.home_directory }}/.oh-my-zsh"
+
+# Starship: use the modern XDG path
+export STARSHIP_CONFIG="$HOME/.config/starship/config.toml"
+
+# -------- Colors ------------------------------------------------------
+export CLICOLOR=1
+export LS_COLORS="${LS_COLORS:-}"
+
+# -------- End of zshenv ----------------------------------------------

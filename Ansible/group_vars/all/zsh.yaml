@@ -1,0 +1,109 @@
+---
+# =============================================================================
+# Zsh / Oh My Zsh / Starship Configuration (Global Defaults)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core shell behavior
+# -----------------------------------------------------------------------------
+
+zsh_default_shell: /usr/bin/zsh
+zsh_theme: robbyrussell
+
+shell_install_zsh: true
+shell_install_oh_my_zsh: true
+shell_install_starship: true
+
+# -----------------------------------------------------------------------------
+# Users that should receive shell configuration
+# (must exist already via users role)
+# -----------------------------------------------------------------------------
+
+shell_config_users: "{{ users }}"
+
+# -----------------------------------------------------------------------------
+# Oh My Zsh Plugins (Git-managed, deterministic)
+# -----------------------------------------------------------------------------
+# These are cloned under:
+#   ~/.oh-my-zsh/custom/plugins/<name>
+#
+# They are merged with base plugins defined in .zshrc.j2
+# -----------------------------------------------------------------------------
+
+plugins:
+  # -------------------------- UX / Safety ------------------------------
+  - name: zsh-syntax-highlighting
+    repo: https://github.com/zsh-users/zsh-syntax-highlighting.git
+
+  - name: zsh-autosuggestions
+    repo: https://github.com/zsh-users/zsh-autosuggestions.git
+
+  - name: zsh-completions
+    repo: https://github.com/zsh-users/zsh-completions.git
+
+  - name: you-should-use
+    repo: https://github.com/MichaelAquilina/zsh-you-should-use.git
+
+  # -------------------------- History & Navigation ---------------------
+  - name: history-substring-search
+    repo: https://github.com/zsh-users/zsh-history-substring-search.git
+
+  - name: z
+    repo: https://github.com/rupa/z.git
+
+  # -------------------------- Tooling Enhancements ---------------------
+  - name: zsh-bat
+    repo: https://github.com/fdellwing/zsh-bat.git
+
+  - name: thefuck
+    repo: https://github.com/nvbn/thefuck
+
+  - name: fzf
+    repo: https://github.com/junegunn/fzf.git
+
+# -----------------------------------------------------------------------------
+# Plugin install behavior
+# -----------------------------------------------------------------------------
+
+zsh_plugin_update: false        # never auto-update during playbooks
+zsh_plugin_depth: 1             # shallow clones for speed
+
+# -----------------------------------------------------------------------------
+# fzf integration
+# -----------------------------------------------------------------------------
+
+fzf_install_shell_integration: true
+fzf_key_bindings: true
+fzf_completion: true
+
+# -----------------------------------------------------------------------------
+# Starship Prompt
+# -----------------------------------------------------------------------------
+
+starship_enabled: true
+starship_config_path: ".config/starship/config.toml"
+
+# -----------------------------------------------------------------------------
+# Oh My Zsh Custom Paths
+# -----------------------------------------------------------------------------
+
+oh_my_zsh_custom_dir: ".oh-my-zsh/custom"
+oh_my_zsh_plugins_dir: ".oh-my-zsh/custom/plugins"
+
+# -----------------------------------------------------------------------------
+# Completion tuning
+# -----------------------------------------------------------------------------
+
+zsh_enable_extra_completions: true
+zsh_completion_cache_dir: ".cache/zcompdump"
+
+# -----------------------------------------------------------------------------
+# Safety / CI compatibility
+# -----------------------------------------------------------------------------
+
+zsh_skip_for_system_users: true   # skip users with shell=/usr/sbin/nologin
+zsh_noninteractive_safe: true
+
+# =============================================================================
+# End of zsh.yaml
+# =============================================================================

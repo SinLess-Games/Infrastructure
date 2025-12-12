@@ -1,0 +1,119 @@
+---
+# =============================================================================
+# Validation — shell-config role
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Fail fast on misconfiguration
+# - Ensure variables are sane before installation/configuration
+# - Prevent accidental shell changes or broken user setups
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Required variables
+# -----------------------------------------------------------------------------
+
+- name: Validate shell_config_users is defined and a list
+  ansible.builtin.assert:
+    that:
+      - shell_config_users is defined
+      - shell_config_users is iterable
+      - shell_config_users | length > 0
+    fail_msg: >
+      shell_config_users must be defined as a non-empty list.
+      Example:
+        shell_config_users:
+          - name: user
+            home_directory: /home/user
+
+# -----------------------------------------------------------------------------
+# Validate user structure
+# -----------------------------------------------------------------------------
+
+- name: Validate each shell_config_user entry
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name | length > 0
+      - item.home_directory is defined
+      - item.home_directory | length > 0
+    fail_msg: >
+      Each entry in shell_config_users must define:
+        - name
+        - home_directory
+  loop: "{{ shell_config_users }}"
+  loop_control:
+    label: "{{ item.name | default('UNKNOWN') }}"
+
+# -----------------------------------------------------------------------------
+# Feature toggles (safe defaults)
+# -----------------------------------------------------------------------------
+
+- name: Validate shell_install_oh_my_zsh flag
+  ansible.builtin.assert:
+    that:
+      - shell_install_oh_my_zsh | default(false) | type_debug == 'bool'
+    fail_msg: "shell_install_oh_my_zsh must be a boolean"
+
+- name: Validate shell_install_starship flag
+  ansible.builtin.assert:
+    that:
+      - shell_install_starship | default(false) | type_debug == 'bool'
+    fail_msg: "shell_install_starship must be a boolean"
+
+- name: Validate shell_set_default_shell flag
+  ansible.builtin.assert:
+    that:
+      - shell_set_default_shell | default(false) | type_debug == 'bool'
+    fail_msg: "shell_set_default_shell must be a boolean"
+
+# -----------------------------------------------------------------------------
+# Plugin validation (if defined)
+# -----------------------------------------------------------------------------
+
+- name: Validate zsh plugins structure (optional)
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.repo is defined
+      - item.repo | regex_search('^https?://')
+    fail_msg: >
+      Each plugin must define:
+        - name
+        - repo (valid http/https URL)
+  loop: "{{ plugins | default([]) }}"
+  loop_control:
+    label: "{{ item.name | default('UNKNOWN') }}"
+  when: plugins is defined
+
+# -----------------------------------------------------------------------------
+# Filesystem sanity checks
+# -----------------------------------------------------------------------------
+
+- name: Ensure user home directories exist
+  ansible.builtin.stat:
+    path: "{{ item.home_directory }}"
+  register: home_dirs
+  loop: "{{ shell_config_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Fail if any home directory does not exist
+  ansible.builtin.fail:
+    msg: "Home directory does not exist for user {{ item.item.name }}: {{ item.item.home_directory }}"
+  when: not item.stat.exists
+  loop: "{{ home_dirs.results }}"
+
+# -----------------------------------------------------------------------------
+# Safety checks
+# -----------------------------------------------------------------------------
+
+- name: Prevent accidental shell change for system users
+  ansible.builtin.assert:
+    that:
+      - item.shell is not defined or item.shell != '/usr/sbin/nologin'
+    fail_msg: >
+      User {{ item.name }} has shell '/usr/sbin/nologin'.
+      Refusing to manage shell configuration.
+  loop: "{{ shell_config_users }}"
+  loop_control:
+    label: "{{ item.name }}"

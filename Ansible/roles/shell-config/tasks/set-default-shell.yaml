@@ -1,0 +1,50 @@
+---
+# =============================================================================
+# Set Default Login Shell (OPT-IN)
+# -----------------------------------------------------------------------------
+# - Changes the user's login shell to zsh
+# - Skips system / nologin users
+# - Requires explicit enable flag
+# - Idempotent and safe
+#
+# Controlled by:
+#   shell_set_default_shell: true
+# =============================================================================
+
+- name: Assert shell switching is explicitly enabled
+  ansible.builtin.assert:
+    that:
+      - shell_set_default_shell | default(false) | bool
+    fail_msg: >
+      Default shell changes are disabled by default.
+      Set shell_set_default_shell=true to enable.
+  when: shell_set_default_shell is defined
+
+- name: Ensure zsh exists at expected path
+  ansible.builtin.stat:
+    path: /usr/bin/zsh
+  register: zsh_binary
+  when: shell_set_default_shell | default(false) | bool
+
+- name: Fail if zsh binary is missing
+  ansible.builtin.fail:
+    msg: "zsh is not installed at /usr/bin/zsh"
+  when:
+    - shell_set_default_shell | default(false) | bool
+    - not zsh_binary.stat.exists
+
+# -----------------------------------------------------------------------------
+# Change default shell
+# -----------------------------------------------------------------------------
+
+- name: Set default shell to zsh for eligible users
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    shell: /usr/bin/zsh
+  loop: "{{ shell_config_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - shell_set_default_shell | default(false) | bool
+    - item.shell is defined
+    - item.shell != '/usr/sbin/nologin'

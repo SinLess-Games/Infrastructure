@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# Install Zsh Plugins (per-user, Oh My Zsh compatible)
+# -----------------------------------------------------------------------------
+# - Clones plugins defined in group_vars/all/zsh.yaml
+# - Installs into ~/.oh-my-zsh/custom/plugins/<plugin>
+# - Skips system / non-interactive users
+# - Fully idempotent
+# =============================================================================
+
+- name: Ensure Oh My Zsh custom plugins directory exists
+  ansible.builtin.file:
+    path: "{{ item.home_directory }}/.oh-my-zsh/custom/plugins"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0755"
+  loop: "{{ shell_config_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - shell_install_oh_my_zsh | bool
+    - plugins is defined
+    - plugins | length > 0
+    - not (zsh_skip_for_system_users | default(true) and item.shell == '/usr/sbin/nologin')
+
+- name: Install Zsh plugins for user
+  become: true
+  become_user: "{{ item.0.name }}"
+  ansible.builtin.git:
+    repo: "{{ item.1.repo }}"
+    dest: "{{ item.0.home_directory }}/.oh-my-zsh/custom/plugins/{{ item.1.name }}"
+    version: "{{ item.1.version | default('HEAD') }}"
+    update: false
+    depth: 1
+  loop: "{{ shell_config_users | product(plugins) | list }}"
+  loop_control:
+    label: "{{ item.0.name }} -> {{ item.1.name }}"
+  when:
+    - shell_install_oh_my_zsh | bool
+    - plugins is defined
+    - plugins | length > 0
+    - item.1.name is defined
+    - item.1.repo is defined
+    - not (zsh_skip_for_system_users | default(true) and item.0.shell == '/usr/sbin/nologin')
