@@ -1,0 +1,64 @@
+---
+# =============================================================================
+# Sign SSH User Keys with SSH CA (Local Only)
+# -----------------------------------------------------------------------------
+# Signs generated user public keys using the SSH Certificate Authority.
+# Runs ONLY on the Ansible control node.
+#
+# Produces:
+#   {{ ssh_output_base }}/<username>/id_<type>-cert.pub
+#
+# This task assumes:
+# - User keys already exist (generate-keys.yaml)
+# - SSH CA keys already exist (generate-ca.yaml)
+# =============================================================================
+
+- name: Ensure SSH CA signing is enabled
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_enabled | bool
+    fail_msg: "SSH CA signing is disabled (ssh_ca_enabled=false)"
+  delegate_to: localhost
+  run_once: true
+
+- name: Sign SSH user keys with CA
+  ansible.builtin.command: >
+    ssh-keygen
+    -s {{ ssh_ca_output_dir }}/ssh_ca
+    -I {{ item.name }}
+    -n {{ item.name }}
+    -V {{ ssh_ca_cert_validity }}
+    {% if ssh_ca_cert_extensions | length > 0 %}
+    -O {{ ssh_ca_cert_extensions | join(' -O ') }}
+    {% endif %}
+    {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub
+  args:
+    creates: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}-cert.pub"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  run_once: true
+  when:
+    - ssh_ca_enabled | bool
+    - not ssh_ca_force_resign
+
+- name: Force re-sign SSH user keys with CA
+  ansible.builtin.command: >
+    ssh-keygen
+    -s {{ ssh_ca_output_dir }}/ssh_ca
+    -I {{ item.name }}
+    -n {{ item.name }}
+    -V {{ ssh_ca_cert_validity }}
+    {% if ssh_ca_cert_extensions | length > 0 %}
+    -O {{ ssh_ca_cert_extensions | join(' -O ') }}
+    {% endif %}
+    {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  run_once: true
+  when:
+    - ssh_ca_enabled | bool
+    - ssh_ca_force_resign

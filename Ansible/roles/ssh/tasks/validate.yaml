@@ -1,0 +1,90 @@
+---
+# =============================================================================
+# Validate SSH Role Inputs
+# -----------------------------------------------------------------------------
+# Performs early, explicit validation of variables and assumptions
+# before any keys, CA material, or signing actions occur.
+#
+# Runs on the control node only.
+# =============================================================================
+
+- name: Validate SSH key type
+  ansible.builtin.assert:
+    that:
+      - ssh_key_type in ssh_supported_key_types
+    fail_msg: "Unsupported ssh_key_type: {{ ssh_key_type }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate RSA key bits when using RSA
+  ansible.builtin.assert:
+    that:
+      - ssh_key_bits is defined
+      - ssh_key_bits | int >= 2048
+    fail_msg: "ssh_key_bits must be defined and >= 2048 when using RSA"
+  when: ssh_key_type == 'rsa'
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate users variable structure
+  ansible.builtin.assert:
+    that:
+      - users is defined
+      - users | length > 0
+      - users is iterable
+    fail_msg: "users must be a non-empty list of user definitions"
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate each user entry
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name | length > 0
+    fail_msg: "Each user entry must define a non-empty 'name' field"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name | default('undefined') }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate SSH output paths are defined
+  ansible.builtin.assert:
+    that:
+      - ssh_output_root is defined
+      - ssh_output_base is defined
+    fail_msg: "SSH output paths (ssh_output_root, ssh_output_base) must be defined"
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate SSH CA configuration when enabled
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_key_type in ssh_supported_key_types
+      - ssh_ca_output_dir is defined
+      - ssh_ca_cert_validity is defined
+    fail_msg: "SSH CA configuration is incomplete or invalid"
+  when: ssh_ca_enabled | bool
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate CA RSA key bits when using RSA
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_key_bits is defined
+      - ssh_ca_key_bits | int >= 2048
+    fail_msg: "ssh_ca_key_bits must be defined and >= 2048 when using RSA CA keys"
+  when:
+    - ssh_ca_enabled | bool
+    - ssh_ca_key_type == 'rsa'
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate CA certificate extensions list
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_cert_extensions is iterable
+    fail_msg: "ssh_ca_cert_extensions must be a list"
+  when: ssh_ca_enabled | bool
+  delegate_to: localhost
+  run_once: true
