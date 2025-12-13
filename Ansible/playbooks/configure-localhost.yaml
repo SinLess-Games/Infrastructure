@@ -16,8 +16,10 @@
     - ../group_vars/all/users.yaml
     - ../group_vars/all/groups.yaml
     - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/packages.yaml
 
   roles:
     - users
     - ssh
     - shell-config
+    - packages

@@ -1,0 +1,26 @@
+---
+# =============================================================================
+# packages — install
+# =============================================================================
+
+- name: Build flattened package list
+  ansible.builtin.set_fact:
+    packages_to_install: >-
+      {{
+        packages_enabled_groups
+        | map('extract', apt_packages)
+        | flatten
+        | unique
+      }}
+
+- name: Show packages to be installed (debug)
+  ansible.builtin.debug:
+    var: packages_to_install
+  when: ansible_verbosity | int >= 2
+
+- name: Install APT packages
+  ansible.builtin.apt:
+    name: "{{ packages_to_install }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600

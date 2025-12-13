@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# packages — main
+# =============================================================================
+
+- name: Validate package configuration
+  import_tasks: validate.yaml
+
+- name: Install packages
+  import_tasks: install.yaml

@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# packages — validation
+# =============================================================================
+
+- name: Validate apt_packages is defined
+  ansible.builtin.assert:
+    that:
+      - apt_packages is defined
+      - apt_packages is mapping
+    fail_msg: "apt_packages must be defined as a dictionary"
+
+- name: Validate enabled package groups exist
+  ansible.builtin.assert:
+    that:
+      - item in apt_packages
+    fail_msg: "Package group '{{ item }}' is not defined in apt_packages"
+  loop: "{{ packages_enabled_groups }}"
+
+- name: Validate each package group is a list
+  ansible.builtin.assert:
+    that:
+      - apt_packages[item] is iterable
+    fail_msg: "apt_packages['{{ item }}'] must be a list"
+  loop: "{{ packages_enabled_groups }}"

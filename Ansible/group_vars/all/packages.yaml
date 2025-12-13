@@ -1,0 +1,172 @@
+---
+# Mega-packages for common_bootstrap: apt_install_role.yaml
+# Most items are in Debian/Ubuntu repos. Lines marked (vendor repo) usually
+# need you to add the vendor's APT source first (keep them or comment out).
+
+
+apt_packages:
+  # ──────────────────────────────────────────────────────────────────────────────
+  # Core/base for every box
+  # ──────────────────────────────────────────────────────────────────────────────
+  base:
+    - ca-certificates
+    - software-properties-common
+    - apt-transport-https
+    - gnupg
+    - gnupg2
+    - curl
+    - wget
+    - git
+    - build-essential
+    - unzip
+    - zip
+    - tree
+    - screen
+    - jq
+    - yq
+    - htop
+    - btop
+    - sudo
+    - locales
+    - bash-completion
+    - moreutils
+    - nano
+    - net-tools
+    - dnsutils            # bind utilities (dig/host/nslookup)
+    - traceroute
+    - whois
+    - time
+    - lsb-release
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # CLI niceties / shells / dotfiles helpers
+  # ──────────────────────────────────────────────────────────────────────────────
+  cli:
+    - zsh
+    - direnv
+    - fzf
+    - colordiff
+    - zoxide
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # Developer workstation & build toolchain
+  # ──────────────────────────────────────────────────────────────────────────────
+  dev:
+    # Python
+    - python3
+    - python3-pip
+    - python3-venv
+    - python3-dev
+    - python3-setuptools
+    - pipx
+    # Node/JS
+    - nodejs              # (vendor repo recommended for current LTS)
+    - npm
+    - yarnpkg             # a.k.a. 'yarn' on some releases
+    # Java/JVM
+    - openjdk-17-jdk
+    - openjdk-21-jdk
+    - default-jdk
+    - maven
+    - gradle
+    # Go / Rust / C/C++ / LLVM
+    - golang
+    - rustc
+    - cargo
+    - gcc
+    - g++
+    - clang
+    - clang-format
+    - llvm
+    - gdb
+    - valgrind
+    - lldb
+    - ninja-build
+    - ccache
+    # Scripting / linters / proto
+    - shellcheck
+    - shfmt
+    - yamllint
+    - jsonlint
+    - graphviz
+    - protobuf-compiler
+    # IaC / DevOps
+    - ansible
+    - ansible-lint
+    - packer             # (vendor repo recommended)
+    - vagrant
+    # Containers
+    - docker.io
+    - containerd
+    - podman
+    - buildah
+    - skopeo
+    - cri-tools
+    # Git helpers
+    - git-extras
+    - gh                 # GitHub CLI (may require vendor repo on some releases)
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # Networking, diagnostics, performance
+  # ──────────────────────────────────────────────────────────────────────────────
+  net:
+    - nmap
+    - tcpdump
+    - ethtool
+    - bridge-utils
+    - vlan
+    - nftables
+    - iptables
+    - dnsutils        # bind utilities (dig/host/nslookup)
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # System, storage, filesystems, security hardening, VM guest agents
+  # ──────────────────────────────────────────────────────────────────────────────
+  system:
+    # Logging & housekeeping
+    - rsyslog
+    - logrotate
+    - needrestart
+    - unattended-upgrades
+    # Filesystems & storage
+    - parted
+    - lvm2
+    - mdadm
+    - hdparm
+    - nvme-cli
+    - cryptsetup
+    - exfatprogs
+    - ntfs-3g
+    - btrfs-progs
+    - zfsutils-linux     # (may require enabling zfs in repo)
+    - xfsprogs
+    - nfs-common
+    - cifs-utils
+    # Power & sensors
+    - lm-sensors
+    - powertop
+    - tlp
+    # SSH / firewall / auth
+    - openssh-server
+    - sshpass
+    - ufw
+    - fail2ban
+    - apparmor
+    - auditd
+    # AV / security auditing
+    - clamav
+    - clamav-freshclam
+    - lynis
+    - rkhunter
+    - gpg
+    - gnupg2
+    # VM guest agents
+    - qemu-guest-agent
+    # Fonts & terminals
+    - fonts-firacode
+    - fonts-hack
+    - fonts-inconsolata
+    - fonts-noto
+    - fonts-noto-color-emoji
+
+
