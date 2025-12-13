@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# packages — install-homebrew
+# -----------------------------------------------------------------------------
+# Installs Homebrew (Linuxbrew) if enabled and not already present
+#
+# Design goals:
+# - Safe (no reinstallation)
+# - Idempotent
+# - Non-interactive
+# - Works under sudo
+# =============================================================================
+
+- name: Check if Homebrew is already installed
+  ansible.builtin.command: brew --version
+  register: brew_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Homebrew (Linuxbrew)
+  ansible.builtin.shell: |
+    NONINTERACTIVE=1 \
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  args:
+    creates: /home/linuxbrew/.linuxbrew/bin/brew
+  when:
+    - brew_check.rc != 0
+    - ansible_system == "Linux"
+
+- name: Ensure Homebrew is available system-wide
+  ansible.builtin.copy:
+    dest: /etc/profile.d/homebrew.sh
+    mode: "0644"
+    content: |
+      # Homebrew (Linuxbrew)
+      if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+        export HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"
+        export HOMEBREW_CELLAR="/home/linuxbrew/.linuxbrew/Cellar"
+        export HOMEBREW_REPOSITORY="/home/linuxbrew/.linuxbrew/Homebrew"
+        export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
+        export MANPATH="/home/linuxbrew/.linuxbrew/share/man:$MANPATH"
+        export INFOPATH="/home/linuxbrew/.linuxbrew/share/info:$INFOPATH"
+      fi
+  when:
+    - ansible_system == "Linux"

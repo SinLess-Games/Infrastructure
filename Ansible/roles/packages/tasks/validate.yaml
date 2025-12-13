@@ -23,3 +23,7 @@
       - apt_packages[item] is iterable
     fail_msg: "apt_packages['{{ item }}'] must be a list"
   loop: "{{ packages_enabled_groups }}"
+
+- name: Install Homebrew (Linuxbrew)
+  import_tasks: install-homebrew.yaml
+  when: packages_install_homebrew | default(false)
