@@ -1,0 +1,51 @@
+---
+# =============================================================================
+# Playbook: configure-proxmox-node.yaml
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Apply the proxmox-node role to one or more Proxmox VE hosts.
+#
+# Usage:
+#   ansible-playbook playbooks/configure-proxmox-node.yaml
+#   ansible-playbook playbooks/configure-proxmox-node.yaml -l pve-01
+#
+# Notes:
+#   - Idempotent
+#   - Safe before or after cluster join
+#   - Does NOT force reboot
+# =============================================================================
+
+- name: Configure Proxmox VE node
+  hosts: proxmox.pve_nodes
+  become: true
+  gather_facts: true
+
+  vars:
+    proxmox_node_playbook: true
+
+  vars_files:
+    - ../group_vars/all/chrony.yaml
+    - ../group_vars/proxmox.yaml
+
+  roles:
+    # -------------------------------------------------------------------------
+    # Proxmox node baseline configuration
+    # -------------------------------------------------------------------------
+    - role: proxmox-node
+      tags: [proxmox, node]
+
+  post_tasks:
+    # -------------------------------------------------------------------------
+    # Completion / advisory
+    # -------------------------------------------------------------------------
+
+    - name: Reboot advisory
+      ansible.builtin.debug:
+        msg: >
+          A reboot may be required if kernel, bootloader, or IOMMU settings
+          were modified. Review task output before rebooting.
+
+    - name: Proxmox node configuration complete
+      ansible.builtin.debug:
+        msg: >
+          Proxmox node {{ inventory_hostname }} configured successfully.

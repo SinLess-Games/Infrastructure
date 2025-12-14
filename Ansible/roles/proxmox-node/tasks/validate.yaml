@@ -1,0 +1,54 @@
+---
+# =============================================================================
+# proxmox-node — validation (STRICT PROXMOX MODE)
+# =============================================================================
+
+- name: Assert Ansible facts are available
+  ansible.builtin.assert:
+    that:
+      - ansible_facts is defined
+      - ansible_distribution is defined
+      - ansible_kernel is defined
+    fail_msg: >
+      proxmox-node: Ansible facts are missing. Ensure gather_facts=true.
+
+- name: Assert system is Debian-based
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Debian"
+      - ansible_distribution_major_version | int >= 11
+    fail_msg: >
+      proxmox-node must run on Debian 11+ (Proxmox VE base OS).
+
+- name: Assert Proxmox kernel is present
+  ansible.builtin.assert:
+    that:
+      - "'pve' in ansible_kernel"
+    fail_msg: >
+      Proxmox kernel not detected (kernel={{ ansible_kernel }}). This does not look like a Proxmox VE host.
+
+- name: Check for pve-manager binary
+  ansible.builtin.stat:
+    path: /usr/bin/pveversion
+  register: pveversion_bin
+
+- name: Assert pve-manager is installed
+  ansible.builtin.assert:
+    that:
+      - pveversion_bin.stat.exists
+    fail_msg: >
+      pve-manager not found (/usr/bin/pveversion missing). This is not a Proxmox VE host.
+
+- name: Check for Proxmox cluster filesystem (/etc/pve)
+  ansible.builtin.stat:
+    path: /etc/pve
+  register: pve_fs
+
+- name: Assert host is Proxmox VE
+  ansible.builtin.assert:
+    that:
+      - pve_fs.stat.exists
+      - pve_fs.stat.isdir
+    fail_msg: >
+      /etc/pve not found. proxmox-node role must run on a Proxmox VE host.
+    success_msg: All assertions passed

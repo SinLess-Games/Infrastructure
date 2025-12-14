@@ -1,0 +1,110 @@
+# =============================================================================
+# chrony.conf — managed by Ansible
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Reliable, low-latency time synchronization
+# - Safe for Proxmox clusters (Corosync-sensitive)
+# - Safe for Ceph (clock skew intolerant)
+# - Safe for Kubernetes (etcd sensitive)
+#
+# Source of truth:
+#   Ansible/templates/chrony/chrony.conf.j2
+#
+# DO NOT EDIT MANUALLY
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Upstream time sources
+# -----------------------------------------------------------------------------
+{% if chrony_servers is defined and chrony_servers | length > 0 %}
+{% for server in chrony_servers %}
+server {{ server }} iburst
+{% endfor %}
+{% else %}
+# Fallback to public pools if none explicitly defined
+pool pool.ntp.org iburst maxsources 4
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Drift file (persistent clock correction)
+# -----------------------------------------------------------------------------
+driftfile /var/lib/chrony/chrony.drift
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+log tracking measurements statistics
+logdir /var/log/chrony
+
+# -----------------------------------------------------------------------------
+# Clock behavior
+# -----------------------------------------------------------------------------
+
+# Step the clock on boot if offset is large (critical for VMs / Ceph)
+makestep 1.0 3
+
+# Sync system clock to RTC
+rtcsync
+
+# Allow gradual correction instead of hard jumps after boot
+maxslewrate 1000
+
+# -----------------------------------------------------------------------------
+# Network access control
+# -----------------------------------------------------------------------------
+{% if chrony_allow is defined and chrony_allow | length > 0 %}
+{% for cidr in chrony_allow %}
+allow {{ cidr }}
+{% endfor %}
+{% else %}
+# Default: do not allow remote clients
+# (Safe default for hosts, enable explicitly for LAN NTP)
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Security hardening
+# -----------------------------------------------------------------------------
+
+# Run as non-root after startup
+user chrony
+
+# Disable NTP command port (unless explicitly needed)
+cmdport 0
+
+# Drop privileges ASAP
+lock_all
+
+# -----------------------------------------------------------------------------
+# Local clock (optional – last-resort only)
+# -----------------------------------------------------------------------------
+{% if chrony_local_stratum is defined %}
+local stratum {{ chrony_local_stratum }}
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Reference ID (optional, cosmetic)
+# -----------------------------------------------------------------------------
+{% if chrony_refid is defined %}
+refid {{ chrony_refid }}
+{% endif %}
+
+# =============================================================================
+# Notes
+# -----------------------------------------------------------------------------
+# - Proxmox clusters REQUIRE accurate time (Corosync quorum)
+# - Ceph is EXTREMELY sensitive to clock skew
+# - Prefer 3–5 trusted upstreams or stratum-1 when possible
+# - For LAN NTP servers, set chrony_allow explicitly
+#
+# Example group_vars:
+#
+# chrony_servers:
+#   - 0.pool.ntp.org
+#   - 1.pool.ntp.org
+#
+# chrony_allow:
+#   - 10.10.0.0/16
+#
+# chrony_local_stratum: 10
+# chrony_refid: LOCAL
+# =============================================================================

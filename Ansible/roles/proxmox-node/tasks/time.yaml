@@ -1,0 +1,86 @@
+---
+# =============================================================================
+# proxmox-node :: time
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Configure reliable, deterministic time sync using chrony
+# - Mandatory for:
+#   * Proxmox clusters (Corosync quorum)
+#   * Ceph (OSD + MON clock skew intolerance)
+#   * Kubernetes / etcd
+#
+# This task:
+# - Installs chrony
+# - Deploys managed chrony.conf
+# - Enables and restarts the service safely
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Install chrony
+# -----------------------------------------------------------------------------
+
+- name: Ensure chrony is installed
+  ansible.builtin.package:
+    name: chrony
+    state: present
+
+# -----------------------------------------------------------------------------
+# Stop conflicting time services
+# -----------------------------------------------------------------------------
+
+- name: Disable systemd-timesyncd if present
+  ansible.builtin.service:
+    name: systemd-timesyncd
+    state: stopped
+    enabled: false
+  failed_when: false
+
+# -----------------------------------------------------------------------------
+# Deploy chrony configuration
+# -----------------------------------------------------------------------------
+
+- name: Ensure chrony config directory exists
+  ansible.builtin.file:
+    path: /etc/chrony
+    state: directory
+    mode: "0755"
+
+- name: Deploy chrony configuration (managed)
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/chrony/chrony.conf.j2"
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chrony
+
+# -----------------------------------------------------------------------------
+# Enable and start chrony
+# -----------------------------------------------------------------------------
+
+- name: Enable and start chrony service
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Validation (non-fatal)
+# -----------------------------------------------------------------------------
+
+- name: Check chrony tracking status
+  ansible.builtin.command: chronyc tracking
+  register: chrony_tracking
+  changed_when: false
+  failed_when: false
+
+- name: Display chrony tracking summary
+  ansible.builtin.debug:
+    msg: "{{ chrony_tracking.stdout_lines }}"
+  when: chrony_tracking.stdout is defined
+
+# =============================================================================
+# Handlers (defined in role handlers/main.yaml)
+# =============================================================================
+# - Restart chrony
+# =============================================================================

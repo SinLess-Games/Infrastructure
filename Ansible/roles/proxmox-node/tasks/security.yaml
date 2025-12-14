@@ -1,0 +1,135 @@
+---
+# =============================================================================
+# proxmox-node — security
+# -----------------------------------------------------------------------------
+# Baseline security hardening for Proxmox VE nodes
+#
+# Scope (intentional, non-destructive):
+# - SSH hardening (minimal, Proxmox-safe)
+# - Firewall baseline (iptables/nftables coexistence aware)
+# - Kernel/sysctl safety defaults
+# - Disable unsafe legacy services
+#
+# Explicitly avoids:
+# - Locking out console / root access
+# - Aggressive CIS hardening
+# - Breaking cluster, Ceph, or Corosync traffic
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SSH hardening (safe defaults for Proxmox)
+# -----------------------------------------------------------------------------
+
+- name: Ensure SSH server is installed
+  ansible.builtin.package:
+    name: openssh-server
+    state: present
+
+- name: Harden SSH configuration (Proxmox-safe)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^{{ item.key }}"
+    line: "{{ item.key }} {{ item.value }}"
+    state: present
+    create: false
+    backrefs: false
+  loop:
+    - { key: "Protocol", value: "2" }
+    - { key: "PermitRootLogin", value: "prohibit-password" }
+    - { key: "PasswordAuthentication", value: "no" }
+    - { key: "ChallengeResponseAuthentication", value: "no" }
+    - { key: "UsePAM", value: "yes" }
+    - { key: "X11Forwarding", value: "no" }
+    - { key: "ClientAliveInterval", value: "300" }
+    - { key: "ClientAliveCountMax", value: "2" }
+  notify: Restart sshd
+
+# -----------------------------------------------------------------------------
+# Firewall baseline (do not enforce policy here)
+# -----------------------------------------------------------------------------
+# NOTE:
+# - Proxmox uses both iptables/nftables depending on version
+# - Actual rule enforcement should be done in a dedicated firewall role
+# - Here we only ensure tooling exists
+# -----------------------------------------------------------------------------
+
+- name: Ensure firewall tooling is installed
+  ansible.builtin.package:
+    name:
+      - nftables
+      - iptables
+      - ipset
+    state: present
+
+- name: Ensure nftables service is enabled (but not enforcing rules)
+  ansible.builtin.service:
+    name: nftables
+    enabled: true
+    state: started
+
+# -----------------------------------------------------------------------------
+# Kernel / sysctl safety settings
+# -----------------------------------------------------------------------------
+# Minimal hardening that does not interfere with Proxmox or Ceph
+# -----------------------------------------------------------------------------
+
+- name: Apply kernel network hardening sysctls
+  ansible.builtin.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { name: "net.ipv4.ip_forward", value: "1" }           # Required for bridges
+    - { name: "net.ipv4.conf.all.accept_redirects", value: "0" }
+    - { name: "net.ipv4.conf.default.accept_redirects", value: "0" }
+    - { name: "net.ipv4.conf.all.send_redirects", value: "0" }
+    - { name: "net.ipv4.conf.default.send_redirects", value: "0" }
+    - { name: "net.ipv4.conf.all.rp_filter", value: "1" }
+    - { name: "net.ipv4.conf.default.rp_filter", value: "1" }
+    - { name: "kernel.kptr_restrict", value: "2" }
+    - { name: "kernel.dmesg_restrict", value: "1" }
+
+# -----------------------------------------------------------------------------
+# Disable insecure legacy services
+# -----------------------------------------------------------------------------
+
+- name: Disable legacy/insecure services if present
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - telnet
+    - rsh
+    - rlogin
+    - rexec
+  ignore_errors: true
+
+# -----------------------------------------------------------------------------
+# APT security hygiene
+# -----------------------------------------------------------------------------
+
+- name: Ensure unattended-upgrades is installed
+  ansible.builtin.package:
+    name: unattended-upgrades
+    state: present
+
+- name: Enable unattended-upgrades service
+  ansible.builtin.service:
+    name: unattended-upgrades
+    enabled: true
+    state: started
+
+# -----------------------------------------------------------------------------
+# Validation marker
+# -----------------------------------------------------------------------------
+
+- name: Proxmox security baseline applied
+  ansible.builtin.debug:
+    msg: "Proxmox node security baseline successfully applied."
+
+# =============================================================================
+# Handlers
+# =============================================================================

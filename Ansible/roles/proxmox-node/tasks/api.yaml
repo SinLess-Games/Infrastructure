@@ -1,0 +1,133 @@
+---
+# =============================================================================
+# proxmox-node — api
+# -----------------------------------------------------------------------------
+# Configure and validate the Proxmox VE API access on the node itself.
+# This role does NOT create users or tokens for external automation yet;
+# it ensures the local API is reachable, secured, and predictable.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Ensure required Proxmox API services are running
+# -----------------------------------------------------------------------------
+
+- name: Ensure pveproxy service is enabled and running
+  ansible.builtin.service:
+    name: pveproxy
+    state: started
+    enabled: true
+
+- name: Ensure pvedaemon service is enabled and running
+  ansible.builtin.service:
+    name: pvedaemon
+    state: started
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Validate API endpoint availability (local)
+# -----------------------------------------------------------------------------
+
+- name: Check Proxmox API HTTPS endpoint is reachable
+  ansible.builtin.uri:
+    url: https://127.0.0.1:8006/api2/json/version
+    method: GET
+    validate_certs: false
+    return_content: true
+    status_code:
+      - 200
+      - 401
+  register: proxmox_api_check
+
+- name: Assert Proxmox API is reachable
+  ansible.builtin.assert:
+    that:
+      - proxmox_api_check.status in [200, 401]
+    success_msg: Proxmox API endpoint is reachable.
+    fail_msg: >
+      Proxmox API endpoint is not reachable.
+      Expected HTTP 200 or 401, got {{ proxmox_api_check.status }}.
+
+# -----------------------------------------------------------------------------
+# Validate API response content (ONLY when authenticated)
+# -----------------------------------------------------------------------------
+
+- name: Assert Proxmox API returned version information (authenticated case)
+  ansible.builtin.assert:
+    that:
+      - proxmox_api_check.json is defined
+      - proxmox_api_check.json.data is defined
+      - proxmox_api_check.json.data.version is defined
+    success_msg: >
+      Proxmox API returned version {{ proxmox_api_check.json.data.version }}.
+    fail_msg: >
+      Proxmox API returned HTTP 200 but did not include version data.
+  when:
+    - proxmox_api_check.status == 200
+
+- name: Skip version validation when unauthenticated (expected)
+  ansible.builtin.debug:
+    msg: >
+      Proxmox API returned HTTP 401 (unauthenticated).
+      This is expected for baseline validation without API credentials.
+  when:
+    - proxmox_api_check.status == 401
+
+# -----------------------------------------------------------------------------
+# Validate SSL certificates exist
+# -----------------------------------------------------------------------------
+
+- name: Check Proxmox API SSL certificate exists
+  ansible.builtin.stat:
+    path: /etc/pve/local/pve-ssl.pem
+  register: proxmox_ssl_cert
+
+- name: Check Proxmox API SSL key exists
+  ansible.builtin.stat:
+    path: /etc/pve/local/pve-ssl.key
+  register: proxmox_ssl_key
+
+- name: Assert Proxmox API SSL cert and key are present
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssl_cert.stat.exists
+      - proxmox_ssl_key.stat.exists
+    fail_msg: >
+      Proxmox SSL certificate or key is missing.
+      Expected:
+        /etc/pve/local/pve-ssl.pem
+        /etc/pve/local/pve-ssl.key
+
+# -----------------------------------------------------------------------------
+# Optional: regenerate certificates if explicitly requested
+# -----------------------------------------------------------------------------
+
+- name: Regenerate Proxmox API certificates (optional)
+  ansible.builtin.command: pvecm updatecerts --force
+  when:
+    - proxmox_node.regenerate_api_certs | default(false)
+  notify: restart proxmox api
+  changed_when: true
+
+# -----------------------------------------------------------------------------
+# Optional: verify cluster API state (safe on single-node)
+# -----------------------------------------------------------------------------
+
+- name: Check Proxmox cluster status
+  ansible.builtin.command: pvecm status
+  register: pvecm_status
+  changed_when: false
+  failed_when: false
+
+- name: Debug Proxmox cluster status
+  ansible.builtin.debug:
+    msg: |
+      Proxmox cluster status:
+      {{ pvecm_status.stdout }}
+
+# -----------------------------------------------------------------------------
+# API validation complete
+# -----------------------------------------------------------------------------
+
+- name: Proxmox API validation complete
+  ansible.builtin.debug:
+    msg: "Proxmox API is reachable, secured, and operational."

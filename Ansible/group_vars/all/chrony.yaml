@@ -1,0 +1,112 @@
+---
+# =============================================================================
+# Chrony Configuration Variables
+# -----------------------------------------------------------------------------
+# Used by:
+#   - roles/proxmox-node/tasks/time.yaml
+#   - templates/chrony/chrony.conf.j2
+#
+# Designed for:
+#   - Proxmox clusters
+#   - Ceph (Squid)
+#   - Kubernetes / etcd
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# NTP Sources
+# -----------------------------------------------------------------------------
+
+# Upstream NTP servers (recommended: >= 3, geographically close)
+chrony_servers:
+  - time.cloudflare.com
+  - time.google.com
+  - pool.ntp.org
+
+# Optional local fallback servers (ex: router, GPS, stratum-1)
+chrony_pools: []
+
+# -----------------------------------------------------------------------------
+# Chrony Behavior
+# -----------------------------------------------------------------------------
+
+# Allow chrony to step the clock if offset is large (important on first boot)
+chrony_makestep_threshold: 1.0   # seconds
+chrony_makestep_limit: 3         # first N updates
+
+# Allow the system clock to slew aggressively on startup
+chrony_rtcsync: true
+
+# Drift file location
+chrony_driftfile: /var/lib/chrony/chrony.drift
+
+# -----------------------------------------------------------------------------
+# Network & Access Control
+# -----------------------------------------------------------------------------
+
+# Allow NTP clients from these networks (Proxmox/Ceph cluster LANs)
+chrony_allow_networks:
+  - 127.0.0.1/32
+  - ::1/128
+  - 10.0.0.0/8
+  - 172.16.0.0/12
+  - 192.168.0.0/16
+
+# Whether this node may act as a time server for others
+chrony_allow_clients: true
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+
+chrony_log_enabled: true
+chrony_log_dir: /var/log/chrony
+chrony_log_options:
+  - tracking
+  - measurements
+  - statistics
+
+# -----------------------------------------------------------------------------
+# Security
+# -----------------------------------------------------------------------------
+
+# Disable unauthenticated command access
+chrony_cmdport: 0
+
+# -----------------------------------------------------------------------------
+# Time Correction Safeguards (Ceph-safe)
+# -----------------------------------------------------------------------------
+
+# Maximum allowed clock correction (ppm)
+chrony_maxslewrate: 1000
+
+# -----------------------------------------------------------------------------
+# Hardware Clock
+# -----------------------------------------------------------------------------
+
+# Write system time to RTC every 11 minutes (recommended)
+chrony_hwclock_sync: true
+
+# -----------------------------------------------------------------------------
+# Service Control
+# -----------------------------------------------------------------------------
+
+chrony_service_name: chrony
+
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
+
+chrony_require_sources: true     # fail if no sources available
+chrony_require_sync: false       # warn-only if not yet synced
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - Ceph is extremely sensitive to clock skew (> 0.5s is dangerous)
+# - Corosync quorum depends on monotonic clocks
+# - Kubernetes certificates are time-bound
+#
+# Recommended:
+#   - Use at least one trusted stratum-1 source if available
+#   - Keep chrony enabled on ALL nodes
+# =============================================================================

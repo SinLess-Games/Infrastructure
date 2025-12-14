@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# Proxmox APT repositories (Deb822 + legacy safe)
+# =============================================================================
+
+- name: Remove Proxmox enterprise .sources files (unlicensed nodes)
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/pve-enterprise.sources
+    - /etc/apt/sources.list.d/ceph.sources
+  when: not proxmox_node.licensed | bool
+
+- name: Remove legacy Proxmox enterprise .list files (if present)
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/pve-enterprise.list
+    - /etc/apt/sources.list.d/ceph.list
+  when: not proxmox_node.licensed | bool
+
+- name: Enable Proxmox VE no-subscription repository
+  apt_repository:
+    repo: "deb http://download.proxmox.com/debian/pve {{ ansible_distribution_release }} pve-no-subscription"
+    filename: pve-no-subscription
+    state: present
+    update_cache: no
+  when: not proxmox_node.licensed | bool
+
+- name: Enable Ceph Squid no-subscription repository
+  apt_repository:
+    repo: "deb http://download.proxmox.com/debian/ceph-squid {{ ansible_distribution_release }} no-subscription"
+    filename: ceph-squid-no-subscription
+    state: present
+    update_cache: no
+  when: not proxmox_node.licensed | bool
+
+- name: Enable enterprise repositories (licensed nodes only)
+  apt_repository:
+    repo: "{{ item }}"
+    state: present
+    update_cache: no
+  loop:
+    - "deb https://enterprise.proxmox.com/debian/pve {{ ansible_distribution_release }} pve-enterprise"
+    - "deb https://enterprise.proxmox.com/debian/ceph-squid {{ ansible_distribution_release }} enterprise"
+  when: proxmox_node.licensed | bool
+
+- name: Update apt cache (single clean run)
+  apt:
+    update_cache: yes
