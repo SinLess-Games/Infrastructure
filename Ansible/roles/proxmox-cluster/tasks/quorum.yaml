@@ -1,0 +1,167 @@
+---
+# =============================================================================
+# proxmox-cluster — quorum
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Validate Proxmox cluster quorum health and topology
+# - Enforce explicit admin intent for risky topologies
+# - Surface actionable warnings without mutating state
+#
+# Design principles:
+# - READ-ONLY (no quorum changes, no expected-votes tweaks)
+# - Authoritative checks delegated to init node
+# - Explicit handling for 1-node, 2-node, and 3+ node clusters
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Guardrails
+# -----------------------------------------------------------------------------
+
+- name: Assert cluster management is enabled
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_enabled | bool
+    fail_msg: >
+      Proxmox cluster management is disabled.
+      Set proxmox_cluster_enabled: true to validate quorum.
+
+- name: Assert node is clustered
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_is_clustered | bool
+    fail_msg: >
+      Node {{ inventory_hostname }} is not part of a Proxmox cluster.
+      Quorum validation is not applicable.
+
+# -----------------------------------------------------------------------------
+# Gather authoritative cluster state (init node)
+# -----------------------------------------------------------------------------
+
+- name: Retrieve authoritative cluster status
+  ansible.builtin.command: pvecm status
+  delegate_to: "{{ proxmox_cluster_init_node }}"
+  register: proxmox_cluster_status
+  changed_when: false
+  failed_when: proxmox_cluster_status.rc != 0
+
+- name: Retrieve authoritative cluster node list
+  ansible.builtin.command: pvecm nodes
+  delegate_to: "{{ proxmox_cluster_init_node }}"
+  register: proxmox_cluster_nodes
+  changed_when: false
+  failed_when: proxmox_cluster_nodes.rc != 0
+
+# -----------------------------------------------------------------------------
+# Derive cluster topology
+# -----------------------------------------------------------------------------
+
+- name: Derive cluster node names
+  ansible.builtin.set_fact:
+    proxmox_cluster_node_names: >-
+      {{ proxmox_cluster_nodes.stdout_lines
+         | select('search', '^[[:space:]]*0x[0-9a-fA-F]+')
+         | map('regex_replace', '^[[:space:]]*[0-9]+[[:space:]]+([^[:space:]]+).*', '\\1')
+         | list }}
+
+- name: Count cluster nodes
+  ansible.builtin.set_fact:
+    proxmox_cluster_node_count: "{{ proxmox_cluster_node_names | length }}"
+
+- name: Determine quorum state
+  ansible.builtin.set_fact:
+    proxmox_cluster_is_quorate: >-
+      {{ 'Quorate: Yes' in (proxmox_cluster_status.stdout | default('')) }}
+
+# -----------------------------------------------------------------------------
+# Report cluster quorum summary
+# -----------------------------------------------------------------------------
+
+- name: Display cluster quorum summary
+  ansible.builtin.debug:
+    msg:
+      - "Init node: {{ proxmox_cluster_init_node }}"
+      - "Detected nodes ({{ proxmox_cluster_node_count }}): {{ proxmox_cluster_node_names }}"
+      - "Quorate: {{ proxmox_cluster_is_quorate }}"
+      - "Raw pvecm status:"
+      - "{{ proxmox_cluster_status.stdout }}"
+
+# -----------------------------------------------------------------------------
+# Single-node cluster handling
+# -----------------------------------------------------------------------------
+
+- name: Enforce explicit approval for single-node cluster
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_allow_single_node | default(false) | bool
+    fail_msg: >
+      Detected a SINGLE-NODE Proxmox cluster.
+      This configuration is blocked by default.
+      Set proxmox_cluster_allow_single_node: true to acknowledge risk.
+  when:
+    - proxmox_cluster_node_count | int == 1
+
+# -----------------------------------------------------------------------------
+# Two-node cluster handling (high risk)
+# -----------------------------------------------------------------------------
+
+- name: Warn about two-node cluster quorum risks
+  ansible.builtin.debug:
+    msg: >
+      WARNING: Two-node Proxmox clusters have ZERO fault tolerance.
+      Loss of either node causes quorum loss.
+      A third node or QDevice is STRONGLY recommended.
+  when:
+    - proxmox_cluster_node_count | int == 2
+
+- name: Enforce explicit approval for two-node cluster
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_allow_two_node | default(false) | bool
+    fail_msg: >
+      Detected a TWO-NODE Proxmox cluster.
+      This topology is risky and blocked by default.
+      Set proxmox_cluster_allow_two_node: true to proceed.
+  when:
+    - proxmox_cluster_node_count | int == 2
+
+# -----------------------------------------------------------------------------
+# Three or more nodes (normal quorum expectations)
+# -----------------------------------------------------------------------------
+
+- name: Assert cluster has quorum (3+ nodes)
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_is_quorate | bool
+    fail_msg: >
+      Cluster does NOT currently have quorum.
+      Investigate corosync networking, latency, or node health.
+  when:
+    - proxmox_cluster_node_count | int >= 3
+
+# -----------------------------------------------------------------------------
+# Optional: QDevice awareness (read-only)
+# -----------------------------------------------------------------------------
+
+- name: Check QDevice status (if present)
+  ansible.builtin.command: corosync-qdevice-tool status
+  delegate_to: "{{ proxmox_cluster_init_node }}"
+  register: proxmox_qdevice_status
+  changed_when: false
+  failed_when: false
+
+- name: Display QDevice status
+  ansible.builtin.debug:
+    msg: >
+      QDevice status:
+      {{ proxmox_qdevice_status.stdout | default('Not configured') }}
+
+# -----------------------------------------------------------------------------
+# Completion
+# -----------------------------------------------------------------------------
+
+- name: Proxmox quorum validation complete
+  ansible.builtin.debug:
+    msg:
+      - "Quorum validation completed successfully."
+      - "Cluster size: {{ proxmox_cluster_node_count }}"
+      - "Quorate: {{ proxmox_cluster_is_quorate }}"

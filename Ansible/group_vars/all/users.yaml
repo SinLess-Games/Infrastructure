@@ -19,7 +19,17 @@ users:
       - docker
     sudo: true
     sudo_nopasswd: true
-
+    shared-certs: [root]
+  
+  - name: root
+    comment: "Root user"
+    shell: /bin/bash
+    ssh_principals: [root, admin]
+    sudo: true
+    sudo_nopasswd: true
+    groups:
+      - sudo
+      - adm
 
   - name: automation
     comment: "Automation and CI user (Ansible, GitOps, Terraform)"

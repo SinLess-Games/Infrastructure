@@ -1,0 +1,136 @@
+---
+# =============================================================================
+# proxmox-cluster — discover
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Discover current Proxmox cluster state (READ-ONLY)
+# - Detect whether the node is clustered
+# - Collect authoritative metadata:
+#   * cluster name
+#   * node list
+#   * quorum status
+#   * init-node quorum (for join gating)
+#
+# SAFETY GUARANTEES:
+# - No mutations
+# - No service restarts
+# - Safe to run repeatedly
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Cluster filesystem presence
+# -----------------------------------------------------------------------------
+
+- name: Check if corosync configuration exists
+  ansible.builtin.stat:
+    path: "{{ _proxmox_cluster_internal.corosync_conf }}"
+  register: proxmox_cluster_corosync_conf
+
+- name: Set clustered fact
+  ansible.builtin.set_fact:
+    proxmox_cluster_is_clustered: "{{ proxmox_cluster_corosync_conf.stat.exists | bool }}"
+
+# -----------------------------------------------------------------------------
+# pvecm-based discovery (best-effort, non-fatal)
+# -----------------------------------------------------------------------------
+
+- name: Query Proxmox cluster status (pvecm)
+  ansible.builtin.command: pvecm status
+  register: proxmox_cluster_status
+  changed_when: false
+  failed_when: false
+
+- name: Capture pvecm status output
+  ansible.builtin.set_fact:
+    proxmox_cluster_status_raw: "{{ proxmox_cluster_status.stdout | default('') }}"
+    proxmox_cluster_status_rc: "{{ proxmox_cluster_status.rc | default(1) }}"
+
+- name: Query Proxmox cluster nodes (pvecm)
+  ansible.builtin.command: pvecm nodes
+  register: proxmox_cluster_nodes
+  changed_when: false
+  failed_when: false
+
+- name: Capture pvecm nodes output
+  ansible.builtin.set_fact:
+    proxmox_cluster_nodes_raw: "{{ proxmox_cluster_nodes.stdout | default('') }}"
+    proxmox_cluster_nodes_rc: "{{ proxmox_cluster_nodes.rc | default(1) }}"
+
+# -----------------------------------------------------------------------------
+# API-based discovery (authoritative when available)
+# -----------------------------------------------------------------------------
+
+- name: Query cluster status via local Proxmox API
+  ansible.builtin.uri:
+    url: https://127.0.0.1:8006/api2/json/cluster/status
+    method: GET
+    validate_certs: false
+    return_content: true
+    status_code: [200, 401]
+  register: proxmox_cluster_api_status
+  failed_when: false
+  changed_when: false
+
+- name: Extract API cluster data
+  ansible.builtin.set_fact:
+    proxmox_cluster_api_data: >-
+      {{ proxmox_cluster_api_status.json.data
+         if proxmox_cluster_api_status.json is defined
+         else [] }}
+
+# -----------------------------------------------------------------------------
+# Derive cluster facts (API-first, pvecm fallback)
+# -----------------------------------------------------------------------------
+
+- name: Determine detected cluster name
+  ansible.builtin.set_fact:
+    proxmox_cluster_detected_name: >-
+      {{ (proxmox_cluster_api_data
+          | selectattr('type', 'equalto', 'cluster')
+          | map(attribute='name')
+          | list
+          | first)
+         | default('unknown') }}
+
+- name: Determine detected cluster nodes
+  ansible.builtin.set_fact:
+    proxmox_cluster_detected_nodes: >-
+      {{ proxmox_cluster_api_data
+          | selectattr('type', 'equalto', 'node')
+          | map(attribute='name')
+          | list
+          | default([]) }}
+
+- name: Determine quorum status (API, non-authoritative)
+  ansible.builtin.set_fact:
+    proxmox_cluster_quorum_api: >-
+      {{ (proxmox_cluster_api_data
+          | selectattr('type', 'equalto', 'cluster')
+          | map(attribute='quorate')
+          | list
+          | first)
+         | default(None) }}
+
+# -----------------------------------------------------------------------------
+# Reporting
+# -----------------------------------------------------------------------------
+
+- name: Display cluster discovery summary
+  ansible.builtin.debug:
+    msg:
+      - "Clustered: {{ proxmox_cluster_is_clustered }}"
+      - "Cluster name (API): {{ proxmox_cluster_detected_name }}"
+      - "Detected nodes (API): {{ proxmox_cluster_detected_nodes | default([]) }}"
+      - "Node count (API): {{ proxmox_cluster_detected_nodes | length }}"
+      - "Quorum (API, non-authoritative): {{ proxmox_cluster_quorum_api }}"
+      - "pvecm status rc: {{ proxmox_cluster_status_rc }}"
+      - "pvecm nodes rc: {{ proxmox_cluster_nodes_rc }}"
+
+# -----------------------------------------------------------------------------
+# Discovery complete
+# -----------------------------------------------------------------------------
+
+- name: Proxmox cluster discovery complete
+  ansible.builtin.debug:
+    msg: >
+      Proxmox cluster discovery completed successfully on {{ inventory_hostname }}.

@@ -1,0 +1,89 @@
+---
+# =============================================================================
+# proxmox-cluster — join
+# -----------------------------------------------------------------------------
+# Idempotent Proxmox cluster join logic.
+# Safely joins a node only if it is not already clustered.
+# =============================================================================
+
+- name: Assert this node is not the init node
+  ansible.builtin.assert:
+    that:
+      - not proxmox_cluster_is_init_node | bool
+    fail_msg: >
+      Node {{ inventory_hostname }} is the cluster init node.
+      Join logic must not run on the init node.
+
+# -----------------------------------------------------------------------------
+# Skip join entirely if node is already clustered
+# -----------------------------------------------------------------------------
+
+- name: Skip cluster join when node is already clustered
+  ansible.builtin.debug:
+    msg: >
+      Node {{ inventory_hostname }} is already a member of the Proxmox cluster.
+      Skipping join operation.
+  when: proxmox_cluster_is_clustered | bool
+
+# -----------------------------------------------------------------------------
+# Validate join parameters (only when joining)
+# -----------------------------------------------------------------------------
+
+- name: Assert join parameters are defined
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_join_address is defined
+      - proxmox_cluster_bind_address is defined
+      - proxmox_cluster_join_password is defined
+    fail_msg: >
+      Cluster join parameters are missing. Cannot join Proxmox cluster.
+  when: not proxmox_cluster_is_clustered | bool
+
+# -----------------------------------------------------------------------------
+# Perform cluster join
+# -----------------------------------------------------------------------------
+
+- name: Join Proxmox cluster with password
+  ansible.builtin.command: >
+    bash -c "echo {{ proxmox_cluster_join_password | quote }} |
+    pvecm add {{ proxmox_cluster_join_address }}
+    --link0 {{ proxmox_cluster_bind_address }}
+    --use_ssh"
+  register: proxmox_join
+  changed_when: proxmox_join.rc == 0
+  failed_when:
+    - proxmox_join.rc != 0
+    - "'already contains node' not in (proxmox_join.stderr | default(''))"
+  when: not proxmox_cluster_is_clustered | bool
+
+# -----------------------------------------------------------------------------
+# Post-join validation
+# -----------------------------------------------------------------------------
+
+- name: Wait for local corosync config
+  ansible.builtin.wait_for:
+    path: /etc/corosync/corosync.conf
+    timeout: 120
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Ensure corosync service is running
+  ansible.builtin.service:
+    name: corosync
+    state: started
+    enabled: true
+
+- name: Wait for this node to appear in init node membership
+  ansible.builtin.command: pvecm nodes
+  delegate_to: "{{ proxmox_cluster_init_node }}"
+  register: proxmox_nodes_now
+  retries: 30
+  delay: 5
+  until: >
+    inventory_hostname in proxmox_nodes_now.stdout or
+    ansible_host in proxmox_nodes_now.stdout
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Display authoritative cluster nodes
+  ansible.builtin.debug:
+    msg: "{{ proxmox_nodes_now.stdout }}"
+  when: not proxmox_cluster_is_clustered | bool

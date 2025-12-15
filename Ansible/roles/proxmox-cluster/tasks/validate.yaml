@@ -1,0 +1,207 @@
+---
+# =============================================================================
+# proxmox-cluster — validate
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Validate host suitability for Proxmox clustering
+# - Enforce explicit and safe cluster intent
+# - Derive canonical facts consumed by create/join/quorum/health
+#
+# Design principles:
+# - READ-ONLY (no mutations, no service restarts)
+# - Fail-fast on ambiguity or unsafe states
+# - Deterministic facts (no hidden defaults)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Baseline fact sanity
+# -----------------------------------------------------------------------------
+
+- name: Assert Ansible facts are available
+  ansible.builtin.assert:
+    that:
+      - ansible_facts is defined
+      - ansible_distribution is defined
+      - ansible_hostname is defined
+      - ansible_kernel is defined
+    fail_msg: >
+      Required Ansible facts are missing.
+      Ensure gather_facts: true is enabled.
+
+# -----------------------------------------------------------------------------
+# Cluster role determination
+# -----------------------------------------------------------------------------
+
+- name: Determine cluster role for this node
+  ansible.builtin.set_fact:
+    proxmox_is_bootstrap: "{{ inventory_hostname in groups.get('pve_bootstrap', []) }}"
+    proxmox_is_member: "{{ inventory_hostname in groups.get('pve_cluster_members', []) }}"
+
+- name: Assert cluster management is enabled
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_enabled | bool
+    fail_msg: >
+      Proxmox cluster role is disabled.
+      Set proxmox_cluster_enabled: true to proceed.
+
+# -----------------------------------------------------------------------------
+# Cluster identity validation
+# -----------------------------------------------------------------------------
+
+- name: Assert cluster name is defined
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_name is defined
+      - proxmox_cluster_name | length > 0
+    fail_msg: >
+      proxmox_cluster_name must be defined and non-empty.
+
+- name: Resolve cluster init node
+  ansible.builtin.set_fact:
+    proxmox_cluster_init_node: >-
+      {{ proxmox_cluster_init_node
+         | default(groups.get('pve_bootstrap', []) | first) }}
+  when:
+    - proxmox_cluster_enabled | bool
+
+- name: Assert cluster init node resolved
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_init_node is defined
+      - proxmox_cluster_init_node | length > 0
+    fail_msg: >
+      Failed to determine Proxmox cluster init node.
+      Ensure exactly one host exists in the pve_bootstrap group
+      or explicitly set proxmox_cluster_init_node.
+
+# -----------------------------------------------------------------------------
+# Platform validation
+# -----------------------------------------------------------------------------
+
+- name: Assert system is Debian-based Proxmox VE
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Debian"
+      - "'pve' in ansible_kernel"
+    fail_msg: >
+      Proxmox VE requires Debian with a PVE kernel.
+      Detected: {{ ansible_distribution }} / {{ ansible_kernel }}
+
+- name: Assert host is not a container
+  ansible.builtin.assert:
+    that:
+      - ansible_virtualization_type != "container"
+    fail_msg: >
+      Proxmox clustering is not supported inside containers (LXC / Docker).
+
+- name: Warn if running Proxmox inside a VM (nested)
+  ansible.builtin.debug:
+    msg: >
+      WARNING: {{ inventory_hostname }} is running Proxmox inside a VM
+      (ansible_virtualization_role={{ ansible_virtualization_role }}).
+      This is supported but may limit performance or passthrough features.
+  when:
+    - ansible_virtualization_role | default('') == "guest"
+
+- name: Check Proxmox cluster filesystem
+  ansible.builtin.stat:
+    path: /etc/pve
+  register: proxmox_pve_fs
+
+- name: Assert host is Proxmox VE
+  ansible.builtin.assert:
+    that:
+      - proxmox_pve_fs.stat.exists
+      - proxmox_pve_fs.stat.isdir
+    fail_msg: >
+      /etc/pve not found.
+      This host does not appear to be a valid Proxmox VE node.
+
+# -----------------------------------------------------------------------------
+# Required tooling checks
+# -----------------------------------------------------------------------------
+
+- name: Check for pvecm binary
+  ansible.builtin.command: which pvecm
+  register: pvecm_check
+  changed_when: false
+  failed_when: false
+
+- name: Assert pvecm is available
+  ansible.builtin.assert:
+    that:
+      - pvecm_check.rc == 0
+    fail_msg: >
+      pvecm command not found.
+      Proxmox cluster tooling is missing or broken.
+
+# -----------------------------------------------------------------------------
+# Cluster membership detection
+# -----------------------------------------------------------------------------
+
+- name: Check for existing corosync configuration
+  ansible.builtin.stat:
+    path: /etc/corosync/corosync.conf
+  register: corosync_conf
+
+- name: Derive cluster membership facts
+  ansible.builtin.set_fact:
+    proxmox_cluster_is_clustered: "{{ corosync_conf.stat.exists | default(false) }}"
+    proxmox_cluster_is_init_node: "{{ inventory_hostname == proxmox_cluster_init_node }}"
+
+- name: Skip cluster join on already-clustered nodes
+  ansible.builtin.debug:
+    msg: >
+      Node {{ inventory_hostname }} is already part of the Proxmox cluster.
+      Join operation will be skipped.
+  when: proxmox_cluster_is_clustered | bool
+
+
+# -----------------------------------------------------------------------------
+# Network prerequisites
+# -----------------------------------------------------------------------------
+
+- name: Assert cluster network interface is defined
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_network_interface is defined
+      - proxmox_cluster_network_interface | length > 0
+    fail_msg: >
+      proxmox_cluster_network_interface must be defined
+      (e.g. vmbr0, eno1, bond0).
+
+- name: Assert cluster bind address is defined
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_bind_address is defined
+      - proxmox_cluster_bind_address | length > 0
+    fail_msg: >
+      proxmox_cluster_bind_address must be defined
+      (IP address used by corosync).
+
+# -----------------------------------------------------------------------------
+# Validation summary
+# -----------------------------------------------------------------------------
+
+- name: Display cluster validation summary
+  ansible.builtin.debug:
+    msg:
+      - "Cluster name: {{ proxmox_cluster_name }}"
+      - "Init node: {{ proxmox_cluster_init_node }}"
+      - "This node: {{ inventory_hostname }}"
+      - "Is init node: {{ proxmox_cluster_is_init_node }}"
+      - "Already clustered: {{ proxmox_cluster_is_clustered }}"
+      - "Cluster interface: {{ proxmox_cluster_network_interface }}"
+      - "Cluster bind address: {{ proxmox_cluster_bind_address }}"
+      - "Cluster mode: {{ proxmox_cluster_mode | default('expand') }}"
+
+# -----------------------------------------------------------------------------
+# Validation complete
+# -----------------------------------------------------------------------------
+
+- name: Proxmox cluster validation complete
+  ansible.builtin.debug:
+    msg: >
+      Cluster validation passed on {{ inventory_hostname }}.
+      Safe to proceed with cluster operations.

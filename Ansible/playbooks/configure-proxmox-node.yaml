@@ -3,22 +3,31 @@
 # Playbook: configure-proxmox-node.yaml
 # -----------------------------------------------------------------------------
 # Purpose:
-#   Apply the proxmox-node role to one or more Proxmox VE hosts.
+#   Apply baseline configuration AND cluster orchestration to Proxmox VE nodes
+#   in a safe, deterministic order.
 #
-# Usage:
-#   ansible-playbook playbooks/configure-proxmox-node.yaml
-#   ansible-playbook playbooks/configure-proxmox-node.yaml -l pve-01
-#
-# Notes:
-#   - Idempotent
-#   - Safe before or after cluster join
-#   - Does NOT force reboot
+# Design guarantees:
+#   - Node hardening always runs first
+#   - Cluster bootstrap happens once
+#   - Join operations are serialized (REQUIRED by Proxmox)
+#   - Safe to re-run at any point
 # =============================================================================
 
-- name: Configure Proxmox VE node
-  hosts: proxmox.pve_nodes
+- name: Configure Proxmox VE nodes and cluster
+  hosts: proxmox
   become: true
   gather_facts: true
+
+  # ---------------------------------------------------------------------------
+  # CRITICAL:
+  # Proxmox cluster join MUST be serialized
+  # ---------------------------------------------------------------------------
+  serial: 1
+
+  vars_prompt:
+    - name: "proxmox_cluster_join_password"
+      prompt: "Enter the Proxmox cluster join password"
+      private: true
 
   vars:
     proxmox_node_playbook: true
@@ -26,26 +35,33 @@
   vars_files:
     - ../group_vars/all/chrony.yaml
     - ../group_vars/proxmox.yaml
+    - ../group_vars/proxmox/cluster.yaml
 
   roles:
     # -------------------------------------------------------------------------
-    # Proxmox node baseline configuration
+    # Phase 1: Proxmox node baseline (SAFE, cluster-agnostic)
     # -------------------------------------------------------------------------
     - role: proxmox-node
-      tags: [proxmox, node]
+      tags: [proxmox, node, baseline]
+
+    # -------------------------------------------------------------------------
+    # Phase 2: Proxmox cluster lifecycle
+    # -------------------------------------------------------------------------
+    - role: proxmox-cluster
+      tags: [proxmox, cluster]
 
   post_tasks:
     # -------------------------------------------------------------------------
     # Completion / advisory
     # -------------------------------------------------------------------------
 
-    - name: Reboot advisory
+    - name: Display reboot advisory
       ansible.builtin.debug:
         msg: >
-          A reboot may be required if kernel, bootloader, or IOMMU settings
-          were modified. Review task output before rebooting.
+          A reboot may be required if kernel, bootloader, IOMMU, or sysctl
+          parameters were modified. Review task output before rebooting.
 
     - name: Proxmox node configuration complete
       ansible.builtin.debug:
         msg: >
-          Proxmox node {{ inventory_hostname }} configured successfully.
+          Proxmox node {{ inventory_hostname }} successfully configured.

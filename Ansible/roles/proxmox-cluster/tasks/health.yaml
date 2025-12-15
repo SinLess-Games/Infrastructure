@@ -1,0 +1,154 @@
+---
+# =============================================================================
+# proxmox-cluster — health
+# -----------------------------------------------------------------------------
+# Validate overall Proxmox cluster health (READ-ONLY)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Cluster status (pvecm)
+# -----------------------------------------------------------------------------
+
+- name: Retrieve Proxmox cluster status
+  ansible.builtin.command: pvecm status
+  register: proxmox_cluster_status
+  changed_when: false
+  failed_when: false
+
+- name: Assert pvecm status command succeeded
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_status.rc == 0
+    fail_msg: |
+      Failed to retrieve pvecm status on {{ inventory_hostname }}:
+      {{ proxmox_cluster_status.stderr | default('<no stderr>') }}
+
+# -----------------------------------------------------------------------------
+# Quorum validation (from pvecm output)
+# -----------------------------------------------------------------------------
+
+- name: Derive quorum state from pvecm output (authoritative)
+  ansible.builtin.set_fact:
+    proxmox_cluster_quorate: >-
+      {{
+        (proxmox_cluster_status.stdout | default(''))
+        | regex_search('(?m)^\\s*Quorate:\\s+Yes\\b', ignorecase=True)
+        is not none
+      }}
+
+- name: Normalize quorum fact
+  ansible.builtin.set_fact:
+    proxmox_cluster_quorate: "{{ proxmox_cluster_quorate | default(false) }}"
+
+- name: Assert cluster has quorum according to pvecm
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_quorate | bool
+    fail_msg: |
+      Proxmox cluster is NOT quorate according to pvecm.
+      Full status:
+      {{ proxmox_cluster_status.stdout }}
+
+
+# -----------------------------------------------------------------------------
+# Node membership
+# -----------------------------------------------------------------------------
+
+- name: Retrieve cluster node list
+  ansible.builtin.command: pvecm nodes
+  register: proxmox_cluster_nodes
+  changed_when: false
+  failed_when: false
+
+- name: Assert pvecm nodes command succeeded
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_nodes.rc == 0
+    fail_msg: |
+      Failed to retrieve cluster node list on {{ inventory_hostname }}:
+      {{ proxmox_cluster_nodes.stderr | default('<no stderr>') }}
+
+- name: Extract cluster node names
+  ansible.builtin.set_fact:
+    proxmox_cluster_node_names: >-
+      {{
+        proxmox_cluster_nodes.stdout_lines
+        | select('match', '^[0-9a-fx]+\\s')
+        | map('regex_replace', '^[0-9a-fx]+\\s+[^\\s]+\\s+([^\\s]+).*', '\\1')
+        | list
+      }}
+
+- name: Assert this node appears in membership
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in proxmox_cluster_node_names
+    fail_msg: |
+      This node ({{ inventory_hostname }}) is not in the cluster membership:
+      {{ proxmox_cluster_node_names }}
+
+# -----------------------------------------------------------------------------
+# Corosync health
+# -----------------------------------------------------------------------------
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Assert corosync service is running
+  ansible.builtin.assert:
+    that:
+      - "'corosync.service' in ansible_facts.services"
+      - ansible_facts.services['corosync.service'].state == 'running'
+    fail_msg: >
+      Corosync service is not running on {{ inventory_hostname }}.
+
+# -----------------------------------------------------------------------------
+# Cluster filesystem health
+# -----------------------------------------------------------------------------
+
+- name: Check that /etc/pve is a mountpoint
+  ansible.builtin.command:
+    cmd: mountpoint -q /etc/pve
+  register: proxmox_pve_mount
+  changed_when: false
+  failed_when: false
+
+- name: Assert /etc/pve is mounted
+  ansible.builtin.assert:
+    that:
+      - proxmox_pve_mount.rc == 0
+    fail_msg: >
+      /etc/pve is not mounted; the cluster filesystem is unhealthy.
+
+# -----------------------------------------------------------------------------
+# Optional expected node count
+# -----------------------------------------------------------------------------
+
+- name: Assert expected cluster size if defined
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_node_names | length == proxmox_cluster_expected_nodes
+    fail_msg: >
+      Cluster node count mismatch.
+      Expected {{ proxmox_cluster_expected_nodes }},
+      got {{ proxmox_cluster_node_names | length }}.
+  when:
+    - proxmox_cluster_expected_nodes is defined
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Display cluster health summary
+  ansible.builtin.debug:
+    msg:
+      - "Cluster quorate        : {{ proxmox_cluster_quorate }}"
+      - "Cluster members       : {{ proxmox_cluster_node_names }}"
+      - "/etc/pve mounted      : {{ proxmox_pve_mount.rc == 0 }}"
+      - "Corosync running      : {{ ansible_facts.services['corosync.service'].state }}"
+      - "Raw pvecm status      :"
+      - "{{ proxmox_cluster_status.stdout | indent(2) }}"
+
+- name: Health check complete
+  ansible.builtin.debug:
+    msg: >
+      Proxmox cluster health check passed on {{ inventory_hostname }}.

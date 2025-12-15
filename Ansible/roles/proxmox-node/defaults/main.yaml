@@ -11,3 +11,10 @@ proxmox_node:
   enable_api_users: true
 
   timezone: "UTC"
+
+ssh_output_root: "{{ ssh_repo_root }}/.outputs"
+ssh_output_base: "{{ ssh_output_root }}/ssh"
+ssh_ca_output_dir: "{{ ssh_output_root }}/ssh-ca"
+
+# Absolute path to repo root (git-based, execution-safe)
+ssh_repo_root: "{{ lookup('ansible.builtin.pipe', 'git rev-parse --show-toplevel') | trim }}"

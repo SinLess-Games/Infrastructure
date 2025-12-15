@@ -3,18 +3,64 @@
 # proxmox-node — security
 # -----------------------------------------------------------------------------
 # Baseline security hardening for Proxmox VE nodes
-#
-# Scope (intentional, non-destructive):
-# - SSH hardening (minimal, Proxmox-safe)
-# - Firewall baseline (iptables/nftables coexistence aware)
-# - Kernel/sysctl safety defaults
-# - Disable unsafe legacy services
-#
-# Explicitly avoids:
-# - Locking out console / root access
-# - Aggressive CIS hardening
-# - Breaking cluster, Ceph, or Corosync traffic
+# with automatic SSH key deployment for cluster joins.
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# Root SSH keys deployment (from .outputs/ssh/root)
+# -----------------------------------------------------------------------------
+
+- name: Ensure root SSH directory exists
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Copy all root SSH materials to node
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/root/.ssh/{{ item | basename }}"
+    owner: root
+    group: root
+    mode: >-
+      {{ '0600'
+         if (item | regex_search('id_.*$') and not item | regex_search('\\.pub$'))
+         else '0644'
+      }}
+  with_fileglob:
+    - "{{ ssh_output_base }}/root/*"
+
+- name: Ensure root authorized_keys contains root public key
+  ansible.builtin.authorized_key:
+    user: root
+    state: present
+    key: "{{ lookup('file', ssh_output_base + '/root/id_ed25519.pub') }}"
+
+- name: Configure root SSH client defaults for cluster operations
+  ansible.builtin.blockinfile:
+    path: /root/.ssh/config
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+    marker: "# {mark} ANSIBLE PROXMOX SSH CONFIG"
+    block: |
+      Host *
+        IdentityFile /root/.ssh/id_ed25519
+        StrictHostKeyChecking no
+        UserKnownHostsFile /root/.ssh/known_hosts
+        LogLevel ERROR
+
+- name: Add cluster init node to known_hosts
+  ansible.builtin.known_hosts:
+    path: /root/.ssh/known_hosts
+    name: "{{ proxmox_cluster_init_node }}"
+    key: "{{ lookup('pipe', 'ssh-keyscan -p 22 ' ~ proxmox_cluster_init_node) }}"
+  when:
+    - proxmox_cluster_init_node is defined
+    - proxmox_cluster_init_node | length > 0
 
 # -----------------------------------------------------------------------------
 # SSH hardening (safe defaults for Proxmox)
@@ -32,7 +78,6 @@
     line: "{{ item.key }} {{ item.value }}"
     state: present
     create: false
-    backrefs: false
   loop:
     - { key: "Protocol", value: "2" }
     - { key: "PermitRootLogin", value: "prohibit-password" }
@@ -46,11 +91,6 @@
 
 # -----------------------------------------------------------------------------
 # Firewall baseline (do not enforce policy here)
-# -----------------------------------------------------------------------------
-# NOTE:
-# - Proxmox uses both iptables/nftables depending on version
-# - Actual rule enforcement should be done in a dedicated firewall role
-# - Here we only ensure tooling exists
 # -----------------------------------------------------------------------------
 
 - name: Ensure firewall tooling is installed
@@ -70,8 +110,6 @@
 # -----------------------------------------------------------------------------
 # Kernel / sysctl safety settings
 # -----------------------------------------------------------------------------
-# Minimal hardening that does not interfere with Proxmox or Ceph
-# -----------------------------------------------------------------------------
 
 - name: Apply kernel network hardening sysctls
   ansible.builtin.sysctl:
@@ -86,26 +124,30 @@
     - { name: "net.ipv4.conf.default.accept_redirects", value: "0" }
     - { name: "net.ipv4.conf.all.send_redirects", value: "0" }
     - { name: "net.ipv4.conf.default.send_redirects", value: "0" }
-    - { name: "net.ipv4.conf.all.rp_filter", value: "1" }
-    - { name: "net.ipv4.conf.default.rp_filter", value: "1" }
+    - { name: "net.ipv4.conf.all.rp_filter", value: "2" }   # Loose mode for corosync
+    - { name: "net.ipv4.conf.default.rp_filter", value: "2" }
     - { name: "kernel.kptr_restrict", value: "2" }
     - { name: "kernel.dmesg_restrict", value: "1" }
 
 # -----------------------------------------------------------------------------
-# Disable insecure legacy services
+# Disable insecure legacy services (only if they exist)
 # -----------------------------------------------------------------------------
 
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
 - name: Disable legacy/insecure services if present
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ item }}"
-    enabled: false
     state: stopped
+    enabled: false
+    masked: true
   loop:
     - telnet
     - rsh
     - rlogin
     - rexec
-  ignore_errors: true
+  when: item in ansible_facts.services
 
 # -----------------------------------------------------------------------------
 # APT security hygiene
@@ -129,7 +171,3 @@
 - name: Proxmox security baseline applied
   ansible.builtin.debug:
     msg: "Proxmox node security baseline successfully applied."
-
-# =============================================================================
-# Handlers
-# =============================================================================

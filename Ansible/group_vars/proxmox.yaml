@@ -1,2 +1,22 @@
 proxmox_node:
   licensed: false
+
+# =============================================================================
+# Proxmox Cluster Control
+# =============================================================================
+
+proxmox_cluster_enabled: true
+proxmox_cluster_name: Sinless-Games
+proxmox_cluster_bootstrap: true
+
+# =============================================================================
+# Corosync / Cluster Networking
+# =============================================================================
+
+# Proxmox management bridge
+proxmox_cluster_network_interface: vmbr0
+
+# Bind corosync to the node's management IP
+proxmox_cluster_bind_address: "{{ ansible_host }}"
+
+proxmox_cluster_join_address: 10.10.10.5

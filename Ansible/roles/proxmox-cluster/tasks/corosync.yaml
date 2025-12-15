@@ -1,0 +1,159 @@
+---
+# =============================================================================
+# proxmox-cluster — corosync validation
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Validate Corosync + cluster intent before any mutation
+# - Prevent split-brain, accidental rejoin, or unsafe bootstrap
+# - Ensure host is a legitimate Proxmox VE node
+#
+# IMPORTANT:
+# - This file performs NO mutations
+# - This file MUST be safe to re-run
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Ansible fact validation
+# -----------------------------------------------------------------------------
+
+- name: Assert required Ansible facts are available
+  ansible.builtin.assert:
+    that:
+      - ansible_facts is defined
+      - ansible_distribution is defined
+      - ansible_hostname is defined
+      - ansible_kernel is defined
+    fail_msg: >
+      proxmox-cluster: Required Ansible facts are missing.
+      Ensure gather_facts: true is enabled.
+
+# -----------------------------------------------------------------------------
+# Platform validation (hard gate)
+# -----------------------------------------------------------------------------
+
+- name: Assert system is Debian-based Proxmox VE
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Debian"
+      - "'pve' in ansible_kernel"
+    fail_msg: >
+      proxmox-cluster may only run on Proxmox VE nodes.
+      Detected: {{ ansible_distribution }} / kernel {{ ansible_kernel }}
+
+- name: Check for Proxmox cluster filesystem
+  ansible.builtin.stat:
+    path: "{{ _proxmox_cluster_internal.pve_cluster_fs }}"
+  register: proxmox_cluster_fs
+
+- name: Assert Proxmox cluster filesystem exists
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_fs.stat.exists
+      - proxmox_cluster_fs.stat.isdir
+    fail_msg: >
+      /etc/pve is missing.
+      This host does not appear to be a valid Proxmox VE node.
+
+# -----------------------------------------------------------------------------
+# Cluster intent validation
+# -----------------------------------------------------------------------------
+
+- name: Assert proxmox_cluster configuration is defined
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster is defined
+      - proxmox_cluster.name is defined
+      - proxmox_cluster.name | length > 0
+    fail_msg: >
+      proxmox_cluster.name must be explicitly defined.
+
+- name: Assert expected_nodes is valid
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster.expected_nodes is defined
+      - proxmox_cluster.expected_nodes | int >= 1
+    fail_msg: >
+      proxmox_cluster.expected_nodes must be an integer >= 1.
+
+- name: Prevent accidental single-node cluster creation
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster.expected_nodes | int > 1
+        or proxmox_cluster.quorum.allow_single_node | default(false) | bool
+    fail_msg: >
+      Single-node clusters are DISALLOWED by default.
+      Set proxmox_cluster.quorum.allow_single_node=true to override.
+
+# -----------------------------------------------------------------------------
+# Corosync configuration validation
+# -----------------------------------------------------------------------------
+
+- name: Validate corosync transport
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster.corosync.transport is defined
+      - proxmox_cluster.corosync.transport in ['knet', 'udp']
+    fail_msg: >
+      Invalid corosync transport:
+      {{ proxmox_cluster.corosync.transport | default('undefined') }}
+
+- name: Require bindnetaddr for multi-node clusters
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster.expected_nodes | int == 1
+        or proxmox_cluster.corosync.bindnetaddr is defined
+    fail_msg: >
+      corosync.bindnetaddr must be defined for multi-node clusters.
+
+# -----------------------------------------------------------------------------
+# Safety controls (rejoin & quorum)
+# -----------------------------------------------------------------------------
+
+- name: Validate allow_rejoin is explicitly boolean
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster.allow_rejoin | default(false) | type_debug == 'bool'
+    fail_msg: >
+      proxmox_cluster.allow_rejoin must be a boolean if defined.
+
+- name: Validate quorum enforcement setting
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster.enforce_quorum | default(true) | type_debug == 'bool'
+    fail_msg: >
+      proxmox_cluster.enforce_quorum must be true or false.
+
+# -----------------------------------------------------------------------------
+# Runtime sanity checks (non-destructive)
+# -----------------------------------------------------------------------------
+
+- name: Check for existing corosync configuration
+  ansible.builtin.stat:
+    path: "{{ _proxmox_cluster_internal.corosync_conf }}"
+  register: corosync_conf
+
+- name: Warn if corosync.conf already exists
+  ansible.builtin.debug:
+    msg: >
+      WARNING: Existing corosync.conf detected on {{ inventory_hostname }}.
+      This host may already be part of a cluster.
+  when: corosync_conf.stat.exists
+
+- name: Enforce rejoin protection
+  ansible.builtin.assert:
+    that:
+      - not corosync_conf.stat.exists
+        or proxmox_cluster.allow_rejoin | default(false) | bool
+    fail_msg: >
+      corosync.conf already exists.
+      Refusing to proceed without proxmox_cluster.allow_rejoin=true.
+
+# -----------------------------------------------------------------------------
+# Validation complete
+# -----------------------------------------------------------------------------
+
+- name: Proxmox corosync validation complete
+  ansible.builtin.debug:
+    msg: >
+      Proxmox corosync validation passed on {{ inventory_hostname }}.
+      Safe to proceed with cluster operations.

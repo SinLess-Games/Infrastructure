@@ -1,0 +1,121 @@
+---
+# =============================================================================
+# proxmox-cluster — main
+# -----------------------------------------------------------------------------
+# Orchestrates the Proxmox cluster lifecycle in a SAFE, deterministic order.
+#
+# Principles:
+# - Validation is always read-only and repeatable
+# - Cluster creation is strictly single-shot (bootstrap node only)
+# - Join logic is explicit, guarded, and mode-aware
+# - Discovery refreshes facts before any dependent phase
+# - Quorum and health checks never mutate state
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Phase 0: Guardrails
+# -----------------------------------------------------------------------------
+
+- name: Assert proxmox cluster role is enabled
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_enabled | bool
+    fail_msg: >
+      Proxmox cluster role is disabled.
+      Set proxmox_cluster_enabled: true to proceed.
+
+# -----------------------------------------------------------------------------
+# Phase 1: Pre-flight validation (NO state changes)
+# -----------------------------------------------------------------------------
+
+- name: Pre-flight validation (inputs, platform, intent)
+  ansible.builtin.import_tasks: validate.yaml
+
+# -----------------------------------------------------------------------------
+# Phase 2: Cluster creation (bootstrap node only, create mode)
+# -----------------------------------------------------------------------------
+# - Runs exactly once
+# - Never runs on already-clustered nodes
+# -----------------------------------------------------------------------------
+
+- name: Create Proxmox cluster (bootstrap node only)
+  ansible.builtin.import_tasks: create.yaml
+  when:
+    - proxmox_cluster_mode | default('expand') == 'create'
+    - proxmox_is_bootstrap | bool
+    - not proxmox_cluster_is_clustered | bool
+
+# -----------------------------------------------------------------------------
+# Phase 3: Discover cluster state (authoritative refresh)
+# -----------------------------------------------------------------------------
+# - Must run after create to populate correct facts
+# - Safe to run on all nodes
+# -----------------------------------------------------------------------------
+
+- name: Discover current cluster state
+  ansible.builtin.import_tasks: discover.yaml
+
+# -----------------------------------------------------------------------------
+# Phase 4: Re-validate using discovered facts
+# -----------------------------------------------------------------------------
+# - Ensures join/quorum logic operates on current reality
+# - Still read-only
+# -----------------------------------------------------------------------------
+
+- name: Re-validate cluster state with discovered facts
+  ansible.builtin.import_tasks: validate.yaml
+
+# -----------------------------------------------------------------------------
+# Phase 5: Join cluster (non-init nodes only)
+# -----------------------------------------------------------------------------
+# - Requires init node to already be clustered
+# - Explicitly blocked on init node
+# -----------------------------------------------------------------------------
+
+- name: Join Proxmox cluster (non-init nodes)
+  ansible.builtin.import_tasks: join.yaml
+  when:
+    - proxmox_cluster_mode | default('expand') in ['create', 'expand']
+    - not proxmox_cluster_is_init_node | bool
+    - not proxmox_cluster_is_clustered | bool
+    - hostvars[proxmox_cluster_init_node].proxmox_cluster_is_clustered
+        | default(false) | bool
+
+# # -----------------------------------------------------------------------------
+# # Phase 6: Quorum validation
+# # -----------------------------------------------------------------------------
+# # - Mode-aware (1-node, 2-node, 3+ node clusters)
+# # - Never forces quorum changes
+# # -----------------------------------------------------------------------------
+
+# - name: Validate cluster quorum
+#   ansible.builtin.import_tasks: quorum.yaml
+#   when:
+#     - proxmox_cluster_enabled | bool
+#     - proxmox_cluster_is_clustered | bool
+
+# # -----------------------------------------------------------------------------
+# # Phase 7: Cluster health validation
+# # -----------------------------------------------------------------------------
+# # - Read-only diagnostics
+# # - Surfaces actionable failures
+# # -----------------------------------------------------------------------------
+
+# - name: Validate cluster health
+#   import_tasks: health.yaml
+#   when:
+#     - proxmox_cluster_enabled | bool
+#     - proxmox_cluster_is_clustered | bool
+#     - proxmox_cluster_mode != "create"
+
+
+# # -----------------------------------------------------------------------------
+# # Completion marker
+# # -----------------------------------------------------------------------------
+
+# - name: Proxmox cluster orchestration complete
+#   ansible.builtin.debug:
+#     msg: >
+#       Proxmox cluster role completed successfully on {{ inventory_hostname }}.
+#       Mode={{ proxmox_cluster_mode | default('expand') }},
+#       Clustered={{ proxmox_cluster_is_clustered }}.
