@@ -50,6 +50,12 @@
     - role: proxmox-cluster
       tags: [proxmox, cluster]
 
+    # -------------------------------------------------------------------------
+    # Phase 3: Proxmox hardware inventory collection
+    # -------------------------------------------------------------------------
+    - role: proxmox-hardware
+      tags: [proxmox, hardware, inventory]
+
   post_tasks:
     # -------------------------------------------------------------------------
     # Completion / advisory

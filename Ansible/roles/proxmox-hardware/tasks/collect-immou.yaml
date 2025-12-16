@@ -1,0 +1,79 @@
+---
+# Ansible/roles/proxmox-hardware/tasks/collect-immou.yaml
+# Collect IOMMU, virtualization, and passthrough readiness data
+# Raw output is authoritative and written to disk for future analysis
+
+- name: Collect CPU virtualization support
+  ansible.builtin.command: lscpu
+  register: immou_lscpu
+  changed_when: false
+
+- name: Collect kernel command line
+  ansible.builtin.command: cat /proc/cmdline
+  register: immou_cmdline
+  changed_when: false
+
+- name: Collect IOMMU groups (if enabled)
+  ansible.builtin.shell: |
+    if [ -d /sys/kernel/iommu_groups ]; then
+      find /sys/kernel/iommu_groups -type l
+    else
+      echo "IOMMU groups directory not present"
+    fi
+  args:
+    executable: /bin/bash
+  register: immou_groups
+  changed_when: false
+  become: true
+
+- name: Collect dmesg IOMMU messages
+  ansible.builtin.shell: |
+    dmesg | grep -Ei 'iommu|vt-d|amd-v|viommu' || true
+  args:
+    executable: /bin/bash
+  register: immou_dmesg
+  changed_when: false
+  become: true
+
+- name: Write IOMMU raw output
+  ansible.builtin.copy:
+    dest: "{{ proxmox_hardware_node_dir }}/raw/iommu.txt"
+    mode: "0644"
+    content: |
+      ===== lscpu =====
+      {{ immou_lscpu.stdout }}
+
+      ===== /proc/cmdline =====
+      {{ immou_cmdline.stdout }}
+
+      ===== IOMMU Groups =====
+      {{ immou_groups.stdout }}
+
+      ===== dmesg (IOMMU / Virtualization) =====
+      {{ immou_dmesg.stdout }}
+  delegate_to: localhost
+
+- name: Derive IOMMU capability summary
+  ansible.builtin.set_fact:
+    firmware: "{{ firmware | default({}) }}"
+    immou:
+      cpu_virtualization: >-
+        {{
+          ('vmx' in immou_lscpu.stdout)
+          or ('svm' in immou_lscpu.stdout)
+        }}
+      iommu_kernel_enabled: >-
+        {{
+          ('intel_iommu=on' in immou_cmdline.stdout)
+          or ('amd_iommu=on' in immou_cmdline.stdout)
+        }}
+      iommu_groups_present: >-
+        {{
+          immou_groups.stdout is not search('not present')
+        }}
+      detected_vendor: >-
+        {{
+          'intel' if 'vmx' in immou_lscpu.stdout
+          else 'amd' if 'svm' in immou_lscpu.stdout
+          else 'unknown'
+        }}

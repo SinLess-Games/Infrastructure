@@ -1,0 +1,77 @@
+---
+# Ansible/roles/proxmox-hardware/tasks/collect-storage.yaml
+# Collect block devices, filesystems, controllers, and SMART capability
+# Raw output is preserved for audits, Ceph planning, and failure analysis
+
+- name: Collect block device topology (lsblk JSON)
+  ansible.builtin.command: >
+    lsblk -o NAME,KNAME,SIZE,TYPE,MODEL,SERIAL,ROTA,TRAN,WWN,MOUNTPOINT,FSTYPE -J
+  register: storage_lsblk
+  changed_when: false
+
+- name: Collect filesystem usage
+  ansible.builtin.command: df -hT
+  register: storage_df
+  changed_when: false
+
+- name: Collect PCI storage controllers
+  ansible.builtin.shell: |
+    lspci -nn | grep -Ei 'sata|sas|scsi|nvme|raid' || true
+  args:
+    executable: /bin/bash
+  register: storage_pci
+  changed_when: false
+
+- name: Collect multipath status (if present)
+  ansible.builtin.shell: |
+    if command -v multipath >/dev/null 2>&1; then
+      multipath -ll
+    else
+      echo "multipath not installed"
+    fi
+  args:
+    executable: /bin/bash
+  register: storage_multipath
+  changed_when: false
+  become: true
+
+- name: Collect SMART capability (non-invasive)
+  ansible.builtin.shell: |
+    for d in $(lsblk -ndo NAME,TYPE | awk '$2=="disk"{print $1}'); do
+      echo "=== /dev/$d ==="
+      if command -v smartctl >/dev/null 2>&1; then
+        smartctl -i /dev/$d || true
+      else
+        echo "smartctl not installed"
+      fi
+    done
+  args:
+    executable: /bin/bash
+  register: storage_smart
+  changed_when: false
+  become: true
+
+- name: Write storage raw output
+  ansible.builtin.copy:
+    dest: "{{ proxmox_hardware_node_dir }}/raw/storage.txt"
+    mode: "0644"
+    content: |
+      ===== lsblk (JSON) =====
+      {{ storage_lsblk.stdout }}
+
+      ===== df -hT =====
+      {{ storage_df.stdout }}
+
+      ===== PCI Controllers =====
+      {{ storage_pci.stdout }}
+
+      ===== multipath =====
+      {{ storage_multipath.stdout }}
+
+      ===== SMART =====
+      {{ storage_smart.stdout }}
+  delegate_to: localhost
+
+- name: Parse storage summary facts
+  ansible.builtin.set_fact:
+    storage: "{{ (storage_lsblk.stdout | from_json).blockdevices }}"

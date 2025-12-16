@@ -1,0 +1,91 @@
+---
+# Proxmox hardware inventory role
+# Collects hardware information from each node and stores it locally
+# under .outputs/ssh/<hostname>/
+# This role is READ-ONLY on the Proxmox node
+
+# -------------------------------------------------------------------
+# Sanity checks
+# -------------------------------------------------------------------
+
+- name: Validate required Ansible facts
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname is defined
+    fail_msg: >
+      proxmox-hardware role requires inventory_hostname to be defined.
+
+# -------------------------------------------------------------------
+# Define controller-side base paths (SELF-CONTAINED)
+# -------------------------------------------------------------------
+
+- name: Resolve repository root on controller
+  ansible.builtin.set_fact:
+    proxmox_hardware_repo_root: >-
+      {{ lookup('ansible.builtin.pipe', 'git rev-parse --show-toplevel') | trim }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Define Proxmox hardware output base directory
+  ansible.builtin.set_fact:
+    proxmox_hardware_output_base: >-
+      {{ proxmox_hardware_output_base }}
+  delegate_to: localhost
+  run_once: true
+
+# -------------------------------------------------------------------
+# Determine node identity
+# -------------------------------------------------------------------
+
+- name: Determine canonical node name
+  ansible.builtin.set_fact:
+    proxmox_hardware_node_name: >-
+      {{ ansible_hostname | default(inventory_hostname) | trim }}
+
+- name: Define Proxmox hardware node directory
+  ansible.builtin.set_fact:
+    proxmox_hardware_node_dir: >-
+      {{ proxmox_hardware_output_base }}/{{ proxmox_hardware_node_name }}
+
+# -------------------------------------------------------------------
+# Ensure directory structure exists (controller-side)
+# -------------------------------------------------------------------
+
+- name: Ensure hardware output directories exist
+  ansible.builtin.file:
+    path: "{{ proxmox_hardware_node_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - raw
+    - parsed
+    - summary
+  delegate_to: localhost
+  run_once: false
+
+
+# -------------------------------------------------------------------
+# Hardware collectors (node-side, read-only)
+# -------------------------------------------------------------------
+
+- name: Collect CPU hardware
+  ansible.builtin.import_tasks: collect-cpu.yaml
+
+- name: Collect memory hardware
+  ansible.builtin.import_tasks: collect-memory.yaml
+
+- name: Collect network hardware
+  ansible.builtin.import_tasks: collect-network.yaml
+
+- name: Collect storage hardware
+  ansible.builtin.import_tasks: collect-storage.yaml
+
+- name: Collect IOMMU / virtualization capability
+  ansible.builtin.import_tasks: collect-immou.yaml
+
+# -------------------------------------------------------------------
+# Summary generation (controller-side)
+# -------------------------------------------------------------------
+
+- name: Generate hardware summary
+  ansible.builtin.import_tasks: create-summary.yaml

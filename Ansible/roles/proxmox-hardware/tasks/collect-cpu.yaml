@@ -1,0 +1,119 @@
+---
+# Hardened CPU topology and capability collection for Proxmox nodes
+# JSON-based, locale-safe, NUMA-safe, idempotent
+
+# -------------------------------------------------------------------
+# Collection (node-side)
+# -------------------------------------------------------------------
+
+- name: Collect CPU information (lscpu JSON)
+  ansible.builtin.command: lscpu -J
+  register: cpu_lscpu_json
+  changed_when: false
+
+- name: Collect NUMA topology (numactl)
+  ansible.builtin.command: numactl --hardware
+  register: cpu_numa
+  changed_when: false
+  failed_when: false
+
+- name: Collect CPU frequency and scaling info
+  ansible.builtin.shell: |
+    if command -v cpupower >/dev/null 2>&1; then
+      cpupower frequency-info
+    else
+      echo "cpupower not installed"
+    fi
+  args:
+    executable: /bin/bash
+  register: cpu_freq
+  changed_when: false
+
+# -------------------------------------------------------------------
+# Persistence (controller-side)
+# -------------------------------------------------------------------
+
+- name: Write CPU raw output
+  ansible.builtin.copy:
+    dest: "{{ proxmox_hardware_node_dir }}/raw/cpu.txt"
+    mode: "0644"
+    content: |
+      ===== lscpu (JSON) =====
+      {{ cpu_lscpu_json.stdout }}
+
+      ===== NUMA =====
+      {{ cpu_numa.stdout | default('NUMA info not available', true) }}
+
+      ===== Frequency =====
+      {{ cpu_freq.stdout }}
+  delegate_to: localhost
+
+# -------------------------------------------------------------------
+# Structured facts (AUTHORITATIVE)
+# -------------------------------------------------------------------
+
+- name: Build normalized CPU key-value map
+  ansible.builtin.set_fact:
+    _cpu_map: >-
+      {{
+        dict(
+          (
+            cpu_lscpu_json.stdout
+            | from_json
+            | json_query('lscpu[*]')
+            | map(attribute='field')
+            | map('regex_replace', ':$', '')
+          )
+          | zip(
+              cpu_lscpu_json.stdout
+              | from_json
+              | json_query('lscpu[*].data')
+            )
+        )
+      }}
+
+- name: Parse CPU summary facts (JSON-backed)
+  ansible.builtin.set_fact:
+    cpu:
+      vendor: >-
+        {{
+          'AMD'
+          if _cpu_map['Vendor ID'] | default('') == 'AuthenticAMD'
+          else 'Intel'
+          if _cpu_map['Vendor ID'] | default('') == 'GenuineIntel'
+          else 'Unknown'
+        }}
+
+      model: "{{ _cpu_map['Model name'] | default('Unknown') }}"
+      architecture: "{{ _cpu_map['Architecture'] | default('Unknown') }}"
+
+      sockets: "{{ (_cpu_map['Socket(s)'] | default('1')) | int }}"
+      cores_per_socket: "{{ (_cpu_map['Core(s) per socket'] | default('1')) | int }}"
+      threads_per_core: "{{ (_cpu_map['Thread(s) per core'] | default('1')) | int }}"
+
+      total_cores: >-
+        {{
+          (_cpu_map['Socket(s)'] | default('1') | int)
+          *
+          (_cpu_map['Core(s) per socket'] | default('1') | int)
+        }}
+
+      total_threads: "{{ (_cpu_map['CPU(s)'] | default('1')) | int }}"
+
+      numa_nodes: >-
+        {{
+          cpu_numa.stdout
+          | default('')
+          | regex_findall('available:\\s*(\\d+)')
+          | first
+          | default('1', true)
+          | int
+        }}
+
+- name: Assert CPU parsing succeeded
+  ansible.builtin.assert:
+    that:
+      - cpu.total_threads | int > 1
+      - cpu.model != 'Unknown'
+    fail_msg: "CPU parsing failed — check lscpu JSON ingestion"
+

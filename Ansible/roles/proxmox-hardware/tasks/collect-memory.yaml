@@ -1,0 +1,196 @@
+# Ansible/roles/proxmox-hardware/tasks/collect-memory.yaml
+# Hardened memory topology and DIMM discovery for Proxmox nodes
+# Crash-proof, NUMA-aware, loop-safe, summary-compatible
+
+# -------------------------------------------------------------------
+# Collection (node-side)
+# -------------------------------------------------------------------
+
+- name: Collect memory usage summary (bytes)
+  ansible.builtin.command: free -b
+  register: memory_free_bytes
+  changed_when: false
+
+- name: Collect detailed DIMM information
+  ansible.builtin.command: dmidecode -t memory
+  register: memory_dmi
+  become: true
+  changed_when: false
+
+- name: Collect NUMA memory topology
+  ansible.builtin.command: numactl --hardware
+  register: memory_numa
+  failed_when: false
+  changed_when: false
+
+# -------------------------------------------------------------------
+# Persistence (controller-side)
+# -------------------------------------------------------------------
+
+- name: Write memory raw output
+  ansible.builtin.copy:
+    dest: "{{ proxmox_hardware_node_dir }}/raw/memory.txt"
+    mode: "0644"
+    content: |
+      ===== free -b =====
+      {{ memory_free_bytes.stdout }}
+
+      ===== dmidecode -t memory =====
+      {{ memory_dmi.stdout }}
+
+      ===== NUMA =====
+      {{ memory_numa.stdout | default('NUMA info not available') }}
+  delegate_to: localhost
+
+# -------------------------------------------------------------------
+# Assertions
+# -------------------------------------------------------------------
+
+- name: Assert memory summary was collected
+  ansible.builtin.assert:
+    that:
+      - memory_free_bytes.stdout_lines | length > 1
+    fail_msg: "free -b did not return valid memory information"
+
+# -------------------------------------------------------------------
+# Structured DIMM parsing (SAFE, LOOP-BASED)
+# -------------------------------------------------------------------
+
+# -------------------------------------------------------------------
+# Structured DIMM parsing (WORKING)
+# -------------------------------------------------------------------
+
+# -------------------------------------------------------------------
+# Structured DIMM parsing (SAFE, WORKING)
+# -------------------------------------------------------------------
+
+- name: Initialize DIMM list
+  ansible.builtin.set_fact:
+    dimms: []
+
+- name: Parse installed DIMMs
+  ansible.builtin.set_fact:
+    dimms: "{{ dimms + [ parsed_dimm ] }}"
+  loop: >-
+    {{
+      memory_dmi.stdout
+      | default('')
+      | split('Memory Device')
+      | map('trim')
+      | reject('equalto', '')
+      | reject('search', 'No Module Installed')
+      | list
+    }}
+  vars:
+    parsed_dimm:
+      slot: >-
+        {{
+          (
+            item
+            | regex_search('Locator:.*')
+            | default('')
+            | regex_replace('^.*Locator:\\s*', '')
+          )
+          | default('Unknown')
+        }}
+
+      size: >-
+        {{
+          (
+            item
+            | regex_search('Size:.*')
+            | default('')
+            | regex_replace('^.*Size:\\s*', '')
+          )
+          | default('Unknown')
+        }}
+
+      type: >-
+        {{
+          (
+            item
+            | regex_search('Type:\\s*DDR[0-9]+')
+            | default('')
+            | regex_replace('^.*Type:\\s*', '')
+          )
+          | default('Unknown')
+        }}
+
+      speed: >-
+        {{
+          (
+            item
+            | regex_search('(Configured Memory Speed:.*|Speed:.*)')
+            | default('')
+            | regex_replace('^.*(Configured Memory Speed:|Speed:)\\s*', '')
+          )
+          | default('Unknown')
+        }}
+
+# -------------------------------------------------------------------
+# Final authoritative memory facts (SUMMARY-COMPATIBLE)
+# -------------------------------------------------------------------
+
+- name: Finalize memory facts
+  ansible.builtin.set_fact:
+    memory:
+      total_bytes: "{{ memory_free_bytes.stdout_lines[1].split()[1] | int }}"
+
+      total_mb: >-
+        {{
+          (memory_free_bytes.stdout_lines[1].split()[1] | int
+          / 1024 / 1024)
+          | round(0)
+        }}
+
+      total_gb: >-
+        {{
+          (memory_free_bytes.stdout_lines[1].split()[1] | int
+          / 1024 / 1024 / 1024)
+          | round(2)
+        }}
+
+      # REQUIRED by your summary template
+      total_human: >-
+        {{
+          ((memory_free_bytes.stdout_lines[1].split()[1] | int
+          / 1024 / 1024 / 1024)
+          | round(2)) ~ ' GB'
+        }}
+
+      total_ram: >-
+        {{
+          ((memory_free_bytes.stdout_lines[1].split()[1] | int
+          / 1024 / 1024 / 1024)
+          | round(2)) ~ ' GB'
+        }}
+
+      total_ram_gb: >-
+        {{
+          (memory_free_bytes.stdout_lines[1].split()[1] | int
+          / 1024 / 1024 / 1024)
+          | round(2)
+        }}
+
+      available_bytes: "{{ memory_free_bytes.stdout_lines[1].split()[6] | int }}"
+
+      numa_nodes: >-
+        {{
+          (memory_numa.stdout | default(''))
+          | regex_findall('available:\\s*(\\d+)')
+          | first
+          | default(1, true)
+          | int
+        }}
+
+      dimms: "{{ dimms }}"
+
+# -------------------------------------------------------------------
+# Final assertion (DIMMs optional)
+# -------------------------------------------------------------------
+
+- name: Assert memory facts populated
+  ansible.builtin.assert:
+    that:
+      - memory.total_bytes | int > 0
+    fail_msg: "Memory facts were not populated correctly"

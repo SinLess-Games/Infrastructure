@@ -1,0 +1,44 @@
+---
+# Ansible/roles/proxmox-hardware/tasks/create-summary.yaml
+# Render a human-readable hardware summary for each Proxmox node
+# Uses collected facts but treats raw outputs as authoritative
+
+- name: Ensure node_name is defined (canonical hostname)
+  ansible.builtin.set_fact:
+    node_name: >-
+      {{
+        ansible_hostname
+          | default(inventory_hostname, true)
+          | default(ansible_facts.nodename, true)
+      }}
+
+- name: Ensure summary directory exists
+  ansible.builtin.file:
+    path: "{{ proxmox_hardware_node_dir }}/summary"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+
+- name: Render hardware summary markdown
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/proxmox/hardware-summary.md.j2"
+    dest: "{{ proxmox_hardware_node_dir }}/summary/hardware.md"
+    mode: "0644"
+  delegate_to: localhost
+
+- name: Create summary index marker
+  ansible.builtin.copy:
+    dest: "{{ proxmox_hardware_node_dir }}/summary/README.txt"
+    mode: "0644"
+    content: |
+      Proxmox Hardware Summary
+      ========================
+      Node: {{ node_name }}
+      Generated: {{ ansible_date_time.iso8601 }}
+
+      This directory contains a rendered, human-readable summary
+      derived from raw hardware collection data.
+
+      Authoritative data remains in:
+        {{ proxmox_hardware_node_dir }}/raw/
+  delegate_to: localhost

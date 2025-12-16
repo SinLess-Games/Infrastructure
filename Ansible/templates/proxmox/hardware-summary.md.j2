@@ -1,0 +1,91 @@
+# Proxmox Hardware Summary
+
+## Node Information
+
+- **Node Name:** {{ node_name }}
+- **Inventory Hostname:** {{ inventory_hostname }}
+- **Generated:** {{ ansible_date_time.iso8601 }}
+
+---
+
+## CPU
+
+- **Vendor:** {{ cpu.vendor | default('Unknown') }}
+- **Model:** {{ cpu.model | default('Unknown') }}
+- **Architecture:** {{ cpu.architecture | default('Unknown') }}
+- **Sockets:** {{ cpu.sockets | default(1) }}
+- **Cores per Socket:** {{ cpu.cores_per_socket | default(1) }}
+- **Threads per Core:** {{ cpu.threads_per_core | default(1) }}
+- **Total Cores:** {{ cpu.total_cores | default(1) }}
+- **Total Threads:** {{ cpu.total_threads | default(1) }}
+- **NUMA Nodes:** {{ cpu.numa_nodes | default(1) }}
+
+
+---
+
+## Memory
+
+- **Total RAM:** {{ memory.total_human | default('Unknown') }}
+- **NUMA Nodes:** {{ memory.numa_nodes | default('Unknown') }}
+
+{% if memory.dimms is defined and memory.dimms | length > 0 %}
+### DIMMs
+
+| Slot | Size | Speed | Type |
+|------|------|-------|------|
+{% for dimm in memory.dimms %}
+| {{ dimm.slot | default('N/A') }} | {{ dimm.size | default('N/A') }} | {{ dimm.speed | default('N/A') }} | {{ dimm.type | default('N/A') }} |
+{% endfor %}
+{% endif %}
+
+---
+
+## Network Interfaces
+
+{% if network.interfaces is defined and network.interfaces | length > 0 %}
+| Interface | Speed | Link | Driver |
+|-----------|-------|------|--------|
+{% for iface in network.interfaces %}
+{% set iface_details = (network.details | default({})).get(iface, {}) %}
+| {{ iface }} | {{ iface_details.speed | default('unknown') }} | {{ iface_details.link | default('unknown') }} | {{ iface_details.driver | default('unknown') }} |
+{% endfor %}
+{% else %}
+_No network interfaces detected._
+{% endif %}
+
+{% if network.bridges is defined and network.bridges | length > 0 %}
+### Bridges
+
+{% for bridge in network.bridges %}
+- {{ bridge }}
+{% endfor %}
+{% endif %}
+
+---
+
+## Storage Devices
+
+{% if storage is defined and storage | length > 0 %}
+| Device | Size | Type | Model | Rotational |
+|--------|------|------|-------|------------|
+{% for disk in storage %}
+| {{ disk.name | default(disk.kname | default('N/A')) }} | {{ disk.size | default('N/A') }} | {{ disk.type | default('N/A') }} | {{ disk.model | default('N/A') }} | {{ 'Yes' if disk.rota | default(false) else 'No' }} |
+{% endfor %}
+{% else %}
+_No block devices detected._
+{% endif %}
+
+---
+
+## IOMMU / Virtualization
+
+- **CPU Virtualization:** {{ 'Yes' if immou.cpu_virtualization else 'No' }}
+- **IOMMU Enabled (Kernel):** {{ 'Yes' if immou.iommu_kernel_enabled else 'No' }}
+- **IOMMU Groups Present:** {{ 'Yes' if immou.iommu_groups_present else 'No' }}
+- **Detected Vendor:** {{ immou.detected_vendor | default('Unknown') }}
+
+---
+
+## Notes
+
+- Raw authoritative data is stored under:

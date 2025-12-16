@@ -63,10 +63,10 @@ tasks:
         set -e
         {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/configure-localhost.yaml" --ask-pass
   
-  configure-proxmox-node:
+  setup-proxmox-nodes:
     desc: "Configure the proxmox nodes"
     deps: [init]
     cmds:
       - |
         set -e
-        {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/configure-proxmox-node.yaml" --ask-pass
+        {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/setup-proxmox-nodes.yaml" --ask-pass

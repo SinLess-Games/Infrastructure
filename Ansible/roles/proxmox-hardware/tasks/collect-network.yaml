@@ -1,0 +1,187 @@
+---
+# -------------------------------------------------------------------
+# Collect network information and populate summary facts
+# -------------------------------------------------------------------
+
+- name: Collect link-layer interface list
+  ansible.builtin.command: ip -o link show
+  register: network_links
+  changed_when: false
+
+- name: Collect IP addressing
+  ansible.builtin.command: ip -o addr show
+  register: network_addrs
+  changed_when: false
+
+- name: Collect routing table
+  ansible.builtin.command: ip route show
+  register: network_routes
+  changed_when: false
+
+- name: Build interface list (facts first, fallback to ip link)
+  ansible.builtin.set_fact:
+    network_interface_names: >-
+      {{
+        (
+          ansible_interfaces
+          | default([])
+        )
+        + (
+          network_links.stdout
+          | default('')
+          | regex_findall('^[0-9]+:\\s+([^:@]+)', multiline=True)
+        )
+        | map('trim')
+        | reject('equalto', '')
+        | list
+        | unique
+        | list
+      }}
+
+- name: Drop loopback from interface list
+  ansible.builtin.set_fact:
+    network_interface_names: "{{ network_interface_names | reject('equalto', 'lo') | list }}"
+
+- name: Collect NIC driver and speed (ethtool)
+  ansible.builtin.shell: |
+    iface="{{ item }}"
+    if ethtool "$iface" >/dev/null 2>&1; then
+      info="$(ethtool "$iface")"
+      printf '%s\n' "$info"
+      echo "--- driver info ---"
+      ethtool -i "$iface" 2>/dev/null || true
+      speed=$(printf '%s\n' "$info" | awk -F': +' '/Speed:/ {print $2; exit}')
+      link=$(printf '%s\n' "$info" | awk -F': +' '/Link detected:/ {print $2; exit}')
+      supported_max=$(printf '%s\n' "$info" \
+        | awk '/Supported link modes:/,/^[^[:space:]]/ {print}' \
+        | grep -Eo "[0-9]+base[TAK]" \
+        | sed -E 's/base[TAK]//' \
+        | sort -nr \
+        | head -n1)
+      [ -n "$supported_max" ] && supported_max="${supported_max}Mb/s"
+      driver=$(ethtool -i "$iface" 2>/dev/null | awk -F': +' '/driver:/ {print $2; exit}')
+      printf 'ETHTOOL_JSON: {"iface":"%s","speed":"%s","link":"%s","driver":"%s","supported_max":"%s"}\n' \
+        "$iface" "${speed:-unknown}" "${link:-unknown}" "${driver:-unknown}" "${supported_max:-unknown}"
+    else
+      echo "ethtool not supported for $iface"
+    fi
+  args:
+    executable: /bin/bash
+  loop: >-
+    {{
+      network_interface_names | default([])
+    }}
+  register: network_ethtool
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Collect bridge configuration (Proxmox vmbr)
+  ansible.builtin.shell: |
+    if command -v bridge >/dev/null 2>&1; then
+      bridge link show
+      bridge vlan show
+    else
+      echo "bridge utility not installed"
+    fi
+  args:
+    executable: /bin/bash
+  register: network_bridges
+  changed_when: false
+
+- name: Parse ethtool results
+  ansible.builtin.set_fact:
+    network_interface_details: >-
+      {{
+        (network_interface_details | default({}))
+        | combine({
+            parsed_ethtool.iface: {
+              'speed': (
+                parsed_ethtool.speed
+                if parsed_ethtool.speed is defined and parsed_ethtool.speed not in ['', 'unknown', 'Unknown!']
+                else parsed_ethtool.supported_max | default('unknown')
+              ),
+              'link': parsed_ethtool.link | default('unknown'),
+              'driver': parsed_ethtool.driver | default('unknown')
+            }
+          })
+      }}
+  vars:
+    parsed_ethtool: "{{ item | regex_replace('^ETHTOOL_JSON:\\s*', '') | from_json }}"
+  loop: >-
+    {{
+      network_ethtool.results
+      | default([])
+      | map(attribute='stdout_lines')
+      | map('default', [])
+      | list
+      | flatten
+      | select('match', '^ETHTOOL_JSON:')
+    }}
+  loop_control:
+    label: "{{ parsed_ethtool.iface | default(item, true) }}"
+  changed_when: false
+
+- name: Write network raw output
+  ansible.builtin.copy:
+    dest: "{{ proxmox_hardware_node_dir }}/raw/network.txt"
+    mode: "0644"
+    content: |
+      ===== ip link =====
+      {{ network_links.stdout }}
+
+      ===== ip addr =====
+      {{ network_addrs.stdout }}
+
+      ===== ip route =====
+      {{ network_routes.stdout }}
+
+      ===== interface list (resolved) =====
+      {{ network_interface_names | join(', ') }}
+
+      ===== ethtool =====
+      {% for r in network_ethtool.results %}
+      ## {{ r.item }}
+      {{ r.stdout }}
+      {% endfor %}
+
+      ===== parsed details =====
+      {{ network_interface_details | default({}) | to_nice_json }}
+
+      ===== bridges =====
+      {{ network_bridges.stdout }}
+  delegate_to: localhost
+
+- name: Parse network summary facts (MERGE SAFE)
+  ansible.builtin.set_fact:
+    network: >-
+      {{
+        (network | default({}))
+        | combine({
+            'interfaces': (
+              network_interface_names | default([])
+            ),
+            'bridges': (
+              network_links.stdout
+              | regex_findall('^[0-9]+:\\s+(vmbr[0-9]+)', multiline=True)
+              | reject('equalto', '')
+              | unique
+              | list
+            ),
+            'physical_interfaces': (
+              network_links.stdout
+              | regex_findall('^[0-9]+:\\s+(en[^:@ ]+)', multiline=True)
+              | reject('equalto', '')
+              | unique
+              | list
+            ),
+            'wireless_interfaces': (
+              network_links.stdout
+              | regex_findall('^[0-9]+:\\s+(wl[^:@ ]+)', multiline=True)
+              | reject('equalto', '')
+              | unique
+              | list
+            ),
+            'details': network_interface_details | default({})
+          }, recursive=True)
+      }}
