@@ -1,6 +1,10 @@
-{# --- Derived paths --- #}
+{# =====================================================================
+   .zshrc.j2 — Jinja-safe Zsh configuration (FIXED)
+   ===================================================================== #}
+
 {% set oh_my_zsh_path = user.home_directory ~ "/.oh-my-zsh" %}
-{% set starship_config_path = user.home_directory ~ "/.config/starship/config.toml" %}
+{% set starship_default_config_path = user.home_directory ~ "/.config/starship/starship.toml" %}
+{% set starship_xdg_config_path = user.home_directory ~ "/.config/starship/config.toml" %}
 
 # =====================================================================
 # Zsh Shell Configuration
@@ -13,6 +17,7 @@ setopt nullglob
 
 # -------------------------- General Zsh Options --------------------------
 setopt autocd interactivecomments magicequalsubst nonomatch notify numericglobsort promptsubst
+setopt transient_rprompt
 WORDCHARS=${WORDCHARS//\\//}
 PROMPT_EOL_MARK=""
 
@@ -30,159 +35,106 @@ bindkey '^[[H'     beginning-of-line
 bindkey '^[[F'     end-of-line
 bindkey '^[[Z'     undo
 
-# -------------------------- Completion --------------------------
-autoload -Uz compinit
-[[ -d ~/.cache ]] || mkdir -p ~/.cache
-compinit -d ~/.cache/zcompdump
-
-zstyle ':completion:*:*:*:*:*' menu select
-zstyle ':completion:*' auto-description 'specify: %d'
-zstyle ':completion:*' completer _expand _complete
-zstyle ':completion:*' format 'Completing %d'
-zstyle ':completion:*' group-name ''
-zstyle ':completion:*' list-colors ''
-zstyle ':completion:*' list-prompt %SAt %p: Hit TAB for more%s
-zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
-zstyle ':completion:*' rehash true
-zstyle ':completion:*' select-prompt %SScrolling: selection at %p%s
-zstyle ':completion:*' use-compctl false
-zstyle ':completion:*:kill:*' command 'ps -u $USER -o pid,%cpu,tty,cputime,cmd'
-
-# -------------------------- History --------------------------
-HISTFILE=~/.zsh_history
-HISTSIZE=5000
-SAVEHIST=10000
-setopt hist_expire_dups_first hist_ignore_dups hist_ignore_space hist_verify share_history
-alias history="history 0"
-
-# -------------------------- Timing --------------------------
-TIMEFMT=$'\nreal\t%E\nuser\t%U\nsys\t%S\ncpu\t%P'
-
 # -------------------------- PATH --------------------------
-# zshenv builds the primary PATH — only minimal extras here
 export PATH="$PATH:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/snap/bin"
 
 # -------------------------- Environment --------------------------
 export ZSH="{{ oh_my_zsh_path }}"
-export STARSHIP_CONFIG="{{ starship_config_path }}"
-export DEFAULT_FONT='FiraCode NF'
+export STARSHIP_SHELL=zsh
 export HOMEBREW_NO_ENV_HINTS=1
 export DIRENV_LOG_FORMAT=
 
-# -------------------------- Oh My Zsh Theme & Plugins --------------------------
-ZSH_THEME="{{ zsh_theme | default('robbyrussell') }}"
+if [[ -f "{{ starship_default_config_path }}" ]]; then
+  export STARSHIP_CONFIG="{{ starship_default_config_path }}"
+elif [[ -f "{{ starship_xdg_config_path }}" ]]; then
+  export STARSHIP_CONFIG="{{ starship_xdg_config_path }}"
+fi
 
-{% set base_plugins = [
-  'aliases','ansible','aws','azure','brew','direnv','docker','docker-compose','emoji','encode64','fluxcd','gcloud','gem','gh',
-  'git','git-commit','git-extras','git-flow','github','git-lfs','helm','history','kubectl','microk8s','minikube','ng','npm',
-  'nvm','pre-commit','redis-cli','ssh','ssh-agent','sudo','systemd','terraform','ubuntu','ufw','vscode','yarn','1password',
-  'alias-finder','asdf'
-] %}
-
-{% set incoming = plugins | default([]) %}
-{% set names = [] %}
-{% for p in incoming %}
-  {% set name = (p.name if p is mapping and 'name' in p else p) %}
-  {% if name not in names %}{% set names = names + [name] %}{% endif %}
-{% endfor %}
-
-{% set merged = (base_plugins + names) | unique %}
+# -------------------------- Oh My Zsh --------------------------
+ZSH_THEME=""
 
 plugins=(
-{% for p in merged %}
-  {{ p }}
-{% endfor %}
+  aliases ansible aws azure brew docker docker-compose
+  git gh helm kubectl terraform sudo systemd vscode
+  ssh ssh-agent zoxide
 )
 
 if [[ -s "$ZSH/oh-my-zsh.sh" ]]; then
   source "$ZSH/oh-my-zsh.sh"
 fi
 
-# -------------------------- Syntax Highlighting & Suggestions --------------------------
-[[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# -------------------------- Completion --------------------------
+autoload -Uz compinit
+mkdir -p ~/.cache
+compinit -d ~/.cache/zcompdump
 
-if [[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]]; then
-  source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-  ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#999'
-fi
+# -------------------------- History --------------------------
+HISTFILE=~/.zsh_history
+HISTSIZE=5000
+SAVEHIST=10000
+setopt hist_ignore_dups hist_ignore_space hist_verify share_history
 
-[[ -f /etc/zsh_command_not_found ]] && source /etc/zsh_command_not_found
-
-# -------------------------- Aliases (external file) --------------------------
-source ~/.aliases.zsh 2>/dev/null || true
-
-# -------------------------- Logging Helpers --------------------------
-log_info()    { echo -e "\033[1;34m🔵 [INFO] | $*\033[0m"; }
-log_warn()    { echo -e "\033[0;33m🟠 [WARN] | $*\033[0m"; }
-log_error()   { echo -e "\033[1;31m🔴 [ERROR] | $*\033[0m"; }
-log_success() { echo -e "\033[0;32m✅ [OK]   | $*\033[0m"; }
-
-# -------------------------- Homebrew --------------------------
-if command -v brew >/dev/null 2>&1; then
-  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv 2>/dev/null || /opt/homebrew/bin/brew shellenv 2>/dev/null || true)"
-
-  if [[ -f "{{ user.home_directory }}/Brewfile" ]]; then
-    log_info "Brewfile found. Installing..."
-    brew bundle --file="$HOME/Brewfile" >/dev/null 2>&1 \
-      && log_success "Brew bundle installed" \
-      || log_warn "Brew bundle had issues"
-  fi
-
-  brew-update() {
-    log_info "Updating Homebrew..."
-    brew update >/dev/null 2>&1
-    brew outdated >/dev/null 2>&1
-    brew upgrade >/dev/null 2>&1
-    log_success "Homebrew updated"
-  }
-  alias bu='brew-update'
-else
-  log_warn "Homebrew not found; skipping brew-related setup."
-fi
+# -------------------------- Aliases --------------------------
+source ~/.zsh_aliases 2>/dev/null || true
 
 # -------------------------- direnv --------------------------
 if command -v direnv >/dev/null 2>&1; then
-  eval "$(direnv hook zsh)"
+  eval "$(command direnv hook zsh)"
 fi
-
-# -------------------------- Starship --------------------------
-if command -v starship >/dev/null 2>&1; then
-  eval "$(starship init zsh)"
-fi
-
-# -------------------------- Reload Helper --------------------------
-reload() { source ~/.zshrc && log_info "Reloaded .zshrc"; }
 
 # -------------------------- zoxide --------------------------
-command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
-
-# -------------------------- direnv auto-allow (optional) -------------
-if command -v direnv >/dev/null 2>&1; then
-  if [[ -f "{{ user.home_directory }}/.envrc" ]]; then
-    direnv allow "{{ user.home_directory }}" >/dev/null 2>&1 || true
-  fi
-  if [[ -f ./.envrc ]]; then
-    direnv allow . >/dev/null 2>&1 || true
-  fi
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(command zoxide init zsh)"
 fi
 
-# -------------------------- Python venv Helpers -----------------------
-vact() {
-  local dir="${1:-.}"
-  local vpath="$dir/.venv/bin/activate"
-  if [[ -f "$vpath" ]]; then
-    builtin source "$vpath"
-  else
-    echo "No .venv found at: $dir"
-    return 1
-  fi
+# --------------------------- SSH Agent ---------------------------------------
+# Universal, cert-safe, idempotent SSH agent bootstrap
+# -----------------------------------------------------------------------------
+
+SSH_ENV="$HOME/.ssh/agent.env"
+
+_ssh_agent_load() {
+  [[ -f "$SSH_ENV" ]] || return 1
+  source "$SSH_ENV" >/dev/null 2>&1
+  [[ -n "$SSH_AGENT_PID" ]] && kill -0 "$SSH_AGENT_PID" 2>/dev/null
 }
 
-vdeact() {
-  if [[ -n "$VIRTUAL_ENV" ]]; then
-    deactivate
-  else
-    echo "No active virtualenv"
-    return 1
-  fi
+_ssh_agent_start() {
+  umask 077
+  ssh-agent -s | sed 's/^echo/#echo/' >| "$SSH_ENV"
+  source "$SSH_ENV" >/dev/null 2>&1
 }
+
+if ! _ssh_agent_load; then
+  _ssh_agent_start
+fi
+
+# Load keys only if agent is empty
+if ! ssh-add -l >/dev/null 2>&1; then
+  for key in "$HOME/.ssh"/id_* "$HOME/.ssh"/*_id_*; do
+    [[ -f "$key" ]] || continue
+    [[ "$key" == *.pub ]] && continue
+    [[ "$key" == *-cert.pub ]] && continue
+
+    if ssh-keygen -yf "$key" >/dev/null 2>&1; then
+      ssh-add "$key" >/dev/null 2>&1
+    fi
+  done
+fi
+
+unset SSH_ENV
+
+# -------------------------- Starship (FIXED) --------------------------
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init zsh)"
+
+  # 🔒 CRITICAL FIX:
+  # VS Code calls PROMPT2 as a function.
+  # Starship sets it as a string → crash.
+  # We replace it with a wrapper function.
+  prompt2_starship() {
+    command starship prompt --continuation
+  }
+  PROMPT2='$(prompt2_starship)'
+fi
+# ---------------------------------------------------------------------

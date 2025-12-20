@@ -1,0 +1,6 @@
+- build-essentials
+- git
+- curl
+- wget
+- dnsutils
+- gcc

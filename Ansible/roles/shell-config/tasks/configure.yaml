@@ -25,13 +25,21 @@
   loop: "{{ shell_config_users | product(['starship']) | list }}"
 
 # -----------------------------------------------------------------------------
-# Starship configuration
+# Starship configuration (default path)
 # -----------------------------------------------------------------------------
+- name: Ensure XDG config directory exists
+  ansible.builtin.file:
+    path: "{{ item.home_directory }}/.config"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0755"
+  loop: "{{ shell_config_users }}"
 
-- name: Install Starship config
+- name: Install Starship config (default path)
   ansible.builtin.template:
     src: "{{ playbook_dir }}/../templates/starship/starship.toml.j2"
-    dest: "{{ item.home_directory }}/.config/starship/starship.toml"
+    dest: "{{ item.home_directory }}/.config/starship.toml"
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0644"

@@ -93,15 +93,12 @@ apt_packages:
     # IaC / DevOps
     - ansible
     - ansible-lint
-    - packer             # (vendor repo recommended)
-    - vagrant
     # Containers
     - docker.io
     - containerd
     - podman
     - buildah
     - skopeo
-    - cri-tools
     # Git helpers
     - git-extras
     - gh                 # GitHub CLI (may require vendor repo on some releases)

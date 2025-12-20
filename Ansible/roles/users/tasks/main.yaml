@@ -50,3 +50,11 @@
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
+
+- name: Configure the default shell for users
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    shell: "{{ users_default_shell }}"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"

@@ -1,0 +1,45 @@
+# --------------------- Homebrew Taps ---------------------
+# Taps provide access to additional formulae for specific tools or organizations
+tap 'hashicorp/tap'                 # HashiCorp tools for infrastructure as code and security
+tap 'go-task/tap'                   # Go Task CLI for automation and task running
+tap 'fluxcd/tap'                    # FluxCD tools for GitOps
+
+# ------------------- Programming Languages -------------------
+# Programming languages and runtime environments
+brew 'pipx'                         # Pipx, package installer for Python packages
+
+# ------------------- Containerization and Virtualization -------------------
+# Tools for running and managing containers and virtual environments
+brew 'minikube'                     # Local Kubernetes, for testing and development
+
+# ------------------- Kubernetes-related Tools -------------------
+# Kubernetes CLI and tools for managing clusters and workflows
+brew 'kubectl'                      # Kubernetes command-line interface for cluster management
+brew 'helm'                         # Helm, package manager for Kubernetes applications
+brew 'istioctl'                     # Istio CLI, manages Istio service mesh on Kubernetes
+brew 'flux'                         # FluxCD, GitOps operator for Kubernetes
+
+# ------------------- Cloud and Infrastructure as Code -------------------
+# Infrastructure as Code (IaC) and cloud management tools
+brew 'terraform'                    # Terraform, open-source IaC tool by HashiCorp
+
+# ------------------- Secrets and Configuration Management -------------------
+# Tools for encrypting and managing secrets in configuration files
+brew 'sops'                         # Sops, for managing encrypted files in Git
+brew 'age'                          # Age, modern encryption tool for files
+
+# ------------------- CI/CD and DevOps -------------------
+# Continuous integration/continuous delivery tools and GitHub workflow management
+brew 'go-task'                      # Task automation using Go Task CLI
+brew 'gh'                           # GitHub CLI, interacts with GitHub from the command line
+
+# ------------------- Development Utilities -------------------
+# Essential utilities for development and data processing
+brew 'git'                          # Git, version control for managing code
+brew 'jq'                           # jq, JSON processor for data manipulation
+brew 'yq'                           # yq, YAML processor with jq-like syntax
+
+
+# ------------------- Miscellaneous Utilities -------------------
+# Additional helpful command-line utilities
+brew 'direnv'

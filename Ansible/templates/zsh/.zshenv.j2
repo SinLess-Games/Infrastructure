@@ -74,7 +74,12 @@ export PATH="${(j.:.)_path}"
 export ZSH="{{ user.home_directory }}/.oh-my-zsh"
 
 # Starship: use the modern XDG path
-export STARSHIP_CONFIG="$HOME/.config/starship/config.toml"
+export STARSHIP_CONFIG="$HOME/.config/starship.toml"
+
+export STARSHIP_SHELL=zsh
+export DEFAULT_FONT='FiraCode NF'
+export HOMEBREW_NO_ENV_HINTS=1
+export DIRENV_LOG_FORMAT=
 
 # -------- Colors ------------------------------------------------------
 export CLICOLOR=1

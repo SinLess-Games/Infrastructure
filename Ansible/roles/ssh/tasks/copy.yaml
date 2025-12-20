@@ -1,11 +1,23 @@
 ---
 # =============================================================================
-# Copy SSH Keys and Certificates to Users (multi-key support)
+# Copy SSH Keys and Certificates to Users
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# Resolve home directories safely
+# -----------------------------------------------------------------------------
+
+- name: Resolve home directories from passwd
+  ansible.builtin.getent:
+    database: passwd
+
+# -----------------------------------------------------------------------------
+# Ensure ~/.ssh exists
+# -----------------------------------------------------------------------------
 
 - name: Ensure ~/.ssh directory exists for each user
   ansible.builtin.file:
-    path: "/home/{{ item.name }}/.ssh"
+    path: "{{ getent_passwd[item.name][4] }}/.ssh"
     state: directory
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
@@ -13,169 +25,125 @@
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
+  when: item.name in getent_passwd
 
 # -----------------------------------------------------------------------------
-# Deploy user-specific SSH material
+# Copy user keys
 # -----------------------------------------------------------------------------
 
 - name: Copy user's private SSH key
   ansible.builtin.copy:
     src: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
-    dest: "/home/{{ item.name }}/.ssh/id_{{ ssh_key_type }}"
+    dest: "{{ getent_passwd[item.name][4] }}/.ssh/id_{{ ssh_key_type }}"
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "{{ ssh_key_mode_private }}"
     remote_src: true
-  when:
-    - lookup(
-        'fileglob',
-        ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type,
-        wantlist=True,
-        errors='ignore'
-      ) | length > 0
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
+  when:
+    - item.name in getent_passwd
+    - lookup('fileglob', ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type, wantlist=True) | length > 0
 
 - name: Copy user's public SSH key
   ansible.builtin.copy:
     src: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
-    dest: "/home/{{ item.name }}/.ssh/id_{{ ssh_key_type }}.pub"
+    dest: "{{ getent_passwd[item.name][4] }}/.ssh/id_{{ ssh_key_type }}.pub"
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
-    mode: "{{ ssh_key_mode_public }}"
+    mode: "0644"
     remote_src: true
-  when:
-    - lookup(
-        'fileglob',
-        ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '.pub',
-        wantlist=True,
-        errors='ignore'
-      ) | length > 0
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
+  when:
+    - item.name in getent_passwd
+    - lookup('fileglob', ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '.pub', wantlist=True) | length > 0
 
 - name: Copy user's SSH certificate
   ansible.builtin.copy:
     src: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}-cert.pub"
-    dest: "/home/{{ item.name }}/.ssh/id_{{ ssh_key_type }}-cert.pub"
+    dest: "{{ getent_passwd[item.name][4] }}/.ssh/id_{{ ssh_key_type }}-cert.pub"
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0644"
     remote_src: true
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
   when:
     - ssh_ca_enabled | bool
-    - lookup(
-        'fileglob',
-        ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '-cert.pub',
-        wantlist=True,
-        errors='ignore'
-      ) | length > 0
-  loop: "{{ users }}"
-  loop_control:
-    label: "{{ item.name }}"
+    - item.name in getent_passwd
+    - lookup('fileglob', ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '-cert.pub', wantlist=True) | length > 0
 
 # -----------------------------------------------------------------------------
-# Deploy shared certificates (e.g. root → sinless777)
+# Copy shared certificates (FIXED)
 # -----------------------------------------------------------------------------
 
-- name: Copy shared root public key into user .ssh
+- name: Copy shared public keys
   ansible.builtin.copy:
-    src: "{{ ssh_output_base }}/root/id_{{ ssh_key_type }}.pub"
-    dest: "/home/{{ item.name }}/.ssh/root_id_{{ ssh_key_type }}.pub"
-    owner: "{{ item.name }}"
-    group: "{{ item.name }}"
+    src: "{{ ssh_output_base }}/{{ item.1 }}/id_{{ ssh_key_type }}.pub"
+    dest: "{{ getent_passwd[item.0.name][4] }}/.ssh/shared_{{ item.1 }}_id_{{ ssh_key_type }}.pub"
+    owner: "{{ item.0.name }}"
+    group: "{{ item.0.name }}"
     mode: "0644"
     remote_src: true
+  loop: "{{ users | subelements('shared-certs', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }} <- {{ item.1 }}"
   when:
-    - "'shared-certs' in item"
-    - "'root' in item['shared-certs']"
-    - lookup(
-        'fileglob',
-        ssh_output_base ~ '/root/id_' ~ ssh_key_type ~ '.pub',
-        wantlist=True,
-        errors='ignore'
-      ) | length > 0
-  loop: "{{ users }}"
-  loop_control:
-    label: "{{ item.name }}"
+    - item.0.name in getent_passwd
+    - lookup('fileglob', ssh_output_base ~ '/' ~ item.1 ~ '/id_' ~ ssh_key_type ~ '.pub', wantlist=True) | length > 0
 
-- name: Copy shared root SSH certificate into user .ssh
+- name: Copy shared SSH certificates
   ansible.builtin.copy:
-    src: "{{ ssh_output_base }}/root/id_{{ ssh_key_type }}-cert.pub"
-    dest: "/home/{{ item.name }}/.ssh/root_id_{{ ssh_key_type }}-cert.pub"
-    owner: "{{ item.name }}"
-    group: "{{ item.name }}"
+    src: "{{ ssh_output_base }}/{{ item.1 }}/id_{{ ssh_key_type }}-cert.pub"
+    dest: "{{ getent_passwd[item.0.name][4] }}/.ssh/shared_{{ item.1 }}_id_{{ ssh_key_type }}-cert.pub"
+    owner: "{{ item.0.name }}"
+    group: "{{ item.0.name }}"
     mode: "0644"
     remote_src: true
+  loop: "{{ users | subelements('shared-certs', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }} <- {{ item.1 }}"
   when:
     - ssh_ca_enabled | bool
-    - "'shared-certs' in item"
-    - "'root' in item['shared-certs']"
-    - lookup(
-        'fileglob',
-        ssh_output_base ~ '/root/id_' ~ ssh_key_type ~ '-cert.pub',
-        wantlist=True,
-        errors='ignore'
-      ) | length > 0
-  loop: "{{ users }}"
-  loop_control:
-    label: "{{ item.name }}"
+    - item.0.name in getent_passwd
+    - lookup('fileglob', ssh_output_base ~ '/' ~ item.1 ~ '/id_' ~ ssh_key_type ~ '-cert.pub', wantlist=True) | length > 0
 
 # -----------------------------------------------------------------------------
 # Build authorized_keys deterministically
 # -----------------------------------------------------------------------------
 
-- name: Build authorized_keys file list per user
+- name: Build authorized_keys list
   ansible.builtin.set_fact:
     authorized_key_files: >-
       {{
-        lookup(
-          'fileglob',
-          ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '.pub',
-          wantlist=True,
-          errors='ignore'
-        )
+        lookup('fileglob', ssh_output_base ~ '/' ~ item.0.name ~ '/id_' ~ ssh_key_type ~ '.pub', wantlist=True)
         +
         (
-          lookup(
-            'fileglob',
-            ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '-cert.pub',
-            wantlist=True,
-            errors='ignore'
-          ) if ssh_ca_enabled | bool else []
+          lookup('fileglob', ssh_output_base ~ '/' ~ item.0.name ~ '/id_' ~ ssh_key_type ~ '-cert.pub', wantlist=True)
+          if ssh_ca_enabled | bool else []
         )
         +
-        (
-          lookup(
-            'fileglob',
-            ssh_output_base ~ '/root/id_' ~ ssh_key_type ~ '.pub',
-            wantlist=True,
-            errors='ignore'
-          ) if ('shared-certs' in item and 'root' in item['shared-certs']) else []
-        )
+        lookup('fileglob', ssh_output_base ~ '/' ~ item.1 ~ '/id_' ~ ssh_key_type ~ '.pub', wantlist=True)
         +
         (
-          lookup(
-            'fileglob',
-            ssh_output_base ~ '/root/id_' ~ ssh_key_type ~ '-cert.pub',
-            wantlist=True,
-            errors='ignore'
-          ) if (ssh_ca_enabled | bool and 'shared-certs' in item and 'root' in item['shared-certs']) else []
+          lookup('fileglob', ssh_output_base ~ '/' ~ item.1 ~ '/id_' ~ ssh_key_type ~ '-cert.pub', wantlist=True)
+          if ssh_ca_enabled | bool else []
         )
       }}
-  loop: "{{ users }}"
+  loop: "{{ users | subelements('shared-certs', skip_missing=True) }}"
   loop_control:
-    label: "{{ item.name }}"
+    label: "{{ item.0.name }}"
   register: authorized_key_map
 
 - name: Install authorized_keys
   ansible.builtin.authorized_key:
-    user: "{{ item.0.item.name }}"
+    user: "{{ item.0.item.0.name }}"
     state: present
     key: "{{ lookup('file', item.1) }}"
   loop: "{{ authorized_key_map.results | subelements('ansible_facts.authorized_key_files') }}"
   loop_control:
-    label: "{{ item.0.item.name }}"
-
+    label: "{{ item.0.item.0.name }}"

@@ -4,16 +4,22 @@
 # Starship Prompt — SinLess Games Theme
 # =====================================================================
 
-add_newline = true
-command_timeout = 20000
+# Keep your boxed layout, but keep Starship responsive.
+# scan_timeout / command_timeout are in milliseconds. :contentReference[oaicite:1]{index=1}
+add_newline     = true
+scan_timeout    = 20
+command_timeout = 2000
+
+# If you ever have symlinks into network mounts, turning this off avoids stalls. :contentReference[oaicite:2]{index=2}
+follow_symlinks = true
 
 format = """
-[╔══════════════════════════](bold acc) $os$localip $username[| ](bold ok)[$hostname](bold blue) $time [═════════════════════════════╗](bold acc)
-[║](bold acc)[  Git](bold ok)  $git_branch $git_status $git_metrics 
-[║](bold acc)[  Conditionals](bold ok) $kubernetes $helm $terraform $docker_context $aws $gcloud $azure $package 
-[║](bold acc)[  Languages](bold ok) $nodejs $python $golang $rust 
+[╔══════════════════════════](bold acc) $os$localip$username[| ](bold ok)[$hostname](bold blue)$time [═════════════════════════════╗](bold acc)
+[║](bold acc)[  Git](bold ok)  $git_branch$git_commit$git_state$git_status$git_metrics
+[║](bold acc)[  Conditionals](bold ok) $kubernetes$helm$terraform$docker_context$aws$gcloud$azure$package
+[║](bold acc)[  Languages](bold ok) $nodejs$python$golang$rust
 [║](bold acc)[  Dir](bold ok) $directory
-[╚══>](bold acc) $cmd_duration$status $character
+[╚══>](bold acc) $cmd_duration$status$character
 """
 
 # =====================================================================
@@ -32,11 +38,11 @@ brand = "magenta"
 # Prompt Character
 # =====================================================================
 [character]
-success_symbol         = "[➜](bold ok) "
-error_symbol           = "[✗](bold err) "
-vimcmd_symbol          = "[❮](bold ok) "
-vimcmd_replace_symbol  = "[❮](bold warn) "
-vimcmd_visual_symbol   = "[❮](bold brand) "
+success_symbol        = "[➜](bold ok) "
+error_symbol          = "[✗](bold err) "
+vimcmd_symbol         = "[❮](bold ok) "
+vimcmd_replace_symbol = "[❮](bold warn) "
+vimcmd_visual_symbol  = "[❮](bold brand) "
 
 # =====================================================================
 # User / Host / System
@@ -47,15 +53,29 @@ disabled = false
 
 [username]
 show_always = true
-format = "[$user](bold acc) "
+style_user  = "bold acc"
+style_root  = "bold err"
+format      = "[$user]($style) "
 
 [hostname]
 ssh_only = false
-format = "[@$hostname](bold blue) "
+style    = "bold blue"
+format   = "[@$hostname]($style) "
 
 [os]
+style  = "bold dim"
 format = "[$symbol]($style) "
-style = "bold dim"
+disabled = false
+
+# Optional: make OS symbol selection more consistent across machines
+# (use whatever you actually run most)
+[os.symbols]
+Ubuntu = " "
+Debian = " "
+Arch   = " "
+Fedora = " "
+Alpine = " "
+Linux  = " "
 
 # =====================================================================
 # Directory
@@ -63,9 +83,12 @@ style = "bold dim"
 [directory]
 truncation_length = 3
 truncate_to_repo  = true
-style = "bold"
-format = "[$path]($style) "
-home_symbol = "~"
+home_symbol       = "~"
+style             = "bold"
+# This is the documented default-ish pattern and ensures read-only marker works. :contentReference[oaicite:3]{index=3}
+format            = "[$path]($style)[$read_only]($read_only_style) "
+read_only         = " "
+read_only_style   = "bold err"
 
 [directory.substitutions]
 "Documents" = "󰈙 "
@@ -78,12 +101,23 @@ home_symbol = "~"
 # =====================================================================
 [git_branch]
 symbol = "🌿"
-style = "bold ok"
-format = "[$symbol $branch]($style)"
+style  = "bold ok"
+format = "[$symbol $branch]($style) "
+
+[git_commit]
+commit_hash_length = 7
+tag_disabled       = true
+style              = "dimmed dim"
+format             = "[# $hash]($style) "
+
+[git_state]
+style  = "bold warn"
+format = "([$state( $progress_current/$progress_total)]($style) )"
 
 [git_status]
 style  = "bold warn"
-format = " [• $all_status$ahead_behind •]($style)"
+# Conditional group won’t render if all vars are empty. :contentReference[oaicite:4]{index=4}
+format = "([• $all_status$ahead_behind •]($style) )"
 
 stashed    = " 📦 $count"
 conflicted = " ⚔ $count"
@@ -96,145 +130,151 @@ ahead      = " ⬆ $count"
 behind     = " ⬇ $count"
 diverged   = " ⇕ $ahead_count/$behind_count"
 
-[git_commit]
-commit_hash_length = 7
-tag_disabled = true
-format = " [# $hash]($style)"
-style = "dim"
-
 [git_metrics]
-disabled      = false
-added_style   = "bold ok"
-deleted_style = "bold err"
-format        = " ([+$added]($added_style) [-$deleted]($deleted_style))"
+disabled           = false
+only_nonzero_diffs = true
+added_style        = "bold ok"
+deleted_style      = "bold err"
+format             = "([+$added]($added_style) )([-$deleted]($deleted_style) )"
 
 # =====================================================================
 # Kubernetes
 # =====================================================================
 [kubernetes]
-format = 'on [☸ ($user@)$context (\($namespace\))](bold acc) '
 disabled = false
-detect_folders = ["k8s",".kube"]
-detect_files   = ["kubeconfig",".kubeconfig"]
+symbol   = "☸ "
+style    = "bold acc"
+# Keep it quiet unless you're in k8s-ish folders/files.
+detect_folders = ["k8s", ".kube"]
+detect_files   = ["kubeconfig", ".kubeconfig"]
+format = "[$symbol$context( \\($namespace\\))]($style) "
 
+# Named capture groups are supported for context aliases. :contentReference[oaicite:5]{index=5}
 [[kubernetes.contexts]]
-context_pattern = '^gke_.*_(.*)$'
-style = "bold ok"
-symbol = "⛵ "
-context_alias = "gke-$1"
+context_pattern = '^gke_.*_(?P<cluster>[\\w-]+)$'
+context_alias   = 'gke-$cluster'
+symbol          = "⛵ "
+style           = "bold ok"
 
 [[kubernetes.contexts]]
 context_pattern = '.*openshift.*'
-style = "bold err"
-symbol = "💔 "
-context_alias = "openshift"
+context_alias   = "openshift"
+symbol          = "💔 "
+style           = "bold err"
 
 [[kubernetes.contexts]]
 context_pattern = '.*dev.*'
-style = "bold warn"
-symbol = "🔧 "
-context_alias = "dev"
+context_alias   = "dev"
+symbol          = "🔧 "
+style           = "bold warn"
 
 [[kubernetes.contexts]]
 context_pattern = '.*prod.*'
-style = "bold brand"
-symbol = "🔥 "
-context_alias = "prod"
+context_alias   = "prod"
+symbol          = "🔥 "
+style           = "bold brand"
 
 [[kubernetes.contexts]]
 context_pattern = '^minikube$|^kind.*$'
-style = "bold acc"
-symbol = "💻 "
-context_alias = "local"
+context_alias   = "local"
+symbol          = "💻 "
+style           = "bold acc"
 
 # =====================================================================
 # Cloud Providers
 # =====================================================================
 [aws]
-format = 'on [ $profile( \($region\))]($style) '
-style = "bold brand"
+format   = "[$symbol$profile( \\($region\\))]($style) "
+style    = "bold brand"
 disabled = true
 
 [gcloud]
-format = 'on [☁ $account(@$domain) \($region\)]($style) '
-style = "bold brand"
+format   = "[$symbol$account(@$domain)( \\($region\\))]($style) "
+style    = "bold brand"
 disabled = true
 
 [azure]
-format = 'on [󰠠 $subscription]($style) '
-style = "bold brand"
+format   = "[$symbol$subscription]($style) "
+style    = "bold brand"
 disabled = true
 
 # =====================================================================
 # Tools
 # =====================================================================
 [helm]
-format = 'via [⚓ $version](bold acc) '
-symbol = '⎈ '
-style = 'bold acc'
-version_format = 'v${raw}'
-detect_files   = ["helmfile.yaml","Chart.yaml"]
-detect_folders = ["charts","helm"]
+symbol          = "⎈ "
+style           = "bold acc"
+version_format  = "v${raw}"
+detect_files    = ["helmfile.yaml", "Chart.yaml"]
+detect_folders  = ["charts", "helm"]
+format          = "[$symbol$version]($style) "
 
 [terraform]
-format = 'via [🧱 $version$workspace]($style) '
-style = "bold brand"
-version_format = 'v${raw}'
-detect_extensions = ["tf","tfvars"]
+symbol            = "🧱 "
+style             = "bold brand"
+version_format    = "v${raw}"
+detect_extensions = ["tf", "tfplan", "tfstate"]
+detect_folders    = [".terraform"]
+
+# Keep Terraform snappy by default: workspace only (version can be slow). :contentReference[oaicite:6]{index=6}
+format = "[$symbol$workspace]($style) "
+# If you *really* want version, switch to:
+# format = "[$symbol$version $workspace]($style) "
 
 [docker_context]
-symbol = "🐳 "
-format = "via [$symbol$context]($style) "
-style = "bold acc"
+symbol          = "🐳 "
+style           = "bold acc"
 only_with_files = true
+# Defaults already include compose + Dockerfile; keeping explicit is fine. :contentReference[oaicite:7]{index=7}
+detect_files    = ["compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml", "Dockerfile"]
+format          = "[$symbol$context]($style) "
 
+# Languages
 [nodejs]
 disabled = true
 
 [golang]
-format = "via [ $version]($style) "
-style = "bold ok"
+style  = "bold ok"
+format = "[ $version]($style) "
 
 [rust]
-format = "via [🦀 $version]($style) "
-style = "bold ok"
+style  = "bold ok"
+format = "[🦀 $version]($style) "
 
 [python]
-format = '[${symbol}${virtualenv}${version}]($style) '
-style = "bold warn"
-symbol = " "
+symbol        = " "
+style         = "bold warn"
 python_binary = "python3"
+format        = "[$symbol$virtualenv$version]($style) "
 
 [package]
-format = "[$symbol$version]($style) "
-style = "dimmed"
 symbol = "📦 "
+style  = "dimmed dim"
+format = "[$symbol$version]($style) "
 
 # =====================================================================
 # System Info / Status / Time
 # =====================================================================
 [cmd_duration]
 min_time = 2000
-format = " [took $duration]($style)"
-style = "bold dim"
+style    = "dimmed dim"
+format   = "[took $duration]($style) "
 
 [status]
 disabled = false
-format = " [$symbol]($style)"
-symbol = "✗"
-success_symbol = "✅"
-not_executable_symbol = "…"
-style = "bold err"
-success_style = "bold ok"
-
-[battery]
-full_symbol        = "🔋 "
-charging_symbol    = "⚡ "
-discharging_symbol = "🔌 "
+# By default, Starship only shows this on failures unless success_symbol is non-empty. :contentReference[oaicite:8]{index=8}
+success_symbol = ""
+symbol         = "✗ "
+style          = "bold err"
+format         = "[$symbol$status]($style) "
+not_executable_symbol = " "
+not_found_symbol      = " "
+sigint_symbol         = "⏹ "
 
 [time]
-disabled = false
-use_12hr = true
+disabled    = false
+use_12hr    = true
 time_format = "%I:%M:%S %p"
-style = "bold dim acc"
+# style strings should be "modifier + color", not multiple palette colors at once. :contentReference[oaicite:9]{index=9}
+style  = "dimmed acc"
 format = " [🕒 $time]($style)"

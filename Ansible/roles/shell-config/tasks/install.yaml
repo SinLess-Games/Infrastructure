@@ -61,32 +61,81 @@
 
 
 # -----------------------------------------------------------------------------
-# Starship Prompt
+# Starship Prompt (robust install)
 # -----------------------------------------------------------------------------
 
-- name: Check if starship is already installed
-  ansible.builtin.command: starship --version
-  register: starship_check
+- name: Check for existing starship binary (common locations)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /usr/local/bin/starship
+    - /usr/bin/starship
+  register: starship_bins
   changed_when: false
-  failed_when: false
 
-# Prefer native package manager when available
-- name: Install starship via package manager
-  ansible.builtin.package:
-    name: starship
-    state: present
+- name: Set starship_installed fact
+  ansible.builtin.set_fact:
+    starship_installed: "{{ starship_bins.results | selectattr('stat.exists', 'equalto', true) | list | length > 0 }}"
+  changed_when: false
+
+- name: Install starship (package when supported, script fallback)
   when:
     - shell_install_starship | bool
-    - starship_check.rc != 0
-    - ansible_facts.pkg_mgr is defined
-    - ansible_facts.pkg_mgr in ['apt', 'dnf', 'pacman', 'zypper']
+    - not starship_installed
+  block:
 
-# Fallback: official install script (safe + idempotent)
-- name: Install starship via official install script (fallback)
-  ansible.builtin.shell: |
-    curl -fsSL https://starship.rs/install.sh | sh -s -- -y
-  args:
-    creates: /usr/local/bin/starship
-  when:
-    - shell_install_starship | bool
-    - starship_check.rc != 0
+    # Only attempt apt where Starship is actually expected to exist in the distro repos
+    # (per Starship docs: Ubuntu 25.04+ and Debian 13+)
+    - name: Install starship via apt (supported Debian/Ubuntu only)
+      become: true
+      ansible.builtin.apt:
+        name: starship
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      register: starship_apt
+      failed_when: false
+      changed_when: starship_apt is changed
+      when: >
+        ansible_facts.os_family == "Debian" and (
+          (ansible_facts.distribution == "Ubuntu" and (ansible_facts.distribution_version is version('25.04', '>='))) or
+          (ansible_facts.distribution == "Debian" and ((ansible_facts.distribution_major_version | int) >= 13))
+        )
+
+    # Re-check after apt attempt (or if apt skipped)
+    - name: Check if starship is now installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/starship
+      register: starship_after_apt_local
+      changed_when: false
+
+    - name: Check if starship is now installed (alt path)
+      ansible.builtin.stat:
+        path: /usr/bin/starship
+      register: starship_after_apt_usr
+      changed_when: false
+
+    - name: Install starship via official install script (fallback)
+      become: true
+      ansible.builtin.shell: |
+        set -euo pipefail
+        curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/starship
+      when: not (starship_after_apt_local.stat.exists or starship_after_apt_usr.stat.exists)
+
+    - name: Ensure starship is executable
+      become: true
+      ansible.builtin.file:
+        path: /usr/local/bin/starship
+        mode: "0755"
+      when: starship_after_apt_local.stat.exists or (not starship_after_apt_usr.stat.exists)
+
+    - name: Validate starship install (must succeed)
+      ansible.builtin.command: /usr/local/bin/starship --version
+      register: starship_version
+      changed_when: false
+
+
+

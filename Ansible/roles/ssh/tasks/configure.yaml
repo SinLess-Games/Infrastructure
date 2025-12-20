@@ -42,6 +42,14 @@
 # SSHD configuration
 # -----------------------------------------------------------------------------
 
+- name: Ensure sshd runtime directory exists (required for sshd validate)
+  ansible.builtin.file:
+    path: /run/sshd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Configure sshd to trust User CA
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
