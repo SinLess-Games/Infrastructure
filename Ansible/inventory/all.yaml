@@ -1,0 +1,12 @@
+---
+# =============================================================================
+# Global inventory root
+# -----------------------------------------------------------------------------
+# This file intentionally does NOT define hosts.
+# It exists to allow multiple inventory files to merge cleanly.
+# =============================================================================
+
+all:
+  children:
+    dev:
+    proxmox:

@@ -17,6 +17,7 @@
     - ../group_vars/all/groups.yaml
     - ../group_vars/all/zsh.yaml
     - ../group_vars/all/packages.yaml
+    - ../group_vars/all/ssh.yaml
 
   roles:
     - users
