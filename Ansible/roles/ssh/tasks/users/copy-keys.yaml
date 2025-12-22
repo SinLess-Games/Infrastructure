@@ -1,0 +1,91 @@
+---
+# =============================================================================
+# SSH :: Users :: Install authorized_keys
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Build authorized_keys for users from controller-generated materials
+# - Use Jinja template for deterministic output
+# - NEVER copy private keys
+#
+# Source of truth:
+#   {{ playbook_dir }}/../templates/ssh/authorized_keys.j2
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Resolve user home directories safely
+# -----------------------------------------------------------------------------
+
+- name: Resolve home directories from passwd
+  ansible.builtin.getent:
+    database: passwd
+
+# -----------------------------------------------------------------------------
+# Ensure ~/.ssh exists
+# -----------------------------------------------------------------------------
+
+- name: Ensure ~/.ssh directory exists for users
+  ansible.builtin.file:
+    path: "{{ getent_passwd[item.name][4] }}/.ssh"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0700"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name in getent_passwd
+
+# -----------------------------------------------------------------------------
+# Collect authorized key material (controller-side)
+# -----------------------------------------------------------------------------
+
+- name: Collect authorized key material for users
+  ansible.builtin.set_fact:
+    ssh__authorized_keys_map: >-
+      {{
+        ssh__authorized_keys_map | default({}) | combine({
+          item.name: {
+            'public_keys': lookup(
+              'fileglob',
+              ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '.pub',
+              wantlist=True
+            ),
+            'certificates': (
+              lookup(
+                'fileglob',
+                ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '-cert.pub',
+                wantlist=True
+              ) if ssh_ca_enabled | bool else []
+            ),
+            'shared_keys': (
+              item['shared-certs'] | default([])
+            )
+          }
+        })
+      }}
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Render authorized_keys using template
+# -----------------------------------------------------------------------------
+
+- name: Render authorized_keys for users
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/ssh/authorized_keys.j2"
+    dest: "{{ getent_passwd[item.name][4] }}/.ssh/authorized_keys"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0600"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name in getent_passwd
+  vars:
+    authorized_keys:
+      user: "{{ item.name }}"
+      data: "{{ ssh__authorized_keys_map[item.name] }}"

@@ -1,0 +1,96 @@
+# -------------------------------------------------------------------
+# SSH client config (Ansible managed)
+# -------------------------------------------------------------------
+# DO NOT EDIT BY HAND
+# Rendered from: {{ ansible_template_src | default('templates/ssh/config.j2') }}
+# -------------------------------------------------------------------
+
+# -------------------------------------------------------------------
+# Global defaults
+# -------------------------------------------------------------------
+
+Host *
+  {% if ssh_client.global.strict_host_key_checking is defined %}
+  StrictHostKeyChecking {{ ssh_client.global.strict_host_key_checking }}
+  {% else %}
+  StrictHostKeyChecking accept-new
+  {% endif %}
+
+  {% if ssh_client.global.forward_agent is defined %}
+  ForwardAgent {{ ssh_client.global.forward_agent }}
+  {% else %}
+  ForwardAgent no
+  {% endif %}
+
+  {% if ssh_client.global.forward_x11 is defined %}
+  ForwardX11 {{ ssh_client.global.forward_x11 }}
+  {% endif %}
+
+  {% if ssh_client.global.server_alive_interval is defined %}
+  ServerAliveInterval {{ ssh_client.global.server_alive_interval }}
+  {% endif %}
+
+  {% if ssh_client.global.server_alive_count_max is defined %}
+  ServerAliveCountMax {{ ssh_client.global.server_alive_count_max }}
+  {% endif %}
+
+  {% if ssh_client.global.use_keychain is defined %}
+  UseKeychain {{ ssh_client.global.use_keychain }}
+  {% endif %}
+
+  {% if ssh_client.global.identity_file is defined %}
+  IdentityFile {{ ssh_client.global.identity_file }}
+  {% endif %}
+
+  {% if ssh_client.global.certificate_file is defined %}
+  CertificateFile {{ ssh_client.global.certificate_file }}
+  {% endif %}
+
+  IdentitiesOnly {{ 'yes' if ssh_client.global.identities_only | default(true) else 'no' }}
+
+# -------------------------------------------------------------------
+# Per-host overrides
+# -------------------------------------------------------------------
+{% for host_cfg in ssh_client.hosts | default([]) %}
+Host {{ host_cfg.pattern | default('*') }}
+  {% if host_cfg.user is defined %}
+  User {{ host_cfg.user }}
+  {% endif %}
+
+  {% if host_cfg.hostname is defined %}
+  HostName {{ host_cfg.hostname }}
+  {% endif %}
+
+  {% if host_cfg.port is defined %}
+  Port {{ host_cfg.port }}
+  {% endif %}
+
+  {% if host_cfg.identity_file is defined %}
+  IdentityFile {{ host_cfg.identity_file }}
+  {% endif %}
+
+  {% if host_cfg.certificate_file is defined %}
+  CertificateFile {{ host_cfg.certificate_file }}
+  {% endif %}
+
+  {% if host_cfg.strict_host_key_checking is defined %}
+  StrictHostKeyChecking {{ host_cfg.strict_host_key_checking }}
+  {% endif %}
+
+  {% if host_cfg.forward_agent is defined %}
+  ForwardAgent {{ host_cfg.forward_agent }}
+  {% endif %}
+
+  {% if host_cfg.forward_x11 is defined %}
+  ForwardX11 {{ host_cfg.forward_x11 }}
+  {% endif %}
+
+  {% if host_cfg.server_alive_interval is defined %}
+  ServerAliveInterval {{ host_cfg.server_alive_interval }}
+  {% endif %}
+
+  {% if host_cfg.server_alive_count_max is defined %}
+  ServerAliveCountMax {{ host_cfg.server_alive_count_max }}
+  {% endif %}
+{% endfor %}
+

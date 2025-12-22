@@ -1,0 +1,100 @@
+---
+# =============================================================================
+# Role: ssh
+# Task: proxmox/create-ssh-authorized-keys.yaml
+#
+# Purpose:
+# - Manage authorized_keys using a template
+# - Provide a controlled fallback path (non-CA auth)
+# - Keep file deterministic and Ansible-managed
+#
+# Notes:
+# - Certificate auth remains primary
+# - authorized_keys is intentionally minimal
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Variables (expected)
+# -----------------------------------------------------------------------------
+# ssh.authorized_keys:
+#   enabled: true|false
+#   path: /root/.ssh/authorized_keys
+#   owner: root
+#   group: root
+#   mode: "0600"
+#   keys:
+#     - "ssh-ed25519 AAAA... comment"
+# -----------------------------------------------------------------------------
+
+- name: Set authorized_keys path
+  ansible.builtin.set_fact:
+    ssh__authorized_keys_path: >-
+      {{
+        ssh.authorized_keys.path
+        | default('/root/.ssh/authorized_keys')
+      }}
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Ensure .ssh directory exists
+# -----------------------------------------------------------------------------
+
+- name: Ensure SSH directory exists for authorized_keys
+  ansible.builtin.file:
+    path: "{{ ssh__authorized_keys_path | dirname }}"
+    state: directory
+    owner: "{{ ssh.authorized_keys.owner | default('root') }}"
+    group: "{{ ssh.authorized_keys.group | default('root') }}"
+    mode: "0700"
+  become: true
+
+# -----------------------------------------------------------------------------
+# Deploy authorized_keys (template-managed)
+# -----------------------------------------------------------------------------
+
+- name: Deploy authorized_keys from template
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/ssh/authorized_keys.j2"
+    dest: "{{ ssh__authorized_keys_path }}"
+    owner: "{{ ssh.authorized_keys.owner | default('root') }}"
+    group: "{{ ssh.authorized_keys.group | default('root') }}"
+    mode: "{{ ssh.authorized_keys.mode | default('0600') }}"
+  become: true
+  when:
+    - ssh.authorized_keys is defined
+    - ssh.authorized_keys.enabled | default(true)
+
+# -----------------------------------------------------------------------------
+# Optional: remove authorized_keys if disabled
+# -----------------------------------------------------------------------------
+
+- name: Remove authorized_keys when disabled
+  ansible.builtin.file:
+    path: "{{ ssh__authorized_keys_path }}"
+    state: absent
+  become: true
+  when:
+    - ssh.authorized_keys is defined
+    - not (ssh.authorized_keys.enabled | default(true))
+
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
+
+- name: Verify authorized_keys file exists (when enabled)
+  ansible.builtin.stat:
+    path: "{{ ssh__authorized_keys_path }}"
+  register: ssh__authorized_keys_stat
+  become: true
+  when:
+    - ssh.authorized_keys is defined
+    - ssh.authorized_keys.enabled | default(true)
+
+- name: Assert authorized_keys was deployed
+  ansible.builtin.assert:
+    that:
+      - ssh__authorized_keys_stat.stat.exists
+    fail_msg: "authorized_keys was not created as expected"
+  when:
+    - ssh.authorized_keys is defined
+    - ssh.authorized_keys.enabled | default(true)

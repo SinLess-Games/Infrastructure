@@ -1,0 +1,187 @@
+# =============================================================================
+# OpenSSH server configuration (Ansible managed)
+# Intended to be deployed as a drop-in under sshd_config.d/*.conf.
+#
+# Notes:
+# - TrustedUserCAKeys enables user certificate authentication.
+# - AuthorizedPrincipalsFile is consulted ONLY for cert-based user auth
+#   when the cert chains to a CA in TrustedUserCAKeys.
+# - HostCertificate enables host key certificates (server identity).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Listener / basics
+# -----------------------------------------------------------------------------
+
+{% if ssh.server.ports is defined %}
+{% for p in ssh.server.ports %}
+Port {{ p }}
+{% endfor %}
+{% elif ssh.server.port is defined %}
+Port {{ ssh.server.port }}
+{% endif %}
+
+{% if ssh.server.address_family is defined %}
+AddressFamily {{ ssh.server.address_family }}
+{% endif %}
+
+{% if ssh.server.listen_addresses is defined %}
+{% for addr in ssh.server.listen_addresses %}
+ListenAddress {{ addr }}
+{% endfor %}
+{% endif %}
+
+{% if ssh.server.host_keys is defined %}
+{% for hk in ssh.server.host_keys %}
+HostKey {{ hk }}
+{% endfor %}
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Authentication
+# -----------------------------------------------------------------------------
+
+UsePAM {{ 'yes' if (ssh.server.use_pam | default(true)) else 'no' }}
+
+PubkeyAuthentication {{ 'yes' if (ssh.server.pubkey_authentication | default(true)) else 'no' }}
+PasswordAuthentication {{ 'yes' if (ssh.server.password_authentication | default(false)) else 'no' }}
+KbdInteractiveAuthentication {{ 'yes' if (ssh.server.kbd_interactive_authentication | default(false)) else 'no' }}
+
+{# Back-compat only (some distros still accept it; omit unless explicitly set) #}
+{% if ssh.server.challenge_response_authentication is defined %}
+ChallengeResponseAuthentication {{ 'yes' if ssh.server.challenge_response_authentication else 'no' }}
+{% endif %}
+
+PermitRootLogin {{ ssh.server.permit_root_login | default('prohibit-password') }}
+PermitEmptyPasswords {{ 'yes' if (ssh.server.permit_empty_passwords | default(false)) else 'no' }}
+
+{% if ssh.server.authentication_methods is defined %}
+AuthenticationMethods {{ ssh.server.authentication_methods }}
+{% endif %}
+
+{% if ssh.server.authorized_keys_file is defined %}
+AuthorizedKeysFile {{ ssh.server.authorized_keys_file }}
+{% endif %}
+
+{% if ssh.server.pubkey_accepted_algorithms is defined %}
+PubkeyAcceptedAlgorithms {{ ssh.server.pubkey_accepted_algorithms }}
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Certificate authentication (User CA)
+# -----------------------------------------------------------------------------
+
+TrustedUserCAKeys {{ ssh.server.trusted_user_ca_keys | default('/etc/ssh/ca/ssh_ca.pub') }}
+AuthorizedPrincipalsFile {{ ssh.server.authorized_principals_file | default('/etc/ssh/auth_principals/%u') }}
+
+# -----------------------------------------------------------------------------
+# Host key certificate (server identity) — optional
+# -----------------------------------------------------------------------------
+
+{% if (ssh.server.enable_host_certificate | default(false)) %}
+HostCertificate {{ ssh.server.host_certificate_path | default('/etc/ssh/ssh_host_ed25519_key-cert.pub') }}
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Access control (optional allow/deny lists)
+# -----------------------------------------------------------------------------
+
+{% if ssh.server.allow_users is defined and (ssh.server.allow_users | length > 0) %}
+AllowUsers {{ ssh.server.allow_users | join(' ') }}
+{% endif %}
+
+{% if ssh.server.allow_groups is defined and (ssh.server.allow_groups | length > 0) %}
+AllowGroups {{ ssh.server.allow_groups | join(' ') }}
+{% endif %}
+
+{% if ssh.server.deny_users is defined and (ssh.server.deny_users | length > 0) %}
+DenyUsers {{ ssh.server.deny_users | join(' ') }}
+{% endif %}
+
+{% if ssh.server.deny_groups is defined and (ssh.server.deny_groups | length > 0) %}
+DenyGroups {{ ssh.server.deny_groups | join(' ') }}
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Session / forwarding controls
+# -----------------------------------------------------------------------------
+
+X11Forwarding {{ 'yes' if (ssh.server.x11_forwarding | default(false)) else 'no' }}
+
+AllowAgentForwarding {{ 'yes' if (ssh.server.allow_agent_forwarding | default(false)) else 'no' }}
+AllowTcpForwarding {{ ssh.server.allow_tcp_forwarding | default('no') }}
+GatewayPorts {{ 'yes' if (ssh.server.gateway_ports | default(false)) else 'no' }}
+PermitTunnel {{ ssh.server.permit_tunnel | default('no') }}
+
+PermitUserEnvironment {{ 'yes' if (ssh.server.permit_user_environment | default(false)) else 'no' }}
+PermitTTY {{ 'yes' if (ssh.server.permit_tty | default(true)) else 'no' }}
+
+# -----------------------------------------------------------------------------
+# Hardening / hygiene
+# -----------------------------------------------------------------------------
+
+UseDNS {{ 'yes' if (ssh.server.use_dns | default(false)) else 'no' }}
+TCPKeepAlive {{ 'yes' if (ssh.server.tcp_keepalive | default(true)) else 'no' }}
+
+LoginGraceTime {{ ssh.server.login_grace_time | default('30s') }}
+MaxAuthTries {{ ssh.server.max_auth_tries | default(3) }}
+MaxSessions {{ ssh.server.max_sessions | default(10) }}
+
+ClientAliveInterval {{ ssh.server.client_alive_interval | default(300) }}
+ClientAliveCountMax {{ ssh.server.client_alive_count_max | default(2) }}
+
+{% if ssh.server.log_level is defined %}
+LogLevel {{ ssh.server.log_level }}
+{% else %}
+LogLevel VERBOSE
+{% endif %}
+
+{% if ssh.server.syslog_facility is defined %}
+SyslogFacility {{ ssh.server.syslog_facility }}
+{% endif %}
+
+# Reduce noise / avoid leaking distro banners (optional)
+PrintMotd {{ 'yes' if (ssh.server.print_motd | default(false)) else 'no' }}
+
+# -----------------------------------------------------------------------------
+# Environment variables (optional)
+# -----------------------------------------------------------------------------
+
+{% if ssh.server.accept_env is defined and (ssh.server.accept_env | length > 0) %}
+AcceptEnv {{ ssh.server.accept_env | join(' ') }}
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Crypto policy (optional; only set if you explicitly want to override distro)
+# -----------------------------------------------------------------------------
+
+{% if ssh.server.ciphers is defined and (ssh.server.ciphers | length > 0) %}
+Ciphers {{ ssh.server.ciphers | join(',') }}
+{% endif %}
+
+{% if ssh.server.macs is defined and (ssh.server.macs | length > 0) %}
+MACs {{ ssh.server.macs | join(',') }}
+{% endif %}
+
+{% if ssh.server.kex_algorithms is defined and (ssh.server.kex_algorithms | length > 0) %}
+KexAlgorithms {{ ssh.server.kex_algorithms | join(',') }}
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# SFTP subsystem (optional; omit to keep distro default)
+# -----------------------------------------------------------------------------
+
+{% if ssh.server.subsystem_sftp is defined %}
+Subsystem sftp {{ ssh.server.subsystem_sftp }}
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Optional per-user overrides
+# -----------------------------------------------------------------------------
+
+{% if ssh.server.root_pubkey_only is defined and ssh.server.root_pubkey_only %}
+Match User root
+  AuthenticationMethods publickey
+  PasswordAuthentication no
+  KbdInteractiveAuthentication no
+{% endif %}

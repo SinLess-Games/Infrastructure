@@ -1,0 +1,92 @@
+---
+# =============================================================================
+# Role: ssh
+# Task: proxmox/create-known-hosts.yaml
+#
+# Purpose:
+# - Install a CA-backed SSH known_hosts file
+# - Use @cert-authority entries via template
+# - Support wildcard DNS (*.local.sinlessgames.com, *.local.sinlessgamesllc.com)
+#
+# Design:
+# - No ssh-keyscan
+# - No pinned host keys
+# - Deterministic, CA-based trust only
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Variables (expected)
+# -----------------------------------------------------------------------------
+# ssh.known_hosts.cert_authority_patterns:
+#   - "*.local.sinlessgames.com"
+#   - "*.local.sinlessgamesllc.com"
+#
+# ssh.known_hosts.trusted_user_ca_keys:
+#   /etc/ssh/ca/ssh_ca.pub
+#
+# ssh_known_hosts_path (optional):
+#   /root/.ssh/known_hosts
+# -----------------------------------------------------------------------------
+
+- name: Set known_hosts path
+  ansible.builtin.set_fact:
+    ssh__known_hosts_path: "{{ ssh_known_hosts_path | default('/root/.ssh/known_hosts') }}"
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Ensure .ssh directory exists
+# -----------------------------------------------------------------------------
+
+- name: Ensure root .ssh directory exists
+  ansible.builtin.file:
+    path: "{{ ssh__known_hosts_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+# -----------------------------------------------------------------------------
+# Assert SSH CA public key exists on node
+# -----------------------------------------------------------------------------
+
+- name: Assert SSH CA public key exists on node
+  ansible.builtin.stat:
+    path: "{{ ssh.known_hosts.trusted_user_ca_keys }}"
+  register: ssh__known_hosts_ca_pub
+  become: true
+
+- name: Fail if SSH CA public key is missing
+  ansible.builtin.fail:
+    msg: "SSH CA public key not found at {{ ssh.known_hosts.trusted_user_ca_keys }}"
+  when: not ssh__known_hosts_ca_pub.stat.exists
+
+# -----------------------------------------------------------------------------
+# Deploy known_hosts via template
+# -----------------------------------------------------------------------------
+
+- name: Deploy CA-based known_hosts file
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/ssh/known_hosts.j2"
+    dest: "{{ ssh__known_hosts_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
+
+- name: Verify known_hosts contains @cert-authority entries
+  ansible.builtin.shell: |
+    grep '^@cert-authority' {{ ssh__known_hosts_path }}
+  register: ssh__known_hosts_verify
+  changed_when: false
+  become: true
+
+- name: Assert CA trust is present in known_hosts
+  ansible.builtin.assert:
+    that:
+      - ssh__known_hosts_verify.stdout is search('@cert-authority')
+    fail_msg: "known_hosts does not contain SSH CA trust entries"

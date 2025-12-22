@@ -1,38 +1,138 @@
 ---
 # =============================================================================
 # SSH Role – Task Orchestration
-# -----------------------------------------------------------------------------
-# Orchestrates SSH key, CA, signing, and distribution tasks.
+# =============================================================================
+#
+# Purpose:
+# - Orchestrate SSH key, CA, signing, and deployment workflows
+# - Support both generic Linux hosts and Proxmox-specific extensions
 #
 # Execution model:
-#   1. validate       → fail fast on bad input
-#   2. generate-keys  → local user key generation
-#   3. generate-ca   → local CA generation (optional)
-#   4. sign          → local cert signing (optional)
-#   5. copy          → deploy keys/certs to hosts
+#   Phase 1  → validation (fail fast)
+#   Phase 2  → local material generation (keys / CA / certs)
+#   Phase 3  → user-level deployment
+#   Phase 4  → system / daemon configuration
+#   Phase 5  → platform-specific extensions (Proxmox)
 #
-# Local-only tasks are explicitly delegated to localhost inside task files.
+# Notes:
+# - Local-only tasks MUST delegate to localhost internally
+# - Proxmox logic is isolated
+# - Users are handled in a dedicated block
 # =============================================================================
 
+# -----------------------------------------------------------------------------
+# Phase 1: Validation
+# -----------------------------------------------------------------------------
+
 - name: Validate SSH role inputs
-  ansible.builtin.import_tasks: validate.yaml
+  ansible.builtin.import_tasks: base/validate.yaml
 
-- name: Generate SSH user keys
-  ansible.builtin.import_tasks: generate-keys.yaml
+# -----------------------------------------------------------------------------
+# Phase 2: Detect existing SSH materials (controller-side)
+# -----------------------------------------------------------------------------
 
-- name: Generate SSH Certificate Authority
-  ansible.builtin.import_tasks: generate-ca.yaml
-  when: ssh_ca_enabled | bool
+- name: Check for existing SSH user keys (controller)
+  ansible.builtin.stat:
+    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
+  loop: "{{ users }}"
+  delegate_to: localhost
+  register: ssh__user_key_stats
+  changed_when: false
+  run_once: true
 
-- name: Sign SSH user keys with CA
-  ansible.builtin.import_tasks: sign.yaml
-  when: ssh_ca_enabled | bool
+- name: Determine if SSH user key generation is required
+  ansible.builtin.set_fact:
+    ssh__generate_user_keys: >-
+      {{
+        ssh__user_key_stats.results
+        | selectattr('stat.exists', 'equalto', false)
+        | list
+        | length > 0
+      }}
+  run_once: true
+  changed_when: false
 
-- name: Copy SSH keys and certificates to users
-  ansible.builtin.import_tasks: copy.yaml
+- name: Check for existing SSH CA (controller)
+  ansible.builtin.stat:
+    path: "{{ ssh_ca_output_dir }}/ssh_ca"
+  delegate_to: localhost
+  register: ssh__ca_stat
+  changed_when: false
+  run_once: true
 
-- name: Configure SSH Daemon to trust User CA
-  ansible.builtin.import_tasks: configure.yaml
+- name: Determine if SSH CA generation is required
+  ansible.builtin.set_fact:
+    ssh__generate_ca: "{{ not ssh__ca_stat.stat.exists }}"
+  run_once: true
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Phase 2: Local SSH material generation (conditional)
+# -----------------------------------------------------------------------------
+
+- name: Generate SSH user keys (controller)
+  ansible.builtin.import_tasks: base/generate-keys.yaml
+  when: ssh__generate_user_keys | bool
+
+- name: Generate SSH Certificate Authority (controller)
+  ansible.builtin.import_tasks: base/generate-ca.yaml
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__generate_ca | bool
+
+- name: Sign SSH user keys with CA (controller)
+  ansible.builtin.import_tasks: base/sign.yaml
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__generate_user_keys | bool or ssh__generate_ca | bool
+
+# -----------------------------------------------------------------------------
+# Phase 3: User-level SSH deployment
+# -----------------------------------------------------------------------------
+
+- name: User SSH configuration
+  when: users is defined and users | length > 0
+  block:
+
+    - name: Install authorized_keys for users
+      ansible.builtin.import_tasks: users/copy-keys.yaml
+
+    - name: Install SSH client config for users
+      ansible.builtin.import_tasks: users/copy-config.yaml
+
+    - name: Install user known_hosts
+      ansible.builtin.import_tasks: users/copy-known-hosts.yaml
+
+# -----------------------------------------------------------------------------
+# Phase 4: System / daemon SSH configuration
+# -----------------------------------------------------------------------------
+
+- name: Configure SSH daemon (generic)
+  ansible.builtin.import_tasks: base/configure.yaml
 
 - name: Fix SSH output permissions
-  ansible.builtin.import_tasks: fix-permissions.yaml
+  ansible.builtin.import_tasks: base/fix-permissions.yaml
+
+# -----------------------------------------------------------------------------
+# Phase 5: Proxmox-specific SSH configuration
+# -----------------------------------------------------------------------------
+
+- name: Proxmox SSH configuration
+  when: "'proxmox' in group_names"
+  block:
+
+    - name: Copy SSH Certificate Authority files to Proxmox node
+      ansible.builtin.import_tasks: proxmox/copy-ca.yaml
+
+    - name: Sign Proxmox host SSH keys with CA
+      ansible.builtin.import_tasks: proxmox/sign-host-keys.yaml
+      when: ssh_ca_enabled | default(false) | bool
+
+    - name: Create Proxmox known_hosts entries
+      ansible.builtin.import_tasks: proxmox/create-known-hosts.yaml
+
+    - name: Create authorized_keys for Proxmox users
+      ansible.builtin.import_tasks: proxmox/create-ssh-authorized-keys.yaml
+
+    - name: Configure Proxmox SSH daemon
+      ansible.builtin.import_tasks: proxmox/configure-ssh.yaml

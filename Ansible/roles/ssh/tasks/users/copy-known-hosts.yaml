@@ -1,0 +1,67 @@
+# Ansible/roles/ssh/tasks/users/copy-known-hosts.yaml
+---
+# =============================================================================
+# SSH :: Users :: Install known_hosts
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Deploy ~/.ssh/known_hosts for users
+# - Use CA-based trust (@cert-authority)
+# - Template is rendered on the controller, so DO NOT do remote file lookups
+#
+# Template:
+#   {{ playbook_dir }}/../templates/ssh/known_hosts.j2
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Resolve home directories safely
+# -----------------------------------------------------------------------------
+
+- name: Resolve home directories from passwd
+  ansible.builtin.getent:
+    database: passwd
+
+# -----------------------------------------------------------------------------
+# Read SSH CA public key (controller)
+# -----------------------------------------------------------------------------
+
+- name: Read SSH CA public key (controller)
+  ansible.builtin.set_fact:
+    ssh_ca_pub: "{{ lookup('file', (ssh.controller.outputs_dir | default(ssh_controller_outputs_dir)) ~ '/ssh-ca/ssh_ca.pub') }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Ensure ~/.ssh exists
+# -----------------------------------------------------------------------------
+
+- name: Ensure ~/.ssh directory exists for users
+  ansible.builtin.file:
+    path: "{{ getent_passwd[item.name][4] }}/.ssh"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0700"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name in getent_passwd
+
+# -----------------------------------------------------------------------------
+# Deploy known_hosts
+# -----------------------------------------------------------------------------
+
+- name: Deploy known_hosts for users
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/ssh/known_hosts.j2"
+    dest: "{{ getent_passwd[item.name][4] }}/.ssh/known_hosts"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0644"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name in getent_passwd
+  vars:
+    ansible_template_src: "templates/ssh/known_hosts.j2"
+    ssh_render_host_entries: false

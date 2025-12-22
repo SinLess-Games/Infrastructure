@@ -1,0 +1,81 @@
+---
+# =============================================================================
+# Role: ssh
+# Task: proxmox/configure-ssh.yaml
+#
+# Purpose:
+# - Deploy SSH daemon configuration using CA-based auth
+# - Template sshd_config as a drop-in (Proxmox-safe)
+# - Validate configuration before reload
+#
+# Design principles:
+# - No inline edits to sshd_config logic
+# - Drop-in overrides only
+# - Validation before restart
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Ensure sshd drop-in directory exists
+# -----------------------------------------------------------------------------
+
+- name: Ensure sshd_config.d directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+# -----------------------------------------------------------------------------
+# Ensure base sshd_config includes drop-in support
+# -----------------------------------------------------------------------------
+
+- name: Ensure sshd_config includes drop-in directory
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    insertafter: BOF
+    regexp: '^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf\s*$'
+    line: 'Include /etc/ssh/sshd_config.d/*.conf'
+    state: present
+  become: true
+
+# -----------------------------------------------------------------------------
+# Deploy SSH daemon configuration (CA-based)
+# -----------------------------------------------------------------------------
+
+- name: Deploy sshd configuration drop-in
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/ssh/sshd_config.j2"
+    dest: /etc/ssh/sshd_config.d/50-ansible-ssh.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart sshd
+  become: true
+
+# -----------------------------------------------------------------------------
+# Validate sshd configuration before reload
+# -----------------------------------------------------------------------------
+
+- name: Validate sshd configuration syntax
+  ansible.builtin.command: sshd -t
+  changed_when: false
+  become: true
+
+- name: Read effective sshd configuration
+  ansible.builtin.command: sshd -T
+  register: sshd_effective
+  changed_when: false
+  become: true
+
+# -----------------------------------------------------------------------------
+# Assert CA-based auth is active
+# -----------------------------------------------------------------------------
+
+- name: Assert SSH CA trust and principals are active
+  ansible.builtin.assert:
+    that:
+      - "'trustedusercakeys {{ ssh.server.trusted_user_ca_keys }}' in sshd_effective.stdout"
+      - "'authorizedprincipalsfile {{ ssh.server.authorized_principals_file }}' in sshd_effective.stdout"
+    fail_msg: "SSH CA-based authentication is NOT active"

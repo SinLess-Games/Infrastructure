@@ -1,0 +1,66 @@
+---
+# =============================================================================
+# Role: ssh
+# Task: proxmox/copy-ca.yaml
+#
+# Purpose:
+# - Copy SSH Certificate Authority files from the controller
+#   into the target node at /etc/ssh/ca/
+#
+# Files expected under controller:
+#   .outputs/ssh-ca/ssh_ca
+#   .outputs/ssh-ca/ssh_ca.pub
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Ensure CA directory exists
+# -----------------------------------------------------------------------------
+- name: Ensure SSH CA directory exists on node
+  ansible.builtin.file:
+    path: /etc/ssh/ca
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+# -----------------------------------------------------------------------------
+# Copy SSH CA private key (optional)
+# -----------------------------------------------------------------------------
+# NOTE: Only copy the private CA key where you actually sign keys.
+#       If this machine is *not* the signing host, skip copying the private CA.
+- name: Copy SSH CA private key to node (only on CA host)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../.outputs/ssh-ca/ssh_ca"
+    dest: /etc/ssh/ca
+    owner: root
+    group: root
+    mode: "0600"
+  when: ssh_copy_ca_private | default(false)
+  become: true
+
+# -----------------------------------------------------------------------------
+# Copy SSH CA public key
+# -----------------------------------------------------------------------------
+- name: Copy SSH CA public key to node
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../.outputs/ssh-ca/ssh_ca.pub"
+    dest: /etc/ssh/ca/ssh_ca.pub
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+# -----------------------------------------------------------------------------
+# Optional: verify via stat
+# -----------------------------------------------------------------------------
+- name: Assert SSH CA public key exists on node
+  ansible.builtin.stat:
+    path: /etc/ssh/ca/ssh_ca.pub
+  register: ssh_ca_pub_on_node
+  become: true
+
+- name: Fail if SSH CA public key is missing on node
+  ansible.builtin.fail:
+    msg: "SSH CA public key failed to copy to /etc/ssh/ca/ssh_ca.pub"
+  when: not ssh_ca_pub_on_node.stat.exists

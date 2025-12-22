@@ -1,0 +1,34 @@
+# Ansible/templates/ssh/known_hosts.j2
+
+# -------------------------------------------------------------------
+# SSH known_hosts managed by Ansible (with CA trust)
+# -------------------------------------------------------------------
+# Trust SSH host certificates signed by your SSH CA for your domains
+{% if ssh_ca_pub is defined and (ssh_ca_pub | trim | length) > 0 %}
+# Trust any host under local.sinlessgames.com
+@cert-authority *.local.sinlessgames.com {{ ssh_ca_pub }}
+
+# Trust any host under local.sinlessgamesllc.com
+@cert-authority *.local.sinlessgamesllc.com {{ ssh_ca_pub }}
+{% endif %}
+
+# -------------------------------------------------------------------
+# Optional explicit host entries (fallback)
+# IMPORTANT:
+# - This MUST be disabled by default because templates render on controller.
+# - Only enable if you pre-collect host key/cert material into variables.
+# -------------------------------------------------------------------
+{% if ssh_render_host_entries | default(false) %}
+{% for host in groups['all'] | default([]) %}
+{% set hostnames = [
+    (hostvars[host]['ansible_fqdn'] if hostvars[host]['ansible_fqdn'] is defined else host),
+    hostvars[host]['inventory_hostname']
+] %}
+{% for name in hostnames %}
+{% if hostvars[host]['ansible_default_ipv4'] is defined %}
+# ssh_host_cert for {{ name }}
+# NOTE: Do NOT use lookup('file', ...) here unless the file exists on controller.
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endif %}
