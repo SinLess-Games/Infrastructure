@@ -1,0 +1,53 @@
+---
+# Ansible/roles/ssh/tasks/proxmox/ensure-ssh-works.yaml
+#
+# Ensures AuthorizedPrincipalsFile directory exists and that root's principals
+# file contains:
+#   - root's own ssh_principals
+#   - plus ssh_principals of any user that shares root cert (shared-certs includes "root")
+
+- name: Resolve AuthorizedPrincipalsFile base directory
+  ansible.builtin.set_fact:
+    _ssh_authorized_principals_path: "{{ ssh.server.authorized_principals_file | default('/etc/ssh/auth_principals/%u') }}"
+    _ssh_authorized_principals_dir: "{{ (ssh.server.authorized_principals_file | default('/etc/ssh/auth_principals/%u')) | dirname }}"
+
+- name: Ensure AuthorizedPrincipalsFile directory exists
+  ansible.builtin.file:
+    path: "{{ _ssh_authorized_principals_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Get root user definition (if present)
+  ansible.builtin.set_fact:
+    _ssh_root_user_def: "{{ (ssh.users | default([]) | selectattr('name', 'equalto', 'root') | list | first) | default({}) }}"
+
+- name: Initialize root allowed principals (defaults to ['root'])
+  ansible.builtin.set_fact:
+    ssh_root_allowed_principals: "{{ _ssh_root_user_def.ssh_principals | default(['root']) }}"
+
+- name: Merge principals of users sharing root cert
+  ansible.builtin.set_fact:
+    ssh_root_allowed_principals: "{{ ssh_root_allowed_principals + (item.ssh_principals | default([])) }}"
+  loop: "{{ ssh.users | default([]) }}"
+  when:
+    - item.name is defined
+    - item.name != 'root'
+    - "'root' in (item.get('shared-certs', []))"
+
+- name: Normalize root allowed principals
+  ansible.builtin.set_fact:
+    ssh_root_allowed_principals: "{{ ssh_root_allowed_principals | unique | sort }}"
+
+- name: Deploy root AuthorizedPrincipals file
+  ansible.builtin.copy:
+    dest: "{{ _ssh_authorized_principals_path | replace('%u', 'root') }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ ssh_root_allowed_principals | join('\n') }}
+  notify: Restart sshd
+  become: true

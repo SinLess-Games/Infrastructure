@@ -1,23 +1,12 @@
 ---
 # =============================================================================
-# SSH Role – Task Orchestration
+# SSH Role – Task Orchestration (SELF-HEALING + PATH-ROBUST)
 # =============================================================================
 #
-# Purpose:
-# - Orchestrate SSH key, CA, signing, and deployment workflows
-# - Support both generic Linux hosts and Proxmox-specific extensions
-#
-# Execution model:
-#   Phase 1  → validation (fail fast)
-#   Phase 2  → local material generation (keys / CA / certs)
-#   Phase 3  → user-level deployment
-#   Phase 4  → system / daemon configuration
-#   Phase 5  → platform-specific extensions (Proxmox)
-#
-# Notes:
-# - Local-only tasks MUST delegate to localhost internally
-# - Proxmox logic is isolated
-# - Users are handled in a dedicated block
+# Fixes:
+# - Avoid ansible.builtin.stat follow=true ELOOP failures ("Too many levels of symbolic links")
+# - Break/repair CA symlink loops by converging to a REAL canonical keypair (copy, not link)
+# - Keep optional candidate symlinks pointing at canonical WITHOUT creating cycles
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -31,12 +20,21 @@
 # Phase 2: Detect existing SSH materials (controller-side)
 # -----------------------------------------------------------------------------
 
-- name: Check for existing SSH user keys (controller)
+- name: Check for existing SSH user private keys (controller)
   ansible.builtin.stat:
     path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
   loop: "{{ users }}"
   delegate_to: localhost
-  register: ssh__user_key_stats
+  register: ssh__user_privkey_stats
+  changed_when: false
+  run_once: true
+
+- name: Check for existing SSH user public keys (controller)
+  ansible.builtin.stat:
+    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
+  loop: "{{ users }}"
+  delegate_to: localhost
+  register: ssh__user_pubkey_stats
   changed_when: false
   run_once: true
 
@@ -44,47 +42,400 @@
   ansible.builtin.set_fact:
     ssh__generate_user_keys: >-
       {{
-        ssh__user_key_stats.results
-        | selectattr('stat.exists', 'equalto', false)
-        | list
-        | length > 0
+        (
+          (ssh__user_privkey_stats.results | selectattr('stat.exists','equalto',false) | list | length) > 0
+        )
+        or
+        (
+          (ssh__user_pubkey_stats.results | selectattr('stat.exists','equalto',false) | list | length) > 0
+        )
       }}
   run_once: true
   changed_when: false
 
-- name: Check for existing SSH CA (controller)
-  ansible.builtin.stat:
-    path: "{{ ssh_ca_output_dir }}/ssh_ca"
-  delegate_to: localhost
-  register: ssh__ca_stat
+# -----------------------------------------------------------------------------
+# Phase 2A: Canonical CA paths + candidate resolution (controller-side)
+# -----------------------------------------------------------------------------
+
+- name: Set canonical CA paths (controller)
+  ansible.builtin.set_fact:
+    ssh__ca_canonical_dir: "{{ ssh_ca_output_dir }}"
+    ssh__ca_canonical_pub: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
+    ssh__ca_canonical_priv: "{{ ssh_ca_output_dir }}/ssh_ca"
+    # Common alternate directory naming (dash vs underscore) if your repo ever used both
+    ssh__ca_alt_dir: "{{ (ssh_ca_output_dir | regex_replace('/ssh-ca$', '/ssh_ca')) }}"
+  run_once: true
   changed_when: false
+
+- name: Read configured CA pub candidates (safe)
+  ansible.builtin.set_fact:
+    ssh__controller_ca_pub_candidates: "{{ ssh.controller.ca_pub_candidates | default([]) }}"
+  run_once: true
+  changed_when: false
+
+- name: Build SSH CA pubkey candidate list (canonical-first)
+  ansible.builtin.set_fact:
+    ssh__ca_pub_candidates: >-
+      {{
+        (
+          [ssh__ca_canonical_pub]
+          + (
+              ([ssh__ca_alt_dir ~ '/ssh_ca.pub'] if (ssh__ca_alt_dir | length > 0 and ssh__ca_alt_dir != ssh__ca_canonical_dir) else [])
+            )
+          + ssh__controller_ca_pub_candidates
+        )
+        | map('string')
+        | unique
+        | list
+      }}
+  run_once: true
+  changed_when: false
+
+- name: Build SSH CA keypair candidate paths
+  ansible.builtin.set_fact:
+    ssh__ca_keypair_candidates: >-
+      {%- set out = [] -%}
+      {%- for pub in ssh__ca_pub_candidates -%}
+      {%- set _ = out.append({'pub': pub, 'priv': (pub | regex_replace('\\.pub$', ''))}) -%}
+      {%- endfor -%}
+      {{ out }}
+  run_once: true
+  changed_when: false
+
+# IMPORTANT:
+# Do NOT use stat(follow=true) on paths that may contain symlink cycles (ELOOP).
+# Instead, probe usability with shell `test -f/-r`, and treat failures as "not usable".
+
+- name: Probe CA keypair candidates for usability (controller) (ELOOP-safe)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    pub="{{ item.pub }}"
+    priv="{{ item.priv }}"
+    test -f "$pub" -a -r "$pub"
+    test -f "$priv" -a -r "$priv"
+  args:
+    executable: /bin/bash
+  loop: "{{ ssh__ca_keypair_candidates }}"
+  delegate_to: localhost
+  register: ssh__ca_candidate_checks
+  failed_when: false
+  changed_when: false
+  run_once: true
+  when: ssh_ca_enabled | default(false) | bool
+
+- name: Initialize CA source selection (controller)
+  ansible.builtin.set_fact:
+    ssh__ca_source_pub: ""
+    ssh__ca_source_priv: ""
+    ssh__ca_source_dir: ""
+  run_once: true
+  changed_when: false
+
+- name: Select first usable CA keypair candidate (controller)
+  ansible.builtin.set_fact:
+    ssh__ca_source_pub: "{{ item.item.pub }}"
+    ssh__ca_source_priv: "{{ item.item.priv }}"
+    ssh__ca_source_dir: "{{ item.item.pub | dirname }}"
+  loop: "{{ ssh__ca_candidate_checks.results | default([]) }}"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__ca_source_pub | length == 0
+    - item.rc is defined
+    - item.rc == 0
+  loop_control:
+    label: "{{ item.item.pub }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+
+- name: Ensure canonical CA directory exists (controller)
+  ansible.builtin.file:
+    path: "{{ ssh__ca_canonical_dir }}"
+    state: directory
+    mode: "0755"
+  when: ssh_ca_enabled | default(false) | bool
+  delegate_to: localhost
   run_once: true
 
 - name: Determine if SSH CA generation is required
   ansible.builtin.set_fact:
-    ssh__generate_ca: "{{ not ssh__ca_stat.stat.exists }}"
+    ssh__generate_ca: >-
+      {{
+        (ssh_ca_enabled | default(false) | bool)
+        and (ssh__ca_source_pub | length == 0)
+      }}
   run_once: true
   changed_when: false
 
+# If canonical CA paths are symlinks (including loops), remove them so we can copy/generate cleanly.
+- name: Stat canonical CA public key (no-follow) (controller)
+  ansible.builtin.stat:
+    path: "{{ ssh__ca_canonical_pub }}"
+    follow: false
+  when: ssh_ca_enabled | default(false) | bool
+  delegate_to: localhost
+  register: ssh__ca_canonical_pub_lstat
+  failed_when: false
+  changed_when: false
+  run_once: true
+
+- name: Stat canonical CA private key (no-follow) (controller)
+  ansible.builtin.stat:
+    path: "{{ ssh__ca_canonical_priv }}"
+    follow: false
+  when: ssh_ca_enabled | default(false) | bool
+  delegate_to: localhost
+  register: ssh__ca_canonical_priv_lstat
+  failed_when: false
+  changed_when: false
+  run_once: true
+
+- name: Remove canonical CA public key if it is a symlink (controller)
+  ansible.builtin.file:
+    path: "{{ ssh__ca_canonical_pub }}"
+    state: absent
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__ca_canonical_pub_lstat.stat is defined
+    - ssh__ca_canonical_pub_lstat.stat.exists | default(false) | bool
+    - ssh__ca_canonical_pub_lstat.stat.islnk | default(false) | bool
+  delegate_to: localhost
+  become: true
+  run_once: true
+
+- name: Remove canonical CA private key if it is a symlink (controller)
+  ansible.builtin.file:
+    path: "{{ ssh__ca_canonical_priv }}"
+    state: absent
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__ca_canonical_priv_lstat.stat is defined
+    - ssh__ca_canonical_priv_lstat.stat.exists | default(false) | bool
+    - ssh__ca_canonical_priv_lstat.stat.islnk | default(false) | bool
+  delegate_to: localhost
+  become: true
+  run_once: true
+
+# Converge onto canonical by COPYING (not linking) to prevent symlink cycles.
+- name: Converge CA into canonical path (copy public key)
+  ansible.builtin.copy:
+    src: "{{ ssh__ca_source_pub }}"
+    dest: "{{ ssh__ca_canonical_pub }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__generate_ca | bool == false
+    - ssh__ca_source_pub | length > 0
+    - ssh__ca_source_pub != ssh__ca_canonical_pub
+  delegate_to: localhost
+  become: true
+  run_once: true
+
+- name: Converge CA into canonical path (copy private key)
+  ansible.builtin.copy:
+    src: "{{ ssh__ca_source_priv }}"
+    dest: "{{ ssh__ca_canonical_priv }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__generate_ca | bool == false
+    - ssh__ca_source_priv | length > 0
+    - ssh__ca_source_priv != ssh__ca_canonical_priv
+  delegate_to: localhost
+  become: true
+  run_once: true
+
+# Generate CA directly into canonical dir if none exists anywhere.
+- name: Generate or repair SSH Certificate Authority (controller)
+  ansible.builtin.import_tasks: base/generate-ca.yaml
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__generate_ca | bool
+
+# After generation (or converge), define resolved CA paths to ALWAYS be canonical.
+- name: Set resolved CA paths to canonical (controller)
+  ansible.builtin.set_fact:
+    ssh__ca_resolved_pub: "{{ ssh__ca_canonical_pub }}"
+    ssh__ca_resolved_priv: "{{ ssh__ca_canonical_priv }}"
+    ssh__ca_resolved_dir: "{{ ssh__ca_canonical_dir }}"
+    ssh_ca_output_dir: "{{ ssh__ca_canonical_dir }}"
+  when: ssh_ca_enabled | default(false) | bool
+  run_once: true
+  changed_when: false
+
+# Hardening: make sure CA pub is readable by the user running ansible (lookup('file') safety).
+- name: Normalize CA public key permissions (controller)
+  ansible.builtin.file:
+    path: "{{ ssh__ca_resolved_pub }}"
+    state: file
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__ca_resolved_pub | length > 0
+  delegate_to: localhost
+  become: true
+  run_once: true
+
+- name: Normalize CA private key permissions (controller)
+  ansible.builtin.file:
+    path: "{{ ssh__ca_resolved_priv }}"
+    state: file
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__ca_resolved_priv | length > 0
+  delegate_to: localhost
+  become: true
+  run_once: true
+
+# Optional: ensure configured candidate paths exist as symlinks -> canonical (WITHOUT cycles).
+# Only replace if missing OR already a symlink (including looped symlinks). Do not clobber real files.
+
+- name: Build CA pub symlink destinations (non-canonical)
+  ansible.builtin.set_fact:
+    ssh__ca_pub_link_dests: >-
+      {{
+        (
+          (
+            ([ssh__ca_alt_dir ~ '/ssh_ca.pub'] if (ssh__ca_alt_dir | length > 0 and ssh__ca_alt_dir != ssh__ca_canonical_dir) else [])
+            + (ssh__controller_ca_pub_candidates | default([]))
+          )
+          | map('string')
+          | unique
+          | reject('equalto', ssh__ca_canonical_pub)
+          | list
+        )
+      }}
+  when: ssh_ca_enabled | default(false) | bool
+  run_once: true
+  changed_when: false
+
+- name: Ensure configured CA candidate directories exist (controller)
+  ansible.builtin.file:
+    path: "{{ item | dirname }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ ssh__ca_pub_link_dests | default([]) }}"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - (ssh__ca_pub_link_dests | default([]) | length) > 0
+  delegate_to: localhost
+  run_once: true
+
+- name: Lstat configured CA public key candidates (no-follow) (controller)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ ssh__ca_pub_link_dests | default([]) }}"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - (ssh__ca_pub_link_dests | default([]) | length) > 0
+  delegate_to: localhost
+  register: ssh__ca_pub_link_lstats
+  failed_when: false
+  changed_when: false
+  run_once: true
+
+- name: Ensure configured CA public key candidates exist (symlink -> canonical)
+  ansible.builtin.file:
+    src: "{{ ssh__ca_resolved_pub }}"
+    dest: "{{ item.item }}"
+    state: link
+    force: true
+  loop: "{{ ssh__ca_pub_link_lstats.results | default([]) }}"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__ca_resolved_pub | length > 0
+    - item.stat is defined
+    - (
+        (item.stat.exists | default(false) | bool == false)
+        or
+        (item.stat.islnk | default(false) | bool)
+      )
+  delegate_to: localhost
+  run_once: true
+
+- name: Lstat configured CA private key candidates (no-follow) (controller)
+  ansible.builtin.stat:
+    path: "{{ (item | regex_replace('\\.pub$', '')) }}"
+    follow: false
+  loop: "{{ ssh__ca_pub_link_dests | default([]) }}"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - (ssh__ca_pub_link_dests | default([]) | length) > 0
+  delegate_to: localhost
+  register: ssh__ca_priv_link_lstats
+  failed_when: false
+  changed_when: false
+  run_once: true
+
+- name: Ensure configured CA private key candidates exist (symlink -> canonical)
+  ansible.builtin.file:
+    src: "{{ ssh__ca_resolved_priv }}"
+    dest: "{{ (item.item | regex_replace('\\.pub$', '')) }}"
+    state: link
+    force: true
+  loop: "{{ ssh__ca_priv_link_lstats.results | default([]) }}"
+  when:
+    - ssh_ca_enabled | default(false) | bool
+    - ssh__ca_resolved_priv | length > 0
+    - item.stat is defined
+    - (
+        (item.stat.exists | default(false) | bool == false)
+        or
+        (item.stat.islnk | default(false) | bool)
+      )
+  delegate_to: localhost
+  run_once: true
+
 # -----------------------------------------------------------------------------
-# Phase 2: Local SSH material generation (conditional)
+# Phase 2B: Local SSH user key generation (conditional)
 # -----------------------------------------------------------------------------
 
 - name: Generate SSH user keys (controller)
   ansible.builtin.import_tasks: base/generate-keys.yaml
   when: ssh__generate_user_keys | bool
 
-- name: Generate SSH Certificate Authority (controller)
-  ansible.builtin.import_tasks: base/generate-ca.yaml
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__generate_ca | bool
+# --- SSH user certificates ---
+
+- name: Check for existing SSH user certificates (controller)
+  ansible.builtin.stat:
+    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}-cert.pub"
+  loop: "{{ users }}"
+  delegate_to: localhost
+  register: ssh__user_cert_stats
+  changed_when: false
+  run_once: true
+
+- name: Determine if SSH user cert signing is required
+  ansible.builtin.set_fact:
+    ssh__sign_user_certs: >-
+      {{
+        (ssh__user_cert_stats.results
+          | selectattr('stat.exists', 'equalto', false)
+          | list
+          | length > 0)
+        or (ssh_ca_force_resign | default(false) | bool)
+        or (ssh__generate_ca | bool)
+      }}
+  run_once: true
+  changed_when: false
 
 - name: Sign SSH user keys with CA (controller)
   ansible.builtin.import_tasks: base/sign.yaml
   when:
     - ssh_ca_enabled | default(false) | bool
-    - ssh__generate_user_keys | bool or ssh__generate_ca | bool
+    - ssh__sign_user_certs | bool
 
 # -----------------------------------------------------------------------------
 # Phase 3: User-level SSH deployment
@@ -136,3 +487,6 @@
 
     - name: Configure Proxmox SSH daemon
       ansible.builtin.import_tasks: proxmox/configure-ssh.yaml
+
+    - name: Ensure SSH CA-based user cert auth works for root
+      ansible.builtin.import_tasks: proxmox/ensure-ssh-works.yaml

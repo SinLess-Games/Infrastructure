@@ -4,16 +4,83 @@
 # Task: proxmox/copy-ca.yaml
 #
 # Purpose:
-# - Copy SSH Certificate Authority files from the controller
-#   into the target node at /etc/ssh/ca/
+# - Copy SSH Certificate Authority files from the controller to the target node
+#   into /etc/ssh/ca/
 #
-# Files expected under controller:
-#   .outputs/ssh-ca/ssh_ca
-#   .outputs/ssh-ca/ssh_ca.pub
+# Notes:
+# - ansible.builtin.copy reads `src` from the CONTROLLER by default.
+# - If `remote_src: true` is set, Ansible will look for `src` on the REMOTE node.
+# - Facts set with delegate_to are host-scoped unless `delegate_facts: true` is used.
+#   We *want* these facts on localhost so remote tasks can reference:
+#     hostvars['localhost'][...]
+#
+# Controller files expected:
+#   {{ ssh_controller_outputs_dir }}/ssh-ca/ssh_ca
+#   {{ ssh_controller_outputs_dir }}/ssh-ca/ssh_ca.pub
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Ensure CA directory exists
+# Resolve controller CA paths (controller-side)
+# -----------------------------------------------------------------------------
+- name: Resolve controller outputs dir (controller)
+  ansible.builtin.set_fact:
+    ssh_controller_outputs_dir_effective: >-
+      {{
+        ssh_controller_outputs_dir
+          | default(playbook_dir ~ '/../..' ~ '/.outputs')
+      }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  changed_when: false
+
+- name: Resolve controller SSH CA directory (controller)
+  ansible.builtin.set_fact:
+    ssh_controller_ca_dir_effective: "{{ hostvars['localhost']['ssh_controller_outputs_dir_effective'] ~ '/ssh_ca' }}"
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  changed_when: false
+
+- name: Stat SSH CA public key on controller
+  ansible.builtin.stat:
+    path: "{{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca.pub"
+  delegate_to: localhost
+  run_once: true
+  register: ssh_ca_pub_stat
+  changed_when: false
+
+- name: Fail if SSH CA public key is missing on controller
+  ansible.builtin.fail:
+    msg: >-
+      Missing SSH CA public key on controller:
+      {{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca.pub
+  delegate_to: localhost
+  run_once: true
+  when: not ssh_ca_pub_stat.stat.exists
+
+- name: Stat SSH CA private key on controller (only if copying private)
+  ansible.builtin.stat:
+    path: "{{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca"
+  delegate_to: localhost
+  run_once: true
+  register: ssh_ca_priv_stat
+  changed_when: false
+  when: ssh_copy_ca_private | default(false) | bool
+
+- name: Fail if SSH CA private key is missing on controller (only if copying private)
+  ansible.builtin.fail:
+    msg: >-
+      Missing SSH CA private key on controller:
+      {{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca
+  delegate_to: localhost
+  run_once: true
+  when:
+    - ssh_copy_ca_private | default(false) | bool
+    - not ssh_ca_priv_stat.stat.exists
+
+# -----------------------------------------------------------------------------
+# Ensure CA directory exists on node
 # -----------------------------------------------------------------------------
 - name: Ensure SSH CA directory exists on node
   ansible.builtin.file:
@@ -27,40 +94,49 @@
 # -----------------------------------------------------------------------------
 # Copy SSH CA private key (optional)
 # -----------------------------------------------------------------------------
-# NOTE: Only copy the private CA key where you actually sign keys.
-#       If this machine is *not* the signing host, skip copying the private CA.
-- name: Copy SSH CA private key to node (only on CA host)
+# NOTE: Only copy the private CA key onto hosts that are allowed to sign certs.
+- name: Copy SSH CA private key to node (only on signing hosts)
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../.outputs/ssh-ca/ssh_ca"
-    dest: /etc/ssh/ca
+    src: "{{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca"
+    dest: /etc/ssh/ca/ssh_ca
     owner: root
     group: root
     mode: "0600"
-  when: ssh_copy_ca_private | default(false)
   become: true
+  when: ssh_copy_ca_private | default(false) | bool
 
 # -----------------------------------------------------------------------------
 # Copy SSH CA public key
 # -----------------------------------------------------------------------------
-- name: Copy SSH CA public key to node
+- name: Copy SSH CA public key to node (canonical filename for sshd)
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../.outputs/ssh-ca/ssh_ca.pub"
-    dest: /etc/ssh/ca/ssh_ca.pub
+    src: "{{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca.pub"
+    dest: /etc/ssh/ca/user_ca.pub
     owner: root
     group: root
     mode: "0644"
   become: true
 
+# Optional compatibility link (if anything expects /etc/ssh/ca/ssh_ca.pub)
+- name: Ensure compatibility symlink for SSH CA public key
+  ansible.builtin.file:
+    src: /etc/ssh/ca/user_ca.pub
+    dest: /etc/ssh/ca/ssh_ca.pub
+    state: link
+    force: true
+  become: true
+
 # -----------------------------------------------------------------------------
-# Optional: verify via stat
+# Verify on-node result
 # -----------------------------------------------------------------------------
 - name: Assert SSH CA public key exists on node
   ansible.builtin.stat:
-    path: /etc/ssh/ca/ssh_ca.pub
+    path: /etc/ssh/ca/user_ca.pub
   register: ssh_ca_pub_on_node
   become: true
+  changed_when: false
 
 - name: Fail if SSH CA public key is missing on node
   ansible.builtin.fail:
-    msg: "SSH CA public key failed to copy to /etc/ssh/ca/ssh_ca.pub"
+    msg: "SSH CA public key failed to copy to /etc/ssh/ca/user_ca.pub"
   when: not ssh_ca_pub_on_node.stat.exists

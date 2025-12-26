@@ -12,7 +12,7 @@ users:
   - name: sinless777
     comment: "Primary operator (SinLess Games LLC)"
     shell: /bin/zsh
-    ssh_principals: [sinless777, admin]
+    ssh_principals: [sinless777, admin, root]
     groups:
       - sudo
       - adm

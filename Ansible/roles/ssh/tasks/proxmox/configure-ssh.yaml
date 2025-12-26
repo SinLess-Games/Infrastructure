@@ -1,22 +1,5 @@
 ---
-# =============================================================================
-# Role: ssh
-# Task: proxmox/configure-ssh.yaml
-#
-# Purpose:
-# - Deploy SSH daemon configuration using CA-based auth
-# - Template sshd_config as a drop-in (Proxmox-safe)
-# - Validate configuration before reload
-#
-# Design principles:
-# - No inline edits to sshd_config logic
-# - Drop-in overrides only
-# - Validation before restart
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# Ensure sshd drop-in directory exists
-# -----------------------------------------------------------------------------
+# Ansible/roles/ssh/tasks/proxmox/configure-ssh.yaml
 
 - name: Ensure sshd_config.d directory exists
   ansible.builtin.file:
@@ -27,10 +10,6 @@
     mode: "0755"
   become: true
 
-# -----------------------------------------------------------------------------
-# Ensure base sshd_config includes drop-in support
-# -----------------------------------------------------------------------------
-
 - name: Ensure sshd_config includes drop-in directory
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
@@ -39,10 +18,6 @@
     line: 'Include /etc/ssh/sshd_config.d/*.conf'
     state: present
   become: true
-
-# -----------------------------------------------------------------------------
-# Deploy SSH daemon configuration (CA-based)
-# -----------------------------------------------------------------------------
 
 - name: Deploy sshd configuration drop-in
   ansible.builtin.template:
@@ -54,9 +29,9 @@
   notify: Restart sshd
   become: true
 
-# -----------------------------------------------------------------------------
-# Validate sshd configuration before reload
-# -----------------------------------------------------------------------------
+# This is the “manual fix” you did on pve-01
+- name: Ensure principals files exist so cert auth cannot lock us out
+  ansible.builtin.import_tasks: ensure-ssh-works.yaml
 
 - name: Validate sshd configuration syntax
   ansible.builtin.command: sshd -t
@@ -69,13 +44,24 @@
   changed_when: false
   become: true
 
-# -----------------------------------------------------------------------------
-# Assert CA-based auth is active
-# -----------------------------------------------------------------------------
+- name: Compute expected CA directives (lowercase to match sshd -T)
+  ansible.builtin.set_fact:
+    expected_trustedusercakeys: >-
+      trustedusercakeys {{ (ssh.server.trusted_user_ca_keys | default('/etc/ssh/ca/ssh_ca.pub')) | lower }}
+    expected_authorizedprincipalsfile: >-
+      authorizedprincipalsfile {{ (ssh.server.authorized_principals_file | default('/etc/ssh/auth_principals/%u')) | lower }}
 
 - name: Assert SSH CA trust and principals are active
   ansible.builtin.assert:
     that:
-      - "'trustedusercakeys {{ ssh.server.trusted_user_ca_keys }}' in sshd_effective.stdout"
-      - "'authorizedprincipalsfile {{ ssh.server.authorized_principals_file }}' in sshd_effective.stdout"
-    fail_msg: "SSH CA-based authentication is NOT active"
+      - expected_trustedusercakeys in (sshd_effective.stdout | lower)
+      - expected_authorizedprincipalsfile in (sshd_effective.stdout | lower)
+    fail_msg: |
+      SSH CA-based authentication is NOT active.
+      Expected:
+        - {{ expected_trustedusercakeys }}
+        - {{ expected_authorizedprincipalsfile }}
+      Got:
+        {{ (sshd_effective.stdout_lines
+            | select('match', '^(trustedusercakeys|authorizedprincipalsfile)\\s')
+            | list) | to_nice_yaml }}

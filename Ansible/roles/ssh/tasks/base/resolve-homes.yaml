@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# Resolve user home directories safely (NO ansible.getent / NO python pwd calls)
+# -----------------------------------------------------------------------------
+# Builds:
+#   ssh__user_homes:
+#     <username>: /home/<username>
+# =============================================================================
+
+- name: Resolve passwd entries via getent (safe)
+  ansible.builtin.command: "getent passwd {{ item.name }}"
+  loop: "{{ users }}"
+  register: ssh__getent_passwd
+  changed_when: false
+  failed_when: false
+
+- name: Ensure getent succeeded for all users
+  ansible.builtin.assert:
+    that:
+      - (ssh__getent_passwd.results | selectattr('rc', 'ne', 0) | list | length) == 0
+    fail_msg: >-
+      Failed to resolve passwd entries for:
+      {{
+        ssh__getent_passwd.results
+        | selectattr('rc', 'ne', 0)
+        | map(attribute='item.name')
+        | list
+      }}
+
+- name: Build ssh__user_homes map
+  ansible.builtin.set_fact:
+    ssh__user_homes: >-
+      {{
+        dict(
+          (ssh__getent_passwd.results | map(attribute='item.name') | list)
+          | zip(
+              (ssh__getent_passwd.results
+                | map(attribute='stdout')
+                | map('regex_replace', '^(?:[^:]*:){5}([^:]*):.*$', '\\1')
+                | list)
+            )
+        )
+      }}
+  changed_when: false

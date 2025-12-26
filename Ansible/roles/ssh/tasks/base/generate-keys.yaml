@@ -10,16 +10,41 @@
 #     └── <username>/
 #         ├── id_<type>
 #         └── id_<type>.pub
+#
+# Notes:
+# - This role is often executed in multi-host plays; since tasks are delegated to
+#   localhost, we MUST use run_once to avoid concurrent ssh-keygen races.
+# - "Force regenerate" is implemented by deleting the existing keypair first,
+#   because ssh-keygen prompts before overwriting.
 # =============================================================================
 
-- name: Ensure SSH output base directory exists
+- name: Validate key generation inputs (controller)
+  ansible.builtin.assert:
+    that:
+      - ssh_output_base is defined
+      - ssh_output_base | length > 0
+      - users is defined
+      - users is iterable
+      - ssh_key_type is defined
+      - ssh_key_type in ['ed25519', 'rsa', 'ecdsa']
+    fail_msg: >-
+      Invalid SSH key generation configuration.
+      Required: ssh_output_base, users, ssh_key_type (ed25519|rsa|ecdsa).
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+
+- name: Ensure SSH output base directory exists (controller)
   ansible.builtin.file:
     path: "{{ ssh_output_base }}"
     state: directory
     mode: "0755"
   delegate_to: localhost
+  become: false
+  run_once: true
 
-- name: Ensure per-user SSH directories exist
+- name: Ensure per-user SSH directories exist (controller)
   ansible.builtin.file:
     path: "{{ ssh_output_base }}/{{ item.name }}"
     state: directory
@@ -28,53 +53,63 @@
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
+  become: false
+  run_once: true
 
-- name: Generate SSH keypair for user (idempotent)
-  ansible.builtin.command: >
-    ssh-keygen
-    -t {{ ssh_key_type }}
-    {% if ssh_key_type == 'rsa' %}-b {{ ssh_key_bits }}{% endif %}
-    -C "{{ item.name }}{{ ssh_key_comment_suffix }}"
-    -f {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}
-    -N ""
+# Force regeneration: remove existing keypair first to avoid ssh-keygen overwrite prompt
+- name: Remove existing SSH keypair for user (force regenerate) (controller)
+  ansible.builtin.file:
+    path: "{{ ssh_output_base }}/{{ item.0.name }}/id_{{ ssh_key_type }}{{ item.1 }}"
+    state: absent
+  loop: "{{ users | product(['', '.pub']) | list }}"
+  loop_control:
+    label: "{{ item.0.name }}{{ item.1 }}"
+  when: (ssh_force_regenerate | default(false)) | bool
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Generate SSH keypair for user (idempotent) (controller)
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['ssh-keygen',
+         '-t', ssh_key_type]
+        + ((ssh_key_type == 'rsa')
+            | ternary(['-b', (ssh_key_bits | default(4096)) | string], []))
+        + ['-C', item.name ~ (ssh_key_comment_suffix | default('')),
+           '-f', ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type,
+           '-N', '']
+      }}
   args:
     creates: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
-  when: not ssh_force_regenerate
   delegate_to: localhost
+  become: false
+  run_once: true
 
-- name: Force regenerate SSH keypair for user
-  ansible.builtin.command: >
-    ssh-keygen
-    -t {{ ssh_key_type }}
-    {% if ssh_key_type == 'rsa' %}-b {{ ssh_key_bits }}{% endif %}
-    -C "{{ item.name }}{{ ssh_key_comment_suffix }}"
-    -f {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}
-    -N ""
-  loop: "{{ users }}"
-  loop_control:
-    label: "{{ item.name }}"
-  when: ssh_force_regenerate
-  delegate_to: localhost
-
-- name: Set permissions on private key
+- name: Set permissions on private key (controller)
   ansible.builtin.file:
     path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
     state: file
-    mode: "{{ ssh_key_mode_private }}"
+    mode: "{{ ssh_key_mode_private | default('0600') }}"
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
+  become: false
+  run_once: true
 
-- name: Set permissions on public key
+- name: Set permissions on public key (controller)
   ansible.builtin.file:
     path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
     state: file
-    mode: "{{ ssh_key_mode_public }}"
+    mode: "{{ ssh_key_mode_public | default('0644') }}"
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
+  become: false
+  run_once: true

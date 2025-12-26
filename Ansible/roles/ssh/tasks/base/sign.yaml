@@ -26,7 +26,7 @@
     ssh-keygen
     -s {{ ssh_ca_output_dir }}/ssh_ca
     -I {{ item.name }}
-    -n {{ item.name }}
+    -n {{ (item.ssh_principals | default([item.name])) | join(',') }}
     -V {{ ssh_ca_cert_validity }}
     {% if ssh_ca_cert_extensions | length > 0 %}
     -O {{ ssh_ca_cert_extensions | join(' -O ') }}
@@ -43,12 +43,12 @@
     - ssh_ca_enabled | bool
     - not ssh_ca_force_resign
 
-- name: Force re-sign SSH user keys with CA
+- name: Force Re-sign SSH user keys with CA
   ansible.builtin.command: >
     ssh-keygen
     -s {{ ssh_ca_output_dir }}/ssh_ca
     -I {{ item.name }}
-    -n {{ item.name }}
+    -n {{ (item.ssh_principals | default([item.name])) | join(',') }}
     -V {{ ssh_ca_cert_validity }}
     {% if ssh_ca_cert_extensions | length > 0 %}
     -O {{ ssh_ca_cert_extensions | join(' -O ') }}

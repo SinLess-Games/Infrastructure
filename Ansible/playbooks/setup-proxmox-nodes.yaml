@@ -22,7 +22,7 @@
   # CRITICAL:
   # Proxmox cluster join MUST be serialized
   # ---------------------------------------------------------------------------
-  serial: 1
+  # serial: 1
 
   vars_prompt:
     - name: "proxmox_cluster_join_password"
@@ -36,8 +36,16 @@
     - ../group_vars/all/chrony.yaml
     - ../group_vars/proxmox.yaml
     - ../group_vars/proxmox/cluster.yaml
+    - ../group_vars/all/ssh.yaml
+    - ../group_vars/all/users.yaml
 
   roles:
+    # -------------------------------------------------------------------------
+    # Phase 0: Common SSH configuration
+    # -------------------------------------------------------------------------
+    - role: ssh
+      tags: [ssh, common]
+
     # -------------------------------------------------------------------------
     # Phase 1: Proxmox node baseline (SAFE, cluster-agnostic)
     # -------------------------------------------------------------------------
@@ -47,14 +55,14 @@
     # -------------------------------------------------------------------------
     # Phase 2: Proxmox cluster lifecycle
     # -------------------------------------------------------------------------
-    - role: proxmox-cluster
-      tags: [proxmox, cluster]
+    # - role: proxmox-cluster
+    #   tags: [proxmox, cluster]
 
-    # -------------------------------------------------------------------------
-    # Phase 3: Proxmox hardware inventory collection
-    # -------------------------------------------------------------------------
-    - role: proxmox-hardware
-      tags: [proxmox, hardware, inventory]
+    # # -------------------------------------------------------------------------
+    # # Phase 3: Proxmox hardware inventory collection
+    # # -------------------------------------------------------------------------
+    # - role: proxmox-hardware
+    #   tags: [proxmox, hardware, inventory]
 
   post_tasks:
     # -------------------------------------------------------------------------

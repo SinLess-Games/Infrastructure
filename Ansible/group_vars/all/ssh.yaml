@@ -4,15 +4,17 @@
 # SSH global configuration (CA-backed SSH + sane defaults)
 # =============================================================================
 
-# ---- computed building blocks (do NOT reference ssh.* here) ----
+# ---- computed building blocks ----
 ssh_controller_repo_root: "{{ playbook_dir }}/../.."
 ssh_controller_outputs_dir: "{{ ssh_controller_repo_root }}/.outputs"
 ssh_controller_root_materials_dir: "{{ ssh_controller_outputs_dir }}/ssh/root"
 
+# ---- SINGLE canonical CA location (NO ssh-ca) ----
+ssh_ca_output_dir: "{{ ssh_controller_outputs_dir }}/ssh_ca"
+
+# Keep if you still want “candidates”, but only point at canonical.
 ssh_controller_ca_pub_candidates:
-  - "{{ ssh_controller_outputs_dir }}/ssh-ca/ssh_ca.pub"
-  - "{{ ssh_controller_outputs_dir }}/ssh_ca/ssh_ca.pub"
-  - "{{ ssh_controller_outputs_dir }}/ssh-ca/ssh_ca.pub"
+  - "{{ ssh_ca_output_dir }}/ssh_ca.pub"
 
 # Local DNS zones you want every host to be reachable under
 ssh_local_dns_zones:
@@ -33,7 +35,7 @@ ssh_host_certificate_path: "/etc/ssh/ssh_host_ed25519_key-cert.pub"
 ssh_root_identity_file: "/root/.ssh/id_ed25519"
 ssh_root_certificate_file: "/root/.ssh/id_ed25519-cert.pub"
 
-# ---- final structure (reference scalars above) ----
+# ---- final structure ----
 ssh:
   controller:
     repo_root: "{{ ssh_controller_repo_root }}"
@@ -41,30 +43,16 @@ ssh:
     root_materials_dir: "{{ ssh_controller_root_materials_dir }}"
     ca_pub_candidates: "{{ ssh_controller_ca_pub_candidates }}"
 
-  # ---------------------------------------------------------------------------
-  # /etc/hosts template inputs
-  # ---------------------------------------------------------------------------
   hosts:
-    # each host will render entries for:
-    #   <primary-ip> <inventory_hostname> <inventory_hostname>.<zone> ...
     zones: "{{ ssh_local_dns_zones }}"
-    # optional extra static lines you may want appended
     extra_lines: []
 
-  # ---------------------------------------------------------------------------
-  # /etc/ssh/ssh_known_hosts template inputs
-  # ---------------------------------------------------------------------------
   known_hosts:
-    # Install @cert-authority lines for these patterns
     cert_authority_patterns:
       - "*.local.sinlessgames.com"
       - "*.local.sinlessgamesllc.com"
-    # Where the CA pubkey ends up on the target (source for templating)
     trusted_user_ca_keys: "{{ ssh_trusted_user_ca_keys_path }}"
 
-  # ---------------------------------------------------------------------------
-  # sshd (server) configuration inputs
-  # ---------------------------------------------------------------------------
   server:
     port: 22
     listen_addresses: ["0.0.0.0", "::"]
@@ -74,41 +62,26 @@ ssh:
     kbd_interactive_authentication: false
     challenge_response_authentication: false
 
-    # Keep this aligned with your cert setup (publickey covers key+cert auth)
     authentication_methods: "publickey"
-
-    # Proxmox default is often permissive; lock it down with certs
     permit_root_login: "prohibit-password"
     use_pam: true
 
-    # SSH user CA / principals
     trusted_user_ca_keys: "{{ ssh_trusted_user_ca_keys_path }}"
     authorized_principals_dir: "{{ ssh_authorized_principals_dir }}"
     authorized_principals_file: "{{ ssh_authorized_principals_file }}"
 
-    # Host cert (you said you want to sign ssh_host keys)
-    # Role/tasks should only apply HostCertificate when the cert exists.
     enable_host_certificate: true
     host_certificate_path: "{{ ssh_host_certificate_path }}"
 
-    # hygiene / hardening
     x11_forwarding: false
     client_alive_interval: 300
     client_alive_count_max: 2
-
-    # if you rely on DNS names and want sshd to do PTR checks etc
     use_dns: true
+    max_auth_tries: 10
 
-  # ---------------------------------------------------------------------------
-  # authorized principals content (cert auth gate)
-  # ---------------------------------------------------------------------------
   principals:
-    # principals allowed by user cert when logging in as root
     root: ["root", "proxmox", "admin"]
 
-  # ---------------------------------------------------------------------------
-  # Root SSH client defaults (node -> node automation)
-  # ---------------------------------------------------------------------------
   root_client:
     identity_file: "{{ ssh_root_identity_file }}"
     certificate_file: "{{ ssh_root_certificate_file }}"
@@ -116,23 +89,13 @@ ssh:
     strict_host_key_checking: "accept-new"
     password_authentication: false
 
-  # ---------------------------------------------------------------------------
-  # Optional: authorized_keys template inputs
-  # Keep this minimal if you want “cert-only”; you can still include a fallback.
-  # ---------------------------------------------------------------------------
   authorized_keys:
     root:
-      # Optional fallback key material (commonly the same pubkey you also sign)
-      # Your role can render this on the node via template or lineinfile.
       enabled: true
-      keys: []
+      keys:
+        - "{{ ssh_root_identity_file }}.pub"
 
-  # ---------------------------------------------------------------------------
-  # Optional: user ssh_config template inputs (if you render /root/.ssh/config)
-  # ---------------------------------------------------------------------------
   client_config:
-    # Allow short names and automatically append your local zones via %h
-    # (%h expansion for HostName is supported by OpenSSH). :contentReference[oaicite:0]{index=0}
     zones: "{{ ssh_local_dns_zones }}"
     identity_file: "{{ ssh_root_identity_file }}"
     certificate_file: "{{ ssh_root_certificate_file }}"

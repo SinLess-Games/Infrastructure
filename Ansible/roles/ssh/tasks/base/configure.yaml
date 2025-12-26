@@ -1,14 +1,6 @@
 ---
 # =============================================================================
 # Configure SSH Daemon to Trust User CA
-# -----------------------------------------------------------------------------
-# - Installs SSH CA public key
-# - Configures sshd to trust signed user certificates
-# - Reloads sshd safely
-#
-# Assumptions:
-# - ssh_ca_enabled = true
-# - ssh_ca_output_dir contains ssh_ca.pub
 # =============================================================================
 
 - name: Ensure SSH CA is enabled
@@ -18,7 +10,50 @@
     fail_msg: "SSH CA configuration requested but ssh_ca_enabled is false"
 
 # -----------------------------------------------------------------------------
-# Install CA public key
+# Resolve controller CA paths (SINGLE CA: .outputs/ssh_ca)
+# -----------------------------------------------------------------------------
+
+- name: Resolve controller SSH CA directory (canonical)
+  ansible.builtin.set_fact:
+    ssh_controller_ca_dir_effective: "{{ ssh_ca_output_dir }}"
+    ssh_controller_ca_pub_path: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
+  changed_when: false
+
+- name: Stat SSH CA public key on controller (no-follow)
+  ansible.builtin.stat:
+    path: "{{ ssh_controller_ca_pub_path }}"
+    follow: false
+  delegate_to: localhost
+  register: ssh_ca_pub_stat
+  changed_when: false
+
+- name: Fail if SSH CA public key is missing on controller
+  ansible.builtin.fail:
+    msg: >-
+      SSH User CA public key not found on controller:
+      {{ ssh_controller_ca_pub_path }}
+      Expected SINGLE CA location: {{ ssh_ca_output_dir }}
+  when: not ssh_ca_pub_stat.stat.exists
+  delegate_to: localhost
+
+- name: Fail if SSH CA public key is a symlink (avoid ELOOP)
+  ansible.builtin.fail:
+    msg: >-
+      SSH User CA public key is a symlink:
+      {{ ssh_controller_ca_pub_path }}
+      Refusing to follow symlinks to avoid ELOOP.
+  when: ssh_ca_pub_stat.stat.islnk | default(false) | bool
+  delegate_to: localhost
+
+- name: Read SSH CA public key from controller
+  ansible.builtin.slurp:
+    src: "{{ ssh_controller_ca_pub_path }}"
+  delegate_to: localhost
+  register: ssh_ca_pub_slurp
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Install CA public key on target
 # -----------------------------------------------------------------------------
 
 - name: Ensure SSH CA directory exists
@@ -28,65 +63,22 @@
     owner: root
     group: root
     mode: "0755"
+  become: true
 
 - name: Install SSH User CA public key
   ansible.builtin.copy:
-    src: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
-    dest: /etc/ssh/ca/user_ca.pub
+    content: "{{ ssh_ca_pub_slurp.content | b64decode }}"
+    dest: "{{ ssh_trusted_user_ca_keys_path | default('/etc/ssh/ca/ssh_ca.pub') }}"
     owner: root
     group: root
     mode: "0644"
-    remote_src: true
+  become: true
 
-# -----------------------------------------------------------------------------
-# SSHD configuration
-# -----------------------------------------------------------------------------
-
-- name: Ensure sshd runtime directory exists (required for sshd validate)
+- name: Ensure sshd runtime directory exists (required on some distros)
   ansible.builtin.file:
     path: /run/sshd
     state: directory
     owner: root
     group: root
     mode: "0755"
-
-- name: Configure sshd to trust User CA
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^TrustedUserCAKeys'
-    line: 'TrustedUserCAKeys /etc/ssh/ca/user_ca.pub'
-    state: present
-    insertafter: EOF
-    validate: 'sshd -T -f %s'
-
-- name: Ensure SSH certificate authentication is enabled
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^PubkeyAuthentication'
-    line: 'PubkeyAuthentication yes'
-    state: present
-    insertafter: EOF
-    validate: 'sshd -T -f %s'
-
-# -----------------------------------------------------------------------------
-# Optional hardening (safe defaults)
-# -----------------------------------------------------------------------------
-
-- name: Disable password authentication (optional)
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^PasswordAuthentication'
-    line: 'PasswordAuthentication no'
-    state: present
-    insertafter: EOF
-    validate: 'sshd -T -f %s'
-  when: ssh_disable_password_auth | default(true)
-
-# -----------------------------------------------------------------------------
-# Reload SSH daemon safely
-# -----------------------------------------------------------------------------
-
-- name: Reload SSH daemon
-  ansible.builtin.service:
-    name: ssh
-    state: reloaded
+  become: true

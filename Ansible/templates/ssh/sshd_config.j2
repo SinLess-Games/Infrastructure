@@ -7,6 +7,11 @@
 # - AuthorizedPrincipalsFile is consulted ONLY for cert-based user auth
 #   when the cert chains to a CA in TrustedUserCAKeys.
 # - HostCertificate enables host key certificates (server identity).
+#
+# Safety goals (your recent outage):
+# - Do NOT set MaxAuthTries dangerously low by default.
+# - Keep a deterministic, Proxmox-safe drop-in.
+# - Prefer certs, but avoid lockouts if principals/CA files are missing.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -43,14 +48,12 @@ HostKey {{ hk }}
 
 UsePAM {{ 'yes' if (ssh.server.use_pam | default(true)) else 'no' }}
 
+# REQUIRED for user cert auth (certs are publickey auth)
 PubkeyAuthentication {{ 'yes' if (ssh.server.pubkey_authentication | default(true)) else 'no' }}
+
+# Keep password off by default (turn on only for bootstrap if you need --ask-pass)
 PasswordAuthentication {{ 'yes' if (ssh.server.password_authentication | default(false)) else 'no' }}
 KbdInteractiveAuthentication {{ 'yes' if (ssh.server.kbd_interactive_authentication | default(false)) else 'no' }}
-
-{# Back-compat only (some distros still accept it; omit unless explicitly set) #}
-{% if ssh.server.challenge_response_authentication is defined %}
-ChallengeResponseAuthentication {{ 'yes' if ssh.server.challenge_response_authentication else 'no' }}
-{% endif %}
 
 PermitRootLogin {{ ssh.server.permit_root_login | default('prohibit-password') }}
 PermitEmptyPasswords {{ 'yes' if (ssh.server.permit_empty_passwords | default(false)) else 'no' }}
@@ -67,9 +70,13 @@ AuthorizedKeysFile {{ ssh.server.authorized_keys_file }}
 PubkeyAcceptedAlgorithms {{ ssh.server.pubkey_accepted_algorithms }}
 {% endif %}
 
+
 # -----------------------------------------------------------------------------
 # Certificate authentication (User CA)
 # -----------------------------------------------------------------------------
+# IMPORTANT:
+# MaxAuthTries interacts with agent key "spray". Keep it reasonable.
+# You already set ssh.server.max_auth_tries in group_vars; template defaults are safe.
 
 TrustedUserCAKeys {{ ssh.server.trusted_user_ca_keys | default('/etc/ssh/ca/ssh_ca.pub') }}
 AuthorizedPrincipalsFile {{ ssh.server.authorized_principals_file | default('/etc/ssh/auth_principals/%u') }}
@@ -124,7 +131,11 @@ UseDNS {{ 'yes' if (ssh.server.use_dns | default(false)) else 'no' }}
 TCPKeepAlive {{ 'yes' if (ssh.server.tcp_keepalive | default(true)) else 'no' }}
 
 LoginGraceTime {{ ssh.server.login_grace_time | default('30s') }}
-MaxAuthTries {{ ssh.server.max_auth_tries | default(3) }}
+
+{# SAFER DEFAULT:
+   3 is a common foot-gun with ssh-agent. Use 10 unless you explicitly override. #}
+MaxAuthTries {{ ssh.server.max_auth_tries | default(10) }}
+
 MaxSessions {{ ssh.server.max_sessions | default(10) }}
 
 ClientAliveInterval {{ ssh.server.client_alive_interval | default(300) }}
@@ -185,3 +196,4 @@ Match User root
   PasswordAuthentication no
   KbdInteractiveAuthentication no
 {% endif %}
+

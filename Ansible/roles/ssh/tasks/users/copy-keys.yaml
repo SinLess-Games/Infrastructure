@@ -1,14 +1,16 @@
 ---
 # =============================================================================
-# SSH :: Users :: Install authorized_keys
+# SSH :: Users :: Install authorized_keys + (optionally) install identity keys
 # -----------------------------------------------------------------------------
 # Purpose:
 # - Build authorized_keys for users from controller-generated materials
 # - Use Jinja template for deterministic output
-# - NEVER copy private keys
+# - Optionally copy controller-generated identity keys into each user's ~/.ssh
 #
-# Source of truth:
-#   {{ playbook_dir }}/../templates/ssh/authorized_keys.j2
+# Notes:
+# - Identity key installation is controlled by:
+#     ssh_install_identity_keys: true|false   (default: true)
+#     ssh_identity_force: true|false          (default: false; don't clobber)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -18,6 +20,7 @@
 - name: Resolve home directories from passwd
   ansible.builtin.getent:
     database: passwd
+  changed_when: false
 
 # -----------------------------------------------------------------------------
 # Ensure ~/.ssh exists
@@ -34,41 +37,99 @@
   loop_control:
     label: "{{ item.name }}"
   when: item.name in getent_passwd
+  become: true
 
 # -----------------------------------------------------------------------------
-# Collect authorized key material (controller-side)
+# Validate controller-side key material exists (authorized_keys inputs)
 # -----------------------------------------------------------------------------
 
-- name: Collect authorized key material for users
-  ansible.builtin.set_fact:
-    ssh__authorized_keys_map: >-
-      {{
-        ssh__authorized_keys_map | default({}) | combine({
-          item.name: {
-            'public_keys': lookup(
-              'fileglob',
-              ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '.pub',
-              wantlist=True
-            ),
-            'certificates': (
-              lookup(
-                'fileglob',
-                ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type ~ '-cert.pub',
-                wantlist=True
-              ) if ssh_ca_enabled | bool else []
-            ),
-            'shared_keys': (
-              item['shared-certs'] | default([])
-            )
-          }
-        })
-      }}
+- name: Stat per-user public keys on controller (no-follow)
+  ansible.builtin.stat:
+    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
+    follow: false
   loop: "{{ users }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
   run_once: true
+  register: ssh__pubkey_stats
   changed_when: false
+
+- name: Assert per-user public keys exist on controller
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: "Missing public key on controller: {{ item.stat.path | default('unknown') }}"
+  loop: "{{ ssh__pubkey_stats.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+
+# -----------------------------------------------------------------------------
+# Collect authorized key material (controller-side) as delegated facts
+# -----------------------------------------------------------------------------
+
+- name: Build authorized_keys material map (controller, delegated facts)
+  ansible.builtin.set_fact:
+    ssh__authorized_keys_map: |-
+      {%- set out = {} -%}
+      {%- for u in users -%}
+      {%-   set out = out | combine({
+              u.name: {
+                'public_keys': (
+                  lookup(
+                    'ansible.builtin.fileglob',
+                    ssh_output_base ~ '/' ~ u.name ~ '/id_' ~ ssh_key_type ~ '.pub',
+                    wantlist=True
+                  ) | sort
+                ),
+                'certificates': (
+                  (
+                    lookup(
+                      'ansible.builtin.fileglob',
+                      ssh_output_base ~ '/' ~ u.name ~ '/id_' ~ ssh_key_type ~ '-cert.pub',
+                      wantlist=True
+                    ) | sort
+                  ) if (ssh_ca_enabled | bool) else []
+                ),
+                'shared_keys': [],
+                'shared_users': (u['shared-certs'] | default([]))
+              }
+            }, recursive=True) -%}
+      {%- endfor -%}
+      {{ out }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+
+- name: Expand shared_keys from shared_users (controller, delegated facts)
+  ansible.builtin.set_fact:
+    ssh__authorized_keys_map: |-
+      {%- set base = hostvars['localhost'].ssh__authorized_keys_map | default({}) -%}
+      {%- set out = {} -%}
+      {%- for uname, udata in base.items() -%}
+      {%-   set ns = namespace(shared=[]) -%}
+      {%-   for suser in (udata.shared_users | default([])) -%}
+      {%-     if suser in base -%}
+      {%-       set ns.shared = ns.shared + (base[suser].public_keys | default([])) -%}
+      {%-     endif -%}
+      {%-   endfor -%}
+      {%-   set out = out | combine({
+              uname: (
+                udata | combine(
+                  { 'shared_keys': (ns.shared | flatten | unique | sort) },
+                  recursive=True
+                )
+              )
+            }, recursive=True) -%}
+      {%- endfor -%}
+      {{ out }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
 
 # -----------------------------------------------------------------------------
 # Render authorized_keys using template
@@ -85,7 +146,108 @@
   loop_control:
     label: "{{ item.name }}"
   when: item.name in getent_passwd
+  become: true
   vars:
     authorized_keys:
       user: "{{ item.name }}"
-      data: "{{ ssh__authorized_keys_map[item.name] }}"
+      data: >-
+        {{
+          hostvars['localhost'].ssh__authorized_keys_map[item.name]
+          | default({'public_keys': [], 'certificates': [], 'shared_keys': [], 'shared_users': []})
+        }}
+
+# -----------------------------------------------------------------------------
+# Install per-user SSH identity keypair into ~/.ssh (optional)
+# -----------------------------------------------------------------------------
+
+- name: Stat per-user private keys on controller (no-follow)
+  ansible.builtin.stat:
+    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
+    follow: false
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  run_once: true
+  register: ssh__privkey_stats
+  changed_when: false
+  when: (ssh_install_identity_keys | default(true)) | bool
+
+- name: Assert per-user private keys exist on controller
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: "Missing private key on controller: {{ item.stat.path | default('unknown') }}"
+  loop: "{{ ssh__privkey_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  when: (ssh_install_identity_keys | default(true)) | bool
+
+- name: Copy per-user private key to ~/.ssh
+  ansible.builtin.copy:
+    src: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
+    dest: "{{ getent_passwd[item.name][4] }}/.ssh/id_{{ ssh_key_type }}"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0600"
+    force: "{{ ssh_identity_force | default(false) }}"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - (ssh_install_identity_keys | default(true)) | bool
+    - item.name in getent_passwd
+  become: true
+
+- name: Copy per-user public key to ~/.ssh
+  ansible.builtin.copy:
+    src: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
+    dest: "{{ getent_passwd[item.name][4] }}/.ssh/id_{{ ssh_key_type }}.pub"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0644"
+    force: "{{ ssh_identity_force | default(false) }}"
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - (ssh_install_identity_keys | default(true)) | bool
+    - item.name in getent_passwd
+  become: true
+
+- name: Stat per-user certificate on controller (no-follow)
+  ansible.builtin.stat:
+    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}-cert.pub"
+    follow: false
+  loop: "{{ users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  run_once: true
+  register: ssh__cert_stats
+  changed_when: false
+  when:
+    - (ssh_install_identity_keys | default(true)) | bool
+    - (ssh_ca_enabled | default(false)) | bool
+
+- name: Copy per-user certificate to ~/.ssh (if present)
+  ansible.builtin.copy:
+    src: "{{ ssh_output_base }}/{{ item.item.name }}/id_{{ ssh_key_type }}-cert.pub"
+    dest: "{{ getent_passwd[item.item.name][4] }}/.ssh/id_{{ ssh_key_type }}-cert.pub"
+    owner: "{{ item.item.name }}"
+    group: "{{ item.item.name }}"
+    mode: "0644"
+    force: "{{ ssh_identity_force | default(false) }}"
+  loop: "{{ ssh__cert_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.stat.exists
+    - item.item.name in getent_passwd
+    - (ssh_install_identity_keys | default(true)) | bool
+    - (ssh_ca_enabled | default(false)) | bool
+  become: true
