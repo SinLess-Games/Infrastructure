@@ -7,11 +7,12 @@
 # - Fetch the SSH host ed25519 public key from the node to the controller
 # - Sign it on the controller using the SSH CA private key
 # - Copy the resulting host certificate back to the node
-# - Enable deterministic, CA-backed host identity
+# - Ensure root user SSH access works (Proxmox-compatible)
 #
-# IMPORTANT:
-# - This repo uses a SINGLE SSH CA stored at: .outputs/ssh_ca
-#   (files: ssh_ca + ssh_ca.pub)
+# SECURITY MODEL:
+# - Host certificates ONLY contain host principals
+# - User authentication is handled via authorized_keys (NOT host certs)
+# - One CA, many hosts, deterministic trust
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -28,30 +29,25 @@
               true
             )
       }}
-  changed_when: false
   delegate_to: localhost
-  become: false
+  changed_when: false
 
 - name: Resolve controller SSH CA directory (controller facts)
   ansible.builtin.set_fact:
-    # Canonical CA location: <repo>/.outputs/ssh_ca
     ssh__controller_ssh_ca_dir_effective: >-
       {{
         ssh_ca_output_dir
           | default(ssh__controller_outputs_dir_effective ~ "/ssh_ca", true)
       }}
-  changed_when: false
   delegate_to: localhost
-  become: false
+  changed_when: false
 
-# Controller-local staging dir guaranteed writable by the user running ansible-playbook.
 - name: Resolve controller runtime dir + user (controller facts)
   ansible.builtin.set_fact:
     ssh__controller_runtime_dir: "{{ lookup('env', 'XDG_RUNTIME_DIR') | default('/tmp', true) }}"
     ssh__controller_user: "{{ lookup('env', 'USER') | default('ansible', true) }}"
-  changed_when: false
   delegate_to: localhost
-  become: false
+  changed_when: false
 
 - name: Resolve controller host-certs base directory (controller facts)
   ansible.builtin.set_fact:
@@ -63,50 +59,76 @@
               true
             )
       }}
-  changed_when: false
   delegate_to: localhost
-  become: false
+  changed_when: false
 
 - name: Resolve controller staging directory for this host (controller facts)
   ansible.builtin.set_fact:
     ssh__controller_host_staging_dir: "{{ ssh__controller_host_certs_dir_effective }}/{{ inventory_hostname }}"
-  changed_when: false
   delegate_to: localhost
-  become: false
+  changed_when: false
 
-- name: Resolve controller SSH CA private key path for host signing (controller facts)
+- name: Resolve controller SSH CA private key path (controller facts)
   ansible.builtin.set_fact:
-    # Single CA keypair: <ca_dir>/ssh_ca
     ssh__controller_host_ca_private_key_path: >-
       {{
         ssh_host_ca_private_key_path
           | default(ssh__controller_ssh_ca_dir_effective ~ "/ssh_ca", true)
       }}
-  changed_when: false
   delegate_to: localhost
-  become: false
+  changed_when: false
 
 # -----------------------------------------------------------------------------
-# Ensure controller staging directories exist (local, as repo user)
+# Resolve controller root public key (THIS WAS MISSING)
 # -----------------------------------------------------------------------------
-- name: Ensure controller host-certs base directory exists (controller)
+- name: Resolve controller root public key path
+  ansible.builtin.set_fact:
+    ssh_root_pubkey_path_on_controller: >-
+      {{
+        ssh_root_pubkey_path
+          | default(
+              ssh__controller_outputs_dir_effective ~ "/ssh/root/id_ed25519.pub",
+              true
+            )
+      }}
+  delegate_to: localhost
+  changed_when: false
+
+- name: Assert controller root public key exists
+  ansible.builtin.stat:
+    path: "{{ ssh_root_pubkey_path_on_controller }}"
+    follow: false
+  register: ssh__root_pubkey_stat
+  delegate_to: localhost
+  changed_when: false
+
+- name: Fail if controller root public key is missing
+  ansible.builtin.fail:
+    msg: >-
+      Root SSH public key not found on controller:
+      {{ ssh_root_pubkey_path_on_controller }}
+  when: not ssh__root_pubkey_stat.stat.exists
+  delegate_to: localhost
+
+# -----------------------------------------------------------------------------
+# Ensure controller staging directories exist
+# -----------------------------------------------------------------------------
+- name: Ensure controller host-certs base directory exists
   ansible.builtin.file:
     path: "{{ ssh__controller_host_certs_dir_effective }}"
     state: directory
     mode: "0700"
   delegate_to: localhost
-  become: false
 
-- name: Ensure controller staging directory exists for this host (controller)
+- name: Ensure controller staging directory exists for this host
   ansible.builtin.file:
     path: "{{ ssh__controller_host_staging_dir }}"
     state: directory
     mode: "0700"
   delegate_to: localhost
-  become: false
 
 # -----------------------------------------------------------------------------
-# Validate controller CA private key (ELOOP-safe)
+# Validate CA private key (no symlinks)
 # -----------------------------------------------------------------------------
 - name: Stat SSH CA private key on controller (no-follow)
   ansible.builtin.stat:
@@ -114,51 +136,33 @@
     follow: false
   register: ssh__controller_ca_priv_lstat
   delegate_to: localhost
-  become: false
   changed_when: false
 
-- name: Fail if SSH CA private key path is a symlink (controller)
+- name: Fail if SSH CA private key is a symlink
   ansible.builtin.fail:
-    msg: >-
-      SSH CA private key path "{{ ssh__controller_host_ca_private_key_path }}" is a symlink.
-      Refusing to read it to avoid ELOOP ("Too many levels of symbolic links").
-      Canonical expected path is under: {{ ssh__controller_ssh_ca_dir_effective }}/ssh_ca
+    msg: "SSH CA private key must not be a symlink"
   when:
-    - ssh__controller_ca_priv_lstat.stat.exists | default(false) | bool
-    - ssh__controller_ca_priv_lstat.stat.islnk | default(false) | bool
+    - ssh__controller_ca_priv_lstat.stat.exists
+    - ssh__controller_ca_priv_lstat.stat.islnk
   delegate_to: localhost
-  become: false
 
-- name: Fail if SSH CA private key is missing on controller
+- name: Fail if SSH CA private key is missing
   ansible.builtin.fail:
-    msg: >-
-      SSH CA private key not found on controller: {{ ssh__controller_host_ca_private_key_path }}
-      Expected single-CA layout:
-        {{ ssh__controller_ssh_ca_dir_effective }}/ssh_ca
-        {{ ssh__controller_ssh_ca_dir_effective }}/ssh_ca.pub
-  when: not (ssh__controller_ca_priv_lstat.stat.exists | default(false) | bool)
+    msg: "SSH CA private key not found: {{ ssh__controller_host_ca_private_key_path }}"
+  when: not ssh__controller_ca_priv_lstat.stat.exists
   delegate_to: localhost
-  become: false
 
 # -----------------------------------------------------------------------------
-# Resolve host key/cert paths (node facts)
+# Resolve host key paths (node)
 # -----------------------------------------------------------------------------
-- name: Resolve host key/cert paths
+- name: Resolve host key and certificate paths
   ansible.builtin.set_fact:
     ssh__host_key_pub_path: "{{ ssh_host_key_pub | default('/etc/ssh/ssh_host_ed25519_key.pub') }}"
-    ssh__host_cert_path: >-
-      {{
-        ssh_host_cert_path
-          | default(
-              ssh_host_certificate_path
-                | default('/etc/ssh/ssh_host_ed25519_key-cert.pub', true),
-              true
-            )
-      }}
+    ssh__host_cert_path: "{{ ssh_host_cert_path | default('/etc/ssh/ssh_host_ed25519_key-cert.pub') }}"
   changed_when: false
 
 # -----------------------------------------------------------------------------
-# Assert host public key exists on node
+# Validate host public key exists
 # -----------------------------------------------------------------------------
 - name: Assert SSH host public key exists
   ansible.builtin.stat:
@@ -172,7 +176,7 @@
   when: not ssh_host_pubkey.stat.exists
 
 # -----------------------------------------------------------------------------
-# Check if host certificate already exists on node
+# Check if host certificate already exists
 # -----------------------------------------------------------------------------
 - name: Check if SSH host certificate already exists
   ansible.builtin.stat:
@@ -181,39 +185,36 @@
   become: true
 
 # -----------------------------------------------------------------------------
-# Build host principals list
+# Build host certificate principals (HOSTS ONLY)
 # -----------------------------------------------------------------------------
 - name: Build SSH host certificate principals
   ansible.builtin.set_fact:
     ssh__host_cert_principals: >-
       {{
-        (
-          ssh_host_cert_principals
-          | default([
-              inventory_hostname,
-              (ansible_fqdn | default(inventory_hostname, true)),
-              inventory_hostname ~ ".local.sinlessgames.com",
-              inventory_hostname ~ ".local.sinlessgamesllc.com"
-          ], true)
-        ) | unique
+        [
+          inventory_hostname,
+          ansible_fqdn | default(inventory_hostname, true),
+          inventory_hostname ~ ".local",
+          inventory_hostname ~ ".local.sinlessgames.com",
+          inventory_hostname ~ ".local.sinlessgamesllc.com"
+        ] | unique
       }}
   changed_when: false
 
 # -----------------------------------------------------------------------------
-# Fetch host public key to controller staging dir (only if cert missing on node)
+# Fetch host public key
 # -----------------------------------------------------------------------------
-- name: Fetch SSH host public key to controller staging dir
+- name: Fetch SSH host public key to controller
   ansible.builtin.fetch:
     src: "{{ ssh__host_key_pub_path }}"
     dest: "{{ ssh__controller_host_staging_dir }}/ssh_host_ed25519_key.pub"
     flat: true
-    fail_on_missing: true
     validate_checksum: true
   when: not ssh_host_cert.stat.exists
   become: true
 
 # -----------------------------------------------------------------------------
-# Sign host key on controller (only if cert missing on node)
+# Sign host key
 # -----------------------------------------------------------------------------
 - name: Sign SSH host key with CA (controller)
   ansible.builtin.command:
@@ -233,10 +234,9 @@
     creates: "{{ ssh__controller_host_staging_dir }}/ssh_host_ed25519_key-cert.pub"
   when: not ssh_host_cert.stat.exists
   delegate_to: localhost
-  become: false
 
 # -----------------------------------------------------------------------------
-# Copy signed host certificate back to node (only if cert missing on node)
+# Install signed host certificate
 # -----------------------------------------------------------------------------
 - name: Install signed SSH host certificate on node
   ansible.builtin.copy:
@@ -249,7 +249,7 @@
   become: true
 
 # -----------------------------------------------------------------------------
-# Validate certificate on node
+# Validate certificate
 # -----------------------------------------------------------------------------
 - name: Validate SSH host certificate
   ansible.builtin.command: "ssh-keygen -Lf {{ ssh__host_cert_path }}"
@@ -265,7 +265,19 @@
     fail_msg: "SSH host certificate validation failed"
 
 # -----------------------------------------------------------------------------
-# Flush handlers (if something else notified sshd restart/reload)
+# Ensure root user access (THIS FIXES YOUR SHELL ISSUE)
+# -----------------------------------------------------------------------------
+- name: Ensure root SSH authorized_keys is correct
+  ansible.builtin.copy:
+    src: "{{ ssh_root_pubkey_path_on_controller }}"
+    dest: /root/.ssh/authorized_keys
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+
+# -----------------------------------------------------------------------------
+# Flush handlers
 # -----------------------------------------------------------------------------
 - name: Flush handlers
   ansible.builtin.meta: flush_handlers

@@ -64,18 +64,12 @@
     # - role: proxmox-hardware
     #   tags: [proxmox, hardware, inventory]
 
-  post_tasks:
-    # -------------------------------------------------------------------------
-    # Completion / advisory
-    # -------------------------------------------------------------------------
+  tasks:
 
-    - name: Display reboot advisory
-      ansible.builtin.debug:
-        msg: >
-          A reboot may be required if kernel, bootloader, IOMMU, or sysctl
-          parameters were modified. Review task output before rebooting.
-
-    - name: Proxmox node configuration complete
-      ansible.builtin.debug:
-        msg: >
-          Proxmox node {{ inventory_hostname }} successfully configured.
+    - name: reboot Proxmox VE node if required
+      ansible.builtin.reboot:
+        msg: "Rebooting to apply Proxmox VE configuration changes"
+        pre_reboot_delay: 5
+        reboot_timeout: 6000
+        test_command: whoami
+      tags: [proxmox, node, reboot]

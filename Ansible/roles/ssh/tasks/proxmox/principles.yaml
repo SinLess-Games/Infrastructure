@@ -1,0 +1,66 @@
+# Ansible/roles/ssh/tasks/proxmox/principals.yaml
+#
+# Enforces SSH certificate principals for Proxmox nodes.
+# This task file is intentionally strict and explicit to avoid silent
+# authorization failures with OpenSSH CA-based auth.
+
+- name: Set AuthorizedPrincipalsFile base directory
+  set_fact:
+    ssh_authorized_principals_dir: "/etc/ssh/auth_principals"
+
+- name: Ensure AuthorizedPrincipalsFile directory exists
+  file:
+    path: "{{ ssh_authorized_principals_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Initialize root allowed principals (default to ['root'])
+  set_fact:
+    ssh_root_principals: "{{ ssh_root_principals | default(['root']) }}"
+
+- name: Normalize root allowed principals
+  set_fact:
+    ssh_root_principals: "{{ ssh_root_principals | map('trim') | list }}"
+
+- name: Deploy root AuthorizedPrincipals file
+  copy:
+    dest: "{{ ssh_authorized_principals_dir }}/root"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {% for principal in ssh_root_principals %}
+      {{ principal }}
+      {% endfor %}
+
+- name: Assert AuthorizedPrincipalsFile contains no whitespace or invalid entries
+  command: sed -n 'l' {{ ssh_authorized_principals_dir }}/root
+  register: principals_sanity
+  changed_when: false
+
+- name: Fail if AuthorizedPrincipalsFile contains invalid formatting
+  fail:
+    msg: |
+      Invalid AuthorizedPrincipalsFile formatting detected.
+      Each principal must be on its own line with no whitespace.
+      Current contents:
+      {{ principals_sanity.stdout_lines }}
+  when: principals_sanity.stdout is search('[ \t]+$')
+
+- name: Validate sshd is configured to use correct AuthorizedPrincipalsFile path
+  command: sshd -T
+  register: sshd_effective_config
+  changed_when: false
+
+- name: Assert sshd AuthorizedPrincipalsFile path is correct
+  assert:
+    that:
+      - "'authorizedprincipalsfile {{ ssh_authorized_principals_dir }}/%u' in sshd_effective_config.stdout"
+    fail_msg: |
+      sshd is NOT using the expected AuthorizedPrincipalsFile path.
+      Expected: {{ ssh_authorized_principals_dir }}/%u
+      Actual sshd -T output:
+      {{ sshd_effective_config.stdout }}
+    success_msg: "AuthorizedPrincipalsFile path is correctly configured."

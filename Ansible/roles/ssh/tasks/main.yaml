@@ -490,3 +490,6 @@
 
     - name: Ensure SSH CA-based user cert auth works for root
       ansible.builtin.import_tasks: proxmox/ensure-ssh-works.yaml
+    
+    - name: Enforce SSH certificate principals for Proxmox nodes
+      ansible.builtin.import_tasks: proxmox/principles.yaml
