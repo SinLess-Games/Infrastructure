@@ -3,11 +3,19 @@
 set menu-timeout 8000
 set menu-default install
 
-# PXE server base
+# PXE server base (DOWNLOADS)
 set pxe-http http://{{ PXE_HTTP_HOST }}
 
+# Friendly label (DISPLAY ONLY)
+set pxe-label {{ PXE_HTTP_DISPLAY_HOST | default(PXE_HTTP_HOST) }}
+
+# If iPXE knows the NIC MAC, try hands-free chain:
+# - iPXE provides ${net0/mac:hexhyp} like aa-bb-cc-dd-ee-ff
+# - We generate /ipxe/macs/<aa-bb-cc-dd-ee-ff>.ipxe in render.py
+isset ${net0/mac} && chain ${pxe-http}/ipxe/macs/${net0/mac:hexhyp}.ipxe || goto start
+
 :start
-menu PXE Boot Menu ({{ PXE_HTTP_HOST }})
+menu PXE Boot Menu (${pxe-label})
 item --gap --              -------------------------
 item install               Install Debian 12 (Bookworm) -> Proxmox packages later
 item shell                 iPXE shell

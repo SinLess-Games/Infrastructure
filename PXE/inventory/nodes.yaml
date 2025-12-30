@@ -22,7 +22,7 @@ defaults:
 
 nodes:
   - hostname: pve-01
-    mac: "00:d8:61:33:97:84"
+    mac: "00:D8:61:33:97:84"
     vlan: mgmt
     ip: 10.10.10.5
 

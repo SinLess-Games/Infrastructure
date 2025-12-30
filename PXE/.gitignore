@@ -1,0 +1,32 @@
+# -----------------------------------------------------------------------------
+# PXE: generated artifacts + secrets
+# -----------------------------------------------------------------------------
+
+# Render outputs (generated at runtime)
+docker/http/www/
+docker/tftp/
+
+# If you render/cache extra stuff under docker/ in the future, keep it ignored.
+# But do NOT ignore docker/docker-compose.yml or docker/http/nginx.conf (tracked).
+
+# Netboot payloads (downloaded by scripts/fetch-debian-netboot.sh)
+docker/http/www/debian/
+
+# Generated iPXE scripts / preseeds / cloud-init seeds
+docker/http/www/ipxe/
+docker/http/www/preseed/
+docker/http/www/seed/
+
+# -----------------------------------------------------------------------------
+# Secrets (never commit private keys)
+# -----------------------------------------------------------------------------
+secrets/*
+!secrets/.gitkeep
+!secrets/provisioning_key.pub
+
+# -----------------------------------------------------------------------------
+# Python / OS noise (optional but useful)
+# -----------------------------------------------------------------------------
+__pycache__/
+*.pyc
+.DS_Store

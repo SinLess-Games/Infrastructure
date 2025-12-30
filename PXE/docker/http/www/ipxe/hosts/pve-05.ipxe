@@ -1,2 +1,0 @@
-#!ipxe
-chain http://local.sinlessgames.com/ipxe/menu.ipxe || exit

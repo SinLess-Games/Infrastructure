@@ -1,0 +1,22 @@
+#!ipxe
+# autoexec.ipxe - TFTP entrypoint
+# Goal: hands-free install by chaining to per-MAC HTTP script, with a safe fallback to menu.
+
+dhcp || shell
+
+# Use DHCP-provided next-server by default.
+# You can override with PXE_CHAIN_HOST at render time if you want.
+set pxe-base http://{{ PXE_CHAIN_HOST | default('${next-server}') }}
+
+# net0/mac:hexhyp -> aa-bb-cc-dd-ee-ff (matches ipxe/macs/<mac>.ipxe)
+set mac ${net0/mac:hexhyp}
+
+echo iPXE autoexec: next-server=${next-server}
+echo iPXE autoexec: mac=${mac}
+echo iPXE autoexec: trying ${pxe-base}/ipxe/macs/${mac}.ipxe
+
+chain ${pxe-base}/ipxe/macs/${mac}.ipxe || goto fallback
+
+:fallback
+echo iPXE autoexec: no per-MAC script, falling back to bootstrap/menu...
+chain ${pxe-base}/ipxe/bootstrap.ipxe || shell
