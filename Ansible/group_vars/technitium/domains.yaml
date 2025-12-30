@@ -1,0 +1,59 @@
+---
+# =============================================================================
+# Technitium DNS – Local Domains
+# -----------------------------------------------------------------------------
+# This file defines authoritative local DNS zones managed by Technitium.
+#
+# Design goals:
+# - Explicit, declarative zone ownership
+# - Clean separation from host-specific records
+# - Easy extension to:
+#     * reverse zones (PTR)
+#     * service discovery (SRV)
+#     * aliases (CNAME)
+#
+# These zones are intended to be:
+# - Internal-only
+# - Non-public
+# - Served authoritatively by the Technitium DNS server
+# =============================================================================
+
+technitium_domains:
+  # ---------------------------------------------------------------------------
+  # Sinless Games – internal services
+  # ---------------------------------------------------------------------------
+  - name: local.sinlessgames.com
+    type: primary
+    description: "Internal DNS zone for Sinless Games infrastructure"
+
+  # ---------------------------------------------------------------------------
+  # Sinless Games LLC – corporate / admin namespace
+  # ---------------------------------------------------------------------------
+  - name: local.sinlessgamesllc.com
+    type: primary
+    description: "Internal DNS zone for Sinless Games LLC systems"
+
+  # ---------------------------------------------------------------------------
+  # Helix AI Bot / Platform
+  # ---------------------------------------------------------------------------
+  - name: local.helixaibot.com
+    type: primary
+    description: "Internal DNS zone for Helix AI Bot and related services"
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - Records (A / AAAA / CNAME / SRV) should live in:
+#     host_vars/<hostname>.yaml
+#   or a separate records.yaml if you want full decoupling.
+#
+# - Reverse zones (recommended later):
+#     10.10.10.0/24  ->  10.10.10.in-addr.arpa
+#
+# - Keep this file zone-only:
+#     * no IPs
+#     * no records
+#     * no hostnames
+#
+# Last reviewed: 2025-12
+# =============================================================================

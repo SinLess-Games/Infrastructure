@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# Technitium DNS — Wait for API Availability
+# -----------------------------------------------------------------------------
+# Ensures the Technitium DNS HTTP API is reachable before continuing
+# with zone, record, and blocklist configuration.
+#
+# Uses:
+#   - technitium_http_port (default: 5380)
+#   - technitium_bind_ip  (default: 0.0.0.0 → localhost inside host context)
+# =============================================================================
+
+- name: Technitium | Set API connection defaults
+  ansible.builtin.set_fact:
+    _technitium_api_host: >-
+      {{ '127.0.0.1'
+         if technitium_bind_ip in ['0.0.0.0', '::']
+         else technitium_bind_ip }}
+    _technitium_api_port: "{{ technitium_http_port }}"
+
+- name: Technitium | Wait for API to become available
+  ansible.builtin.wait_for:
+    host: "{{ _technitium_api_host }}"
+    port: "{{ _technitium_api_port }}"
+    delay: 2
+    timeout: 90
+    state: started
+
+- name: Technitium | Confirm API endpoint reachable
+  ansible.builtin.uri:
+    url: "http://{{ _technitium_api_host }}:{{ _technitium_api_port }}/"
+    method: GET
+    status_code:
+      - 200
+      - 401
+  register: _technitium_api_check
+  retries: 5
+  delay: 3
+  until: _technitium_api_check.status in [200, 401]
+
+- name: Technitium | API ready
+  ansible.builtin.debug:
+    msg: >-
+      Technitium API is reachable at
+      http://{{ _technitium_api_host }}:{{ _technitium_api_port }}

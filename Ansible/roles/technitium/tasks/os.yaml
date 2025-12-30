@@ -1,0 +1,79 @@
+---
+- name: OS | Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: OS | Install prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - ufw
+    state: present
+
+- name: OS | Gather service facts
+  ansible.builtin.service_facts:
+
+- name: OS | Disable systemd-resolved DNSStubListener
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/resolved.conf
+    regexp: '^\s*#?\s*DNSStubListener='
+    line: 'DNSStubListener=no'
+    create: true
+    mode: "0644"
+  when: "'systemd-resolved.service' in ansible_facts.services"
+
+- name: OS | Restart systemd-resolved
+  ansible.builtin.service:
+    name: systemd-resolved
+    state: restarted
+  when: "'systemd-resolved.service' in ansible_facts.services"
+
+- name: OS | Ensure resolv.conf is symlink to resolved real file
+  ansible.builtin.file:
+    src: /run/systemd/resolve/resolv.conf
+    dest: /etc/resolv.conf
+    state: link
+    force: true
+  when: "'systemd-resolved.service' in ansible_facts.services"
+
+- name: OS | Check for resolvectl
+  ansible.builtin.stat:
+    path: /usr/bin/resolvectl
+  register: _resolvectl
+
+- name: OS | Check for systemd-resolve
+  ansible.builtin.stat:
+    path: /usr/bin/systemd-resolve
+  register: _systemd_resolve
+
+- name: OS | Flush DNS cache (systemd-resolved)
+  ansible.builtin.command: >-
+    {{ (_resolvectl.stat.exists | bool) | ternary('resolvectl flush-caches', 'systemd-resolve --flush-caches') }}
+  changed_when: false
+  when:
+    - "'systemd-resolved.service' in ansible_facts.services"
+    - _resolvectl.stat.exists or _systemd_resolve.stat.exists
+
+- name: OS | Install UFW firewall
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: OS | Set UFW default policies (deny incoming, allow outgoing)
+  community.general.ufw:
+    state: enabled
+    direction: incoming
+    policy: deny
+
+- name: OS | Set UFW allow outgoing
+  community.general.ufw:
+    state: enabled
+    direction: outgoing
+    policy: allow
+
+- name: OS | Enable UFW
+  community.general.ufw:
+    state: enabled

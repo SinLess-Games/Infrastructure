@@ -1,0 +1,26 @@
+---
+# =============================================================================
+# Technitium DNS – Reverse Zones PTR definitions
+# -----------------------------------------------------------------------------
+# This file defines which IPv4 reverse zones should be present, and which
+# PTR records exist in each.
+# =============================================================================
+
+technitium_reverse_zones:
+  # For 10.10.10.0/24
+  - zone: "10.10.10.in-addr.arpa"
+    ptr_records:
+      # pxe -> 10.10.10.10
+      - ip_last_octet: 10
+        hostname: "pxe.local.sinlessgames.com"
+        ttl: 300
+
+      # pi-dns -> 10.10.10.12
+      - ip_last_octet: 12
+        hostname: "pi-dns.local.sinlessgames.com"
+        ttl: 300
+
+      # dev-01 -> 10.10.10.10 (same as pxe)
+      - ip_last_octet: 10
+        hostname: "dev-01.local.sinlessgames.com"
+        ttl: 300

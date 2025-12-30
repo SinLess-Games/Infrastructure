@@ -70,3 +70,11 @@ tasks:
       - |
         set -e
         {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/setup-proxmox-nodes.yaml" --ask-pass
+
+  setup-technitium:
+    desc: "Setup Technitium DNS Server"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/setup-technitium.yaml"

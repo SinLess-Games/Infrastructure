@@ -1,0 +1,25 @@
+#!ipxe
+# bootstrap.ipxe - main entrypoint after iPXE detection
+set menu-timeout 8000
+set menu-default install
+
+# PXE server base
+set pxe-http http://{{ PXE_HTTP_HOST }}
+
+:start
+menu PXE Boot Menu ({{ PXE_HTTP_HOST }})
+item --gap --              -------------------------
+item install               Install Debian 12 (Bookworm) -> Proxmox packages later
+item shell                 iPXE shell
+item reboot                Reboot
+choose --timeout ${menu-timeout} --default ${menu-default} selected || goto start
+goto ${selected}
+
+:install
+chain ${pxe-http}/ipxe/menu.ipxe || goto start
+
+:shell
+shell
+
+:reboot
+reboot

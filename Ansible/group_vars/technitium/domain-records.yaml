@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# Technitium DNS – Local Domain Records
+# -----------------------------------------------------------------------------
+# This file defines DNS records for your local domains. Records are grouped
+# by domain, and each entry includes a list of hostnames with their IPs.
+#
+# Usage:
+#   - The Ansible role will loop through these and create DNS A records.
+#   - You can expand this structure later with:
+#       * AAAA records
+#       * CNAMEs
+#       * SRV records
+#       * TXT records
+#   - Join this with the "technitium_domains" list defined in
+#     group_vars/technitium/domains.yaml
+# =============================================================================
+
+technitium_domain_records:
+
+  # ---------------------------------------------------------------------------
+  # Zone: local.sinlessgames.com
+  # ---------------------------------------------------------------------------
+  local.sinlessgames.com:
+    records:
+      # PXE boot host (shared IP with dev-01)
+      - name: "pxe"
+        type: "A"
+        value: "10.10.10.10"
+        ttl: 300
+      # dev-01 host
+      - name: "dev-01"
+        type: "A"
+        value: "10.10.10.10"
+        ttl: 300
+      # Pi DNS server
+      - name: "pi-dns"
+        type: "A"
+        value: "10.10.10.12"
+        ttl: 300
+      - name: "dns"
+        type: "A"
+        value: "10.10.10.12"
+        ttl: 300
+
+  # ---------------------------------------------------------------------------
+  # Zone: local.sinlessgamesllc.com
+  # ---------------------------------------------------------------------------
+  local.sinlessgamesllc.com:
+    records: []
+
+  # ---------------------------------------------------------------------------
+  # Zone: local.helixaibot.com
+  # ---------------------------------------------------------------------------
+  local.helixaibot.com:
+    records: []
+
+# =============================================================================
+# Notes
+#
+# - You can add more records like:
+#     - CNAME (type: "CNAME", value: "<target>")
+#     - TXT  (type: "TXT",  value: "<text>")
+#     - SRV  (type: "SRV",  value: "<service> <proto> <priority> <weight> <port> <target>")
+# - TTL defaults are set to 300 but can be customized per record.
+# - Reverse DNS (PTR) can be generated later when you choose to enable reverse zones.
+# =============================================================================

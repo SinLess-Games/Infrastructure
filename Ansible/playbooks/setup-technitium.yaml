@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# Playbook: Setup Technitium DNS Server
+#
+# This playbook applies the entire technitium role to hosts in the
+# 'technitium' inventory group.
+#
+# It assumes:
+#   - Inventory defines the technitium host(s)
+#   - Group vars contain:
+#       * API URL and token
+#       * Forwarders
+#       * Block lists
+#       * Local zones + records
+#       * Optional reverse zones
+#       * Firewall CIDRs
+#
+# Example:
+#   ansible-playbook -i inventory/hosts.yaml playbooks/setup-technitium.yaml
+# =============================================================================
+
+- name: "Configure Technitium DNS Appliance"
+  hosts: dns
+  become: true
+  gather_facts: true
+
+  vars:
+    # Optional override of how long to wait for the API
+    technitium_api_timeout: 90
+    technitium_api_delay: 5
+  
+  vars_files:
+    - ../group_vars/technitium/main.yaml
+    - ../group_vars/technitium/domains.yaml
+    - ../group_vars/technitium/domain-records.yaml
+    - ../group_vars/technitium/block-lists.yaml
+    - ../group_vars/technitium/reverse-zones.yaml
+    - ../group_vars/technitium/firewall.yaml
+
+  roles:
+    - role: technitium

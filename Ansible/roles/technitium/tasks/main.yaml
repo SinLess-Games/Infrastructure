@@ -1,0 +1,68 @@
+---
+# =============================================================================
+# Technitium DNS – Main Role Entrypoint
+# -----------------------------------------------------------------------------
+# This task list orchestrates:
+#   * OS preparation
+#   * Technitium installation
+#   * Waiting for API to be ready
+#   * DNS server settings (forwarders, block lists, recursion ACLs)
+#   * Zone creation
+#   * Records creation (A, AAAA, CNAME, TXT)
+#   * Reverse zones / PTR records
+#   * Firewall setup
+#
+# Required group_vars (example):
+#   group_vars/technitium/main.yaml         (API URL + token + forwarders)
+#   group_vars/technitium/domains.yaml      (domain list)
+#   group_vars/technitium/domain-records.yaml
+#   group_vars/technitium/block-lists.yaml
+#   group_vars/technitium/reverse-zones.yaml (optional)
+#
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1) OS Prep / Package Dependencies
+# ---------------------------------------------------------------------------
+- import_tasks: os.yaml
+
+# ---------------------------------------------------------------------------
+# 2) Install Technitium DNS Server
+# ---------------------------------------------------------------------------
+- import_tasks: install.yaml
+
+# ---------------------------------------------------------------------------
+# 3) Wait for the API to come up before pushing config
+# ---------------------------------------------------------------------------
+- import_tasks: wait_for_api.yaml
+
+# ---------------------------------------------------------------------------
+# 4) Global Server Settings (forwarders / blocking / recursion ACLs)
+# ---------------------------------------------------------------------------
+- import_tasks: server_settings.yaml
+
+# ---------------------------------------------------------------------------
+# 5) Create DNS Zones
+# ---------------------------------------------------------------------------
+- import_tasks: zones.yaml
+
+# ---------------------------------------------------------------------------
+# 6) Create DNS Records (A, AAAA, CNAME, TXT)
+# ---------------------------------------------------------------------------
+- import_tasks: records.yaml
+
+# ---------------------------------------------------------------------------
+# 7) Reverse DNS Zones & PTR Records (optional; only if defined)
+# ---------------------------------------------------------------------------
+- import_tasks: reverse_zones.yaml
+  when: technitium_reverse_zones is defined and technitium_reverse_zones | length > 0
+
+# ---------------------------------------------------------------------------
+# Blocklists
+# ---------------------------------------------------------------------------
+- import_tasks: block-lists.yaml
+
+# ---------------------------------------------------------------------------
+# 8) Firewall (allow only selected CIDRs to query DNS)
+# ---------------------------------------------------------------------------
+- import_tasks: firewall.yaml

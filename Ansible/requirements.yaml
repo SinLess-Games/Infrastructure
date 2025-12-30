@@ -3,11 +3,19 @@
 # Ansible Galaxy Requirements
 # -----------------------------------------------------------------------------
 # Pinned collections and roles for deterministic infrastructure automation.
-# This stack supports:
-#   - Proxmox VE (cluster + Ceph)
+#
+# Goals supported by this repo:
+#   - Proxmox VE (cluster + Ceph) management
 #   - Linux system baselining
-#   - Kubernetes via RKE2 (HA-ready, CNCF compliant)
+#   - Kubernetes via RKE2 (HA-ready)
 #   - Container tooling
+#   - DNS services (Technitium)
+#   - Cloudflare (DNS, records, tunnels, etc.)
+#
+# Notes on pinning:
+#   - Collections: pin to exact versions for reproducible installs.
+#   - Roles from Git: `version` MUST match a real git tag/branch/commit hash.
+#     (Commonly tags are "vX.Y.Z", not "X.Y.Z".)
 # =============================================================================
 
 collections:
@@ -24,8 +32,8 @@ collections:
     version: "5.1.2"
 
   # Broad community modules:
-  # - Proxmox integration
-  # - Filesystem, hardware, networking helpers
+  # - filesystem, hardware, networking helpers
+  # - lots of glue modules you end up needing everywhere
   - name: community.general
     version: "9.1.0"
 
@@ -46,7 +54,7 @@ collections:
 
   # Canonical Kubernetes collection
   # - k8s / k8s_info
-  # - Helm
+  # - Helm modules
   # - CRDs
   - name: kubernetes.core
     version: "5.0.0"
@@ -56,24 +64,79 @@ collections:
   - name: community.kubernetes
     version: "2.0.1"
 
+  # ---------------------------------------------------------------------------
+  # DNS Management (Technitium)
+  # ---------------------------------------------------------------------------
+
+  # Technitium DNS Server management via its HTTP API
+  # - zones
+  # - records
+  # - server settings
+  # - blocklists (depending on role capabilities)
+  - name: effectivelywild.technitium_dns
+    version: "1.1.1"
+
+  # ---------------------------------------------------------------------------
+  # Hypervisor / Proxmox
+  # ---------------------------------------------------------------------------
+
+  # Proxmox API modules (create/manage VMs, users, pools, etc.)
+  # Best for day-2 operations and provisioning.
+  - name: community.proxmox
+    version: "1.4.0"
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare
+  # ---------------------------------------------------------------------------
+
+  # Cloudflare automation (DNS records, zones, etc.)
+  # Useful for:
+  # - public DNS records
+  # - internal automation around tunnels / DNS entries (depending on modules used)
+  - name: linuxhq.cloudflare
+    version: "2.0.3"
+
 # =============================================================================
 # Roles
 # =============================================================================
-
 roles:
+  # ---------------------------------------------------------------------------
+  # Kubernetes: RKE2
+  # ---------------------------------------------------------------------------
+
   # Rancher Kubernetes Engine 2 (RKE2)
   # Used for:
   # - HA production clusters
-  # - Staging clusters
+  # - staging clusters
   # - Proxmox-backed VMs or bare metal
   - name: lablabs.rke2
     src: https://github.com/lablabs/ansible-role-rke2
     version: "1.24.4"
 
+  # ---------------------------------------------------------------------------
+  # Proxmox VE: node/cluster configuration (Day-0 / Day-1)
+  # ---------------------------------------------------------------------------
+
+  # Proxmox VE management role (node/host configuration style)
+  #
+  # IMPORTANT:
+  # - `version` must match an existing git tag/branch/commit.
+  # - If you previously used "1.10.0" and got:
+  #     "pathspec '1.10.0' did not match any file(s) known to git"
+  #   that means the repo does NOT have a tag/branch named "1.10.0".
+  # - Common tag format is "vX.Y.Z" (example: "v1.9.0").
+  #
+  # To verify tags:
+  #   git ls-remote --tags https://github.com/lae/ansible-role-proxmox.git
+  #
+  # If you want maximum determinism, you can pin to a commit SHA instead.
+  - name: lae.proxmox
+    src: git+https://github.com/lae/ansible-role-proxmox.git
+    scm: git
+    version: "v1.9.0"
+
 # =============================================================================
-# Notes
-# =============================================================================
-# Python dependencies (install separately):
+# Notes / Python deps (install separately; you already do this via requirements.txt)
 #
 # Proxmox:
 #   - proxmoxer
@@ -85,10 +148,8 @@ roles:
 #   - pyyaml
 #   - jmespath
 #
-# RKE2 notes:
-# - Embedded etcd (no external datastore required)
-# - Supports CIS hardening
-# - Native support for Cilium (recommended)
+# DNS / Cloudflare:
+#   - requests/httpx (depending on libraries)
 #
-# Last reviewed: 2025-09
+# Last reviewed: 2025-12
 # =============================================================================

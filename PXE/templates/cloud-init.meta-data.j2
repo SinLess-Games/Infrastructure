@@ -1,0 +1,18 @@
+#cloud-config
+# Cloud-Init NoCloud meta-data
+#
+# Notes:
+# - instance-id should be stable + unique per node. Using hostname works if hostnames never change.
+# - local-hostname sets the system hostname early in boot.
+# - You can extend this later with network-config if you want cloud-init to own NIC config.
+
+instance-id: {{ hostname }}
+local-hostname: {{ hostname }}
+{% if fqdn is defined and fqdn %}
+local-fqdn: {{ fqdn }}
+{% endif %}
+{% if dsmode is defined and dsmode %}
+dsmode: {{ dsmode }}
+{% else %}
+dsmode: local
+{% endif %}

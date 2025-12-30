@@ -1,0 +1,40 @@
+#!ipxe
+# menu.ipxe - generated list of hosts and generic installers
+set pxe-http http://{{ PXE_HTTP_HOST }}
+set debrel {{ DEBIAN_RELEASE }}
+set arch {{ DEBIAN_ARCH }}
+
+# Debian netboot paths (fetched by scripts/fetch-debian-netboot.sh)
+set debian-kernel ${pxe-http}/debian/${debrel}/${arch}/linux
+set debian-initrd ${pxe-http}/debian/${debrel}/${arch}/initrd.gz
+
+menu Select install target
+item --gap -- -------------------------
+item generic   Generic install (enter hostname later)
+{% for n in nodes %}
+item {{ n.hostname }}   Install {{ n.hostname }} ({{ n.profile }})
+{% endfor %}
+item --gap -- -------------------------
+item back      Back
+choose selected || goto cancel
+goto ${selected}
+
+:generic
+set preseed ${pxe-http}/preseed/bookworm.cfg
+kernel ${debian-kernel} auto=true priority=critical url=${preseed} ---
+initrd ${debian-initrd}
+boot
+
+{% for n in nodes %}
+:{{ n.hostname }}
+set preseed ${pxe-http}/preseed/generated/{{ n.hostname }}.cfg
+kernel ${debian-kernel} auto=true priority=critical url=${preseed} ---
+initrd ${debian-initrd}
+boot
+{% endfor %}
+
+:back
+chain ${pxe-http}/ipxe/bootstrap.ipxe || goto cancel
+
+:cancel
+exit

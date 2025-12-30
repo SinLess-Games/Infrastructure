@@ -1,0 +1,198 @@
+---
+# =============================================================================
+# Technitium DNS – Records (Idempotent)
+# - Ensures zones exist
+# - Applies records using delete -> add
+# - Treats "record already exists" as a no-op (safe re-run)
+#
+# Technitium API examples show add/delete as separate operations (no true upsert). :contentReference[oaicite:1]{index=1}
+# =============================================================================
+
+- name: "Technitium | Assert required variables exist"
+  ansible.builtin.assert:
+    that:
+      - technitium_api_url is defined
+      - technitium_api_token is defined
+      - technitium_domain_records is defined
+    fail_msg: >-
+      Missing required vars. Ensure you set:
+      technitium_api_url, technitium_api_token, technitium_domain_records
+
+# -----------------------------------------------------------------------------
+# Ensure zones exist
+# -----------------------------------------------------------------------------
+- name: "Technitium | Ensure zones exist (Primary)"
+  ansible.builtin.uri:
+    url: "{{ technitium_api_url.rstrip('/') }}/api/zones/create"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ technitium_api_token }}"
+      zone: "{{ item.key }}"
+      type: "Primary"
+    return_content: true
+    status_code: [200]
+  loop: "{{ technitium_domain_records | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: technitium_zone_create
+  no_log: true
+  failed_when: false
+  changed_when: false
+
+- name: "Technitium | Assert zone create calls succeeded (allow already-exists)"
+  ansible.builtin.assert:
+    that:
+      - (item.json.status | default('')) in ['ok', 'error']
+      - >
+        (item.json.status | default('')) == 'ok'
+        or
+        (
+          (item.json.status | default('')) == 'error'
+          and
+          (item.json.errorMessage | default('') | lower) is search('zone already exists')
+        )
+    fail_msg: >-
+      Zone create failed unexpectedly. Response: {{ item.content | default('') }}
+  loop: "{{ technitium_zone_create.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.key | default('unknown-zone') }}"
+  no_log: true
+
+# -----------------------------------------------------------------------------
+# Build flattened record jobs
+# -----------------------------------------------------------------------------
+- name: "Technitium | Build flattened record jobs"
+  ansible.builtin.set_fact:
+    technitium_record_jobs: "{{ (technitium_record_jobs | default([])) + [ job ] }}"
+  vars:
+    zone_name: "{{ item.0.key }}"
+    rec: "{{ item.1 }}"
+    fqdn: >-
+      {{
+        (
+          ((rec.name | default('') | string) in ['@', ''])
+          | ternary(zone_name, (rec.name ~ '.' ~ zone_name))
+        )
+      }}
+    ttl_val: "{{ rec.ttl | default(technitium_default_ttl | default(300)) }}"
+    job:
+      zone: "{{ zone_name }}"
+      domain: "{{ fqdn }}"
+      type: "{{ rec.type }}"
+      ttl: "{{ ttl_val }}"
+      value: "{{ rec.value }}"
+  loop: "{{ technitium_domain_records | dict2items | subelements('value.records', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.key }} -> {{ item.1.name }} ({{ item.1.type }})"
+
+- name: "Technitium | Validate record types are supported"
+  ansible.builtin.assert:
+    that:
+      - item.type in ['A', 'AAAA', 'CNAME', 'TXT']
+    fail_msg: "Unsupported record type '{{ item.type }}' for {{ item.domain }}"
+  loop: "{{ technitium_record_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+
+# -----------------------------------------------------------------------------
+# Delete -> Add (idempotent)
+# -----------------------------------------------------------------------------
+- name: "Technitium | Delete existing record (best-effort, domain+type)"
+  ansible.builtin.uri:
+    url: "{{ technitium_api_url.rstrip('/') }}/api/zones/records/delete"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ technitium_api_token }}"
+      domain: "{{ item.domain }}"
+      type: "{{ item.type }}"
+    return_content: true
+    status_code: [200]
+  loop: "{{ technitium_record_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+  register: technitium_record_delete_loose
+  no_log: true
+  failed_when: false
+  changed_when: false
+
+- name: "Technitium | Delete existing record (best-effort, exact value)"
+  vars:
+    value_payload: >-
+      {{
+        (item.type in ['A','AAAA']) | ternary({'ipAddress': item.value}, {})
+        | combine((item.type == 'CNAME') | ternary({'cname': item.value}, {}))
+        | combine((item.type == 'TXT')   | ternary({'text': item.value}, {}))
+      }}
+  ansible.builtin.uri:
+    url: "{{ technitium_api_url.rstrip('/') }}/api/zones/records/delete"
+    method: POST
+    body_format: form-urlencoded
+    body: >-
+      {{
+        {
+          'token': technitium_api_token,
+          'domain': item.domain,
+          'type': item.type
+        } | combine(value_payload)
+      }}
+    return_content: true
+    status_code: [200]
+  loop: "{{ technitium_record_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+  register: technitium_record_delete_exact
+  no_log: true
+  failed_when: false
+  changed_when: false
+
+- name: "Technitium | Add record"
+  vars:
+    value_payload: >-
+      {{
+        (item.type in ['A','AAAA']) | ternary({'ipAddress': item.value}, {})
+        | combine((item.type == 'CNAME') | ternary({'cname': item.value}, {}))
+        | combine((item.type == 'TXT')   | ternary({'text': item.value}, {}))
+      }}
+    request_body: >-
+      {{
+        {
+          'token': technitium_api_token,
+          'domain': item.domain,
+          'type': item.type,
+          'ttl': (item.ttl | string)
+        } | combine(value_payload)
+      }}
+  ansible.builtin.uri:
+    url: "{{ technitium_api_url.rstrip('/') }}/api/zones/records/add"
+    method: POST
+    body_format: form-urlencoded
+    body: "{{ request_body }}"
+    return_content: true
+    status_code: [200]
+  loop: "{{ technitium_record_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+  register: technitium_record_add
+  no_log: true
+  failed_when: false
+  changed_when: false
+
+- name: "Technitium | Assert record apply succeeded (allow already-exists)"
+  ansible.builtin.assert:
+    that:
+      - (item.json.status | default('')) in ['ok', 'error']
+      - >
+        (item.json.status | default('')) == 'ok'
+        or
+        (
+          (item.json.status | default('')) == 'error'
+          and
+          (item.json.errorMessage | default('') | lower) is search('record already exists')
+        )
+    fail_msg: "Record apply failed unexpectedly. Response: {{ item.content | default('') }}"
+  loop: "{{ technitium_record_add.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.domain }} ({{ item.item.type }})"
+  no_log: true

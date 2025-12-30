@@ -1,0 +1,135 @@
+---
+# =============================================================================
+# Technitium DNS — Server Settings Configuration (FIXED)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Preconditions
+# -----------------------------------------------------------------------------
+- name: Technitium | Assert admin password is defined
+  ansible.builtin.assert:
+    that:
+      - technitium_admin_password is defined
+      - technitium_admin_password | length > 0
+
+# -----------------------------------------------------------------------------
+# API base
+# -----------------------------------------------------------------------------
+- name: Technitium | Set API base URL
+  ansible.builtin.set_fact:
+    _technitium_api_base: "{{ technitium_api_url }}"
+
+# -----------------------------------------------------------------------------
+# Output directory (controller-side)
+# -----------------------------------------------------------------------------
+- name: Technitium | Set output paths (controller-side)
+  ansible.builtin.set_fact:
+    _technitium_output_dir: "{{ technitium_output_dir }}"
+    _technitium_token_file: "{{ technitium_token_file }}"
+
+- name: Technitium | Ensure output directory exists
+  ansible.builtin.file:
+    path: "{{ _technitium_output_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+# -----------------------------------------------------------------------------
+# Create NON-EXPIRING API token (recommended for automation)
+# -----------------------------------------------------------------------------
+- name: Technitium | Create API token (non-expiring)
+  ansible.builtin.uri:
+    url: "{{ _technitium_api_base }}/api/user/createToken"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      user: "{{ technitium_admin_user | default('admin') }}"
+      pass: "{{ technitium_admin_password }}"
+      tokenName: "{{ technitium_api_token_name | default('ansible') }}"
+    status_code: 200
+    return_content: true
+  register: _technitium_create_token
+  no_log: true
+
+- name: Technitium | Assert token creation succeeded
+  ansible.builtin.assert:
+    that:
+      - _technitium_create_token.json is defined
+      - _technitium_create_token.json.status == "ok"
+      - _technitium_create_token.json.token is defined
+      - (_technitium_create_token.json.token | string | length) > 0
+    fail_msg: >-
+      Technitium createToken failed:
+      {{ _technitium_create_token.json.errorMessage
+         | default(_technitium_create_token.content | default('unknown error')) }}
+
+- name: Technitium | Extract API token
+  ansible.builtin.set_fact:
+    technitium_api_token: "{{ _technitium_create_token.json.token }}"
+
+- name: Debug technitium Extract
+  ansible.builtin.debug:
+    msg: "Technitium API Token: {{ technitium_api_token }}
+      _technitium_create_token: {{ _technitium_create_token }}"
+  
+
+
+# -----------------------------------------------------------------------------
+# Persist token (controller-side)
+# -----------------------------------------------------------------------------
+- name: Technitium | Write API token to file
+  ansible.builtin.copy:
+    dest: "{{ _technitium_token_file }}"
+    content: "{{ technitium_api_token | trim }}\n"
+    mode: "0600"
+    force: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+
+# -----------------------------------------------------------------------------
+# Server/DNS settings (FORM-URLENCODED; token as a normal parameter)
+# -----------------------------------------------------------------------------
+- name: Technitium | Configure server settings
+  ansible.builtin.uri:
+    url: "{{ _technitium_api_base }}/api/settings/set"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ technitium_api_token }}"
+
+      # Disable encrypted DNS listeners/proxies
+      enableDnsOverHttp: "false"
+      enableDnsOverTls: "false"
+      enableDnsOverQuic: "false"
+      enableDnsOverHttps: "false"
+      enableDnsOverHttpsProxy: "false"
+      enableDnsOverTlsProxy: "false"
+
+      # Recursion enabled (safer default for LAN)
+      recursion: "AllowOnlyForPrivateNetworks"
+
+      # Logging off (queries)
+      enableLogging: "false"
+      logQueries: "false"
+
+      # Cache persistence (optional; adjust if you don't want disk cache)
+      saveCache: "true"
+    status_code: 200
+    return_content: true
+  register: _technitium_settings_set
+  no_log: true
+
+- name: Technitium | Assert settings applied successfully
+  ansible.builtin.assert:
+    that:
+      - _technitium_settings_set.json is defined
+      - _technitium_settings_set.json.status == "ok"
+    fail_msg: >-
+      Technitium settings/set failed:
+      {{ _technitium_settings_set.json.errorMessage
+         | default(_technitium_settings_set.content | default('unknown error')) }}

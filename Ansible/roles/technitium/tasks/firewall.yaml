@@ -1,0 +1,101 @@
+---
+# =============================================================================
+# Technitium DNS – Firewall (LAN-only, not public)
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Restrict inbound access to Technitium (Docker-published ports) to ONLY
+#     the CIDRs you allow.
+#   - Prevent accidental exposure of DNS/Web UI beyond your trusted networks.
+#
+# Why DOCKER-USER:
+#   - When Technitium runs in Docker, published ports are handled via iptables/NAT.
+#   - Host firewalls like UFW may not filter published container ports the way
+#     you expect; Docker recommends enforcing allow/deny in the DOCKER-USER chain.
+#
+# Variables (define in group_vars/technitium/*.yaml):
+#   technitium_firewall_enabled: true
+#   technitium_firewall_allowed_cidrs:
+#     - "10.10.0.0/16"
+#     - "192.168.0.0/24"
+#   # Optional override; otherwise uses ansible_default_ipv4.interface
+#   technitium_firewall_interface: "eth0"
+#
+# Notes:
+#   - This file does NOT change your system-wide INPUT default policy.
+#   - It focuses on Docker-published ports (DNS 53, UI 5380, etc.) by controlling
+#     forwarded traffic to containers through DOCKER-USER.
+# =============================================================================
+
+- name: Firewall | Validate allowlist is defined and non-empty
+  ansible.builtin.assert:
+    that:
+      - technitium_firewall_allowed_cidrs is defined
+      - technitium_firewall_allowed_cidrs is iterable
+      - (technitium_firewall_allowed_cidrs | length) > 0
+    fail_msg: >-
+      technitium_firewall_allowed_cidrs must be a non-empty list of CIDRs
+      to enforce "LAN-only" access (example: ['10.10.0.0/16','192.168.0.0/24']).
+  when: technitium_firewall_enabled | default(true) | bool
+
+- name: Firewall | Determine interface used for LAN access
+  ansible.builtin.set_fact:
+    technitium_firewall_interface_effective: >-
+      {{ technitium_firewall_interface | default(ansible_default_ipv4.interface) }}
+  when: technitium_firewall_enabled | default(true) | bool
+
+# ---------------------------------------------------------------------------
+# Ensure DOCKER-USER chain exists (safe even if Docker creates it later)
+# ---------------------------------------------------------------------------
+- name: Firewall | Ensure DOCKER-USER chain exists (IPv4)
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    chain_management: true
+    state: present
+  when: technitium_firewall_enabled | default(true) | bool
+
+# ---------------------------------------------------------------------------
+# Rule order in DOCKER-USER is important:
+#   1) allow established/related
+#   2) allow new inbound from allowlisted CIDRs (on your LAN interface)
+#   3) drop other new inbound on that interface
+# ---------------------------------------------------------------------------
+
+- name: Firewall | DOCKER-USER | Allow established/related
+  ansible.builtin.iptables:
+    table: filter
+    chain: DOCKER-USER
+    ctstate:
+      - RELATED
+      - ESTABLISHED
+    jump: ACCEPT
+    comment: "technitium: allow established/related"
+    state: present
+  when: technitium_firewall_enabled | default(true) | bool
+
+- name: Firewall | DOCKER-USER | Allow NEW inbound from allowlisted CIDRs (LAN-only)
+  ansible.builtin.iptables:
+    table: filter
+    chain: DOCKER-USER
+    in_interface: "{{ technitium_firewall_interface_effective }}"
+    source: "{{ item }}"
+    ctstate:
+      - NEW
+    jump: ACCEPT
+    comment: "technitium: allow from {{ item }}"
+    state: present
+  loop: "{{ technitium_firewall_allowed_cidrs }}"
+  loop_control:
+    label: "{{ item }}"
+  when: technitium_firewall_enabled | default(true) | bool
+
+- name: Firewall | DOCKER-USER | Drop other NEW inbound on LAN interface
+  ansible.builtin.iptables:
+    table: filter
+    chain: DOCKER-USER
+    in_interface: "{{ technitium_firewall_interface_effective }}"
+    ctstate:
+      - NEW
+    jump: DROP
+    comment: "technitium: drop non-allowlisted inbound"
+    state: present
+  when: technitium_firewall_enabled | default(true) | bool

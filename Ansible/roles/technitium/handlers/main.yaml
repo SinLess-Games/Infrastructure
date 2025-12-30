@@ -1,0 +1,9 @@
+---
+# =============================================================================
+# Handlers for Technitium DNS role
+# =============================================================================
+
+- name: "Restart systemd-resolved"
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted

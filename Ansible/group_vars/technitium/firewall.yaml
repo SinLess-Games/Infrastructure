@@ -1,0 +1,10 @@
+technitium_firewall_allowed_cidrs:
+  - "10.10.10.0/24"
+  - "10.10.20.0/24"
+  - "10.10.30.0/24"
+  - "10.10.40.0/24"
+  - "10.10.50.0/24"
+
+technitium_firewall_enabled: true
+technitium_firewall_reset: true
+technitium_firewall_interface: "eth0"

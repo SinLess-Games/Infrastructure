@@ -1,0 +1,37 @@
+version: '3'
+
+tasks:
+  keygen:
+    desc: Generate shared provisioning SSH keypair (ignored by git)
+    cmds:
+      - bash PXE/scripts/gen-shared-key.sh
+
+  fetch:
+    desc: Fetch iPXE bootloaders + Debian netboot artifacts
+    cmds:
+      - bash PXE/scripts/fetch-ipxe.sh
+      - bash PXE/scripts/fetch-debian-netboot.sh
+
+  render:
+    desc: Render dnsmasq VLAN scopes + per-node preseed + cloud-init seed + iPXE menus
+    env:
+      PXE_HTTP_HOST: '{{.PXE_HTTP_HOST | default "pxe.local.sinlessgamesllc.com"}}'
+      DEBIAN_RELEASE: '{{.DEBIAN_RELEASE | default "bookworm"}}'
+      DEBIAN_ARCH: '{{.DEBIAN_ARCH | default "amd64"}}'
+    cmds:
+      - bash -lc 'cd PXE && python3 scripts/render.py'
+
+  up:
+    desc: Start PXE stack (dnsmasq + nginx)
+    cmds:
+      - bash -lc 'docker compose -f PXE/docker/docker-compose.yml up -d'
+
+  down:
+    desc: Stop PXE stack
+    cmds:
+      - bash -lc 'docker compose -f PXE/docker/docker-compose.yml down'
+
+  logs:
+    desc: Tail PXE service logs
+    cmds:
+      - bash -lc 'docker compose -f PXE/docker/docker-compose.yml logs -f --tail=200'

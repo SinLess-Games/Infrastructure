@@ -1,0 +1,151 @@
+---
+# =============================================================================
+# Technitium DNS — Zones + Records
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Normalize URL (avoid accidental //api)
+# -----------------------------------------------------------------------------
+- name: Technitium | Normalize API base URL
+  ansible.builtin.set_fact:
+    _technitium_api_base: "{{ technitium_api_url | regex_replace('/+$', '') }}"
+
+# -----------------------------------------------------------------------------
+# Preconditions
+# -----------------------------------------------------------------------------
+- name: Technitium | Assert required vars exist
+  ansible.builtin.assert:
+    that:
+      - technitium_api_url is defined
+      - technitium_api_url | length > 0
+      - technitium_api_token is defined
+      - technitium_api_token | length > 0
+      - technitium_dns_zones is defined
+      - technitium_dns_zone_records is defined
+    fail_msg: >-
+      Missing required variables. Ensure technitium_api_url, technitium_api_token,
+      technitium_dns_zones, and technitium_dns_zone_records are defined.
+
+# -----------------------------------------------------------------------------
+# Create zones (idempotent-ish; Technitium typically returns 200 with status field)
+# -----------------------------------------------------------------------------
+- name: Technitium | Create DNS zones
+  ansible.builtin.uri:
+    url: "{{ _technitium_api_base }}/api/zones/create"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ technitium_api_token }}"
+      zone: "{{ item.name }}"
+      type: "{{ item.type | default('Primary') }}"
+    status_code: 200
+    return_content: true
+  register: _technitium_zone_create
+  loop: "{{ technitium_dns_zones }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.type | default('Primary') }})"
+  no_log: "{{ technitium_no_log | default(true) }}"
+
+- name: Technitium | Assert zone create calls succeeded (allow already-exists)
+  ansible.builtin.assert:
+    that:
+      - item.json is defined
+      - item.json.status is defined
+      - item.json.status in ['ok', 'error']
+    fail_msg: "Zone create call returned unexpected response: {{ item.content | default(item) }}"
+  loop: "{{ _technitium_zone_create.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# -----------------------------------------------------------------------------
+# Flatten records map -> list of {zone,domain,type,ttl,value}
+#
+# Expected input shape:
+# technitium_dns_zone_records:
+#   local.sinlessgames.com:
+#     records:
+#       - { name: pxe, ttl: 300, type: A, value: 10.10.10.10 }
+# -----------------------------------------------------------------------------
+- name: Technitium | Build flattened record jobs
+  ansible.builtin.set_fact:
+    _technitium_record_jobs: >-
+      {%- set out = [] -%}
+      {%- for z in (technitium_dns_zone_records | default({}) | dict2items) -%}
+        {%- set zone = z.key -%}
+        {%- set recs = (z.value.records | default([])) -%}
+        {%- for r in recs -%}
+          {%- set n = (r.name | default('')) -%}
+          {%- if n in ['', '@', none] -%}
+            {%- set fqdn = zone -%}
+          {%- else -%}
+            {%- set fqdn = n ~ '.' ~ zone -%}
+          {%- endif -%}
+          {%- set _ = out.append({
+            'zone': zone,
+            'domain': fqdn,
+            'type': (r.type | default('A')),
+            'ttl': (r.ttl | default(300)),
+            'value': r.value
+          }) -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Technitium | Assert record jobs are present (or empty by design)
+  ansible.builtin.assert:
+    that:
+      - _technitium_record_jobs is defined
+    fail_msg: "Failed to build _technitium_record_jobs"
+
+# -----------------------------------------------------------------------------
+# Validate supported record types (expand here as you add mappings)
+# -----------------------------------------------------------------------------
+- name: Technitium | Validate record types are supported by this task
+  ansible.builtin.assert:
+    that:
+      - item.type in ['A']
+    fail_msg: "Unsupported record type '{{ item.type }}' for {{ item.domain }}. Implement mapping before using."
+  loop: "{{ _technitium_record_jobs }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+
+# -----------------------------------------------------------------------------
+# Upsert records (idempotent): use overwrite=true (Technitium supports this)
+# -----------------------------------------------------------------------------
+- name: Technitium | Upsert record (overwrite=true)
+  ansible.builtin.uri:
+    url: "{{ _technitium_api_base }}/api/zones/records/add"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ technitium_api_token }}"
+      domain: "{{ item.domain }}"
+      zone: "{{ item.zone }}"
+      type: "{{ item.type }}"
+      ttl: "{{ item.ttl }}"
+      overwrite: "true"
+      ipAddress: "{{ item.value }}"
+    status_code: 200
+    return_content: true
+  register: _technitium_record_add
+  loop: "{{ _technitium_record_jobs }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+  no_log: "{{ technitium_no_log | default(true) }}"
+
+- name: Technitium | Assert record upserts succeeded (allow already-exists)
+  ansible.builtin.assert:
+    that:
+      - item.json is defined
+      - item.json.status is defined
+      - item.json.status == 'ok' or
+        (
+          item.json.status == 'error' and
+          (item.json.errorMessage | default('')) is search('record already exists', ignorecase=True)
+        )
+    fail_msg: >-
+      Record upsert failed for {{ item.item.domain }} ({{ item.item.type }}).
+      Response: {{ item.content | default(item.json | default(item)) }}
+  loop: "{{ _technitium_record_add.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.domain }} ({{ item.item.type }})"

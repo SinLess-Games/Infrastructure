@@ -1,0 +1,78 @@
+###############################################################################
+# dnsmasq PXE + DHCP + DNS
+###############################################################################
+
+# --------------------
+# DNS SETTINGS
+# --------------------
+
+port=53
+bind-dynamic
+domain-needed
+bogus-priv
+expand-hosts
+local-service
+
+# Listen on loopback + host IP (host tools + LAN clients)
+listen-address=127.0.0.1,{{ PXE_SERVER_IP }}
+
+# Optionally bind to a specific interface if provided
+{% if PXE_BIND_IFACE is defined and PXE_BIND_IFACE %}
+interface={{ PXE_BIND_IFACE }}
+{% endif %}
+
+# Authoritative local domain
+domain={{ LOCAL_DOMAIN }}
+local=/{{ LOCAL_DOMAIN }}/
+
+# EXACT A record for the PXE HTTP host (no wildcard poisoning)
+host-record={{ PXE_HTTP_HOST }},{{ PXE_SERVER_IP }}
+
+# Upstream DNS (REQUIRED or dnsmasq will REFUSE non-local names)
+no-resolv
+server={{ UPSTREAM_DNS_1 | default('1.1.1.1') }}
+server={{ UPSTREAM_DNS_2 | default('8.8.8.8') }}
+server=10.10.10.1
+
+# --------------------
+# LOGGING (stdout for Docker)
+# --------------------
+log-facility=-
+log-dhcp
+log-queries
+
+# --------------------
+# DHCP
+# --------------------
+dhcp-authoritative
+
+# --------------------
+# TFTP
+# --------------------
+enable-tftp
+tftp-root=/tftp
+
+# --------------------
+# iPXE DETECTION
+# --------------------
+dhcp-match=set:ipxe,175
+dhcp-userclass=set:ipxe,iPXE
+
+# --------------------
+# ARCH DETECTION
+# --------------------
+dhcp-match=set:efi64,option:client-arch,7
+dhcp-match=set:efi64,option:client-arch,9
+dhcp-match=set:efi64,option:client-arch,11
+
+# --------------------
+# BOOT SELECTION
+# --------------------
+dhcp-boot=tag:ipxe,http://{{ PXE_HTTP_HOST }}/ipxe/bootstrap.ipxe
+dhcp-boot=tag:efi64,tag:!ipxe,ipxe.efi
+dhcp-boot=tag:!efi64,tag:!ipxe,undionly.kpxe
+
+# --------------------
+# VLAN / SUBNET SCOPES
+# --------------------
+conf-dir=/etc/dnsmasq.d/conf.d,*.conf

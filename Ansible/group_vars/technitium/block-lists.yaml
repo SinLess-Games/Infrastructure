@@ -1,0 +1,54 @@
+---
+# =============================================================================
+# Technitium DNS - Block List Sources
+# -----------------------------------------------------------------------------
+# This file lists authoritative blocklist URLs intended to cover:
+#   - Ads / trackers
+#   - Malware / phishing / scam domains
+#   - Telemetry / analytics (optional aggressiveness)
+#   - Combined community-maintained block sources
+#
+# Notes:
+# - Lists are regularly updated by their maintainers.
+# - Some lists overlap; remove any if you see breakage on certain domains.
+# - The "category" field is purely for human structure and automation clarity.
+# =============================================================================
+
+# group_vars/dns-pi/technitium.yml (or wherever you keep it)
+technitium_block_list_urls:
+  - "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+  - "https://dbl.oisd.nl/"
+  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/easylist/list.txt"
+  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/easyprivacy/list.txt"
+  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/adguard-simplified/list.txt"
+  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/eth-phishing-detect/list.txt"
+  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/spam404.com/list.txt"
+  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/matomo.org-spammers/list.txt"
+  - "https://s3.amazonaws.com/lists.disconnect.me/simple_tracking.txt"
+  - "https://s3.amazonaws.com/lists.disconnect.me/simple_ad.txt"
+  - "https://gitlab.com/quidsup/notrack-blocklists/raw/master/notrack-malware.txt"
+  - "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-social/hosts"
+  - "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-social/hosts"
+  - "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+  - "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/multi-onlydomains.txt"
+
+
+# =============================================================================
+# Considerations / Tuning
+#
+# - The block lists above can be aggressive. Monitor false positives
+#   and adjust per your environment.
+#
+# - Some feeds (e.g., OISD) are extremely large and may be sufficient on their
+#   own. Additional lists may add little benefit beyond overlap.
+#   See community recommendations: multiple blocklist sources used but careful
+#   not to overload. :contentReference[oaicite:1]{index=1}
+#
+# - Maintaining a smaller, *high-quality* list often yields fewer false
+#   positives than indiscriminately combining all lists.
+#
+# - You can group or tag block lists by category and enable/disable via
+#   playbooks without changing the underlying YAML structure.
+#
+# =============================================================================
+
