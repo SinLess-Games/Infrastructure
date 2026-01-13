@@ -1,0 +1,51 @@
+#!ipxe
+# PXE/assets/auto-install/macs/pve-03.ipxe
+#
+# Host lock + per-node variables for pve-03, then chain into the shared installer flow.
+
+# ---- Safety: ensure we actually have a NIC (net0) ----
+isset ${net0/mac} || goto no_net
+
+# ---- Safety: MAC-lock so we don't accidentally install on the wrong box ----
+set expected_mac_raw 0024e876a06a
+set actual_mac_raw ${net0/mac:hexraw}
+
+iseq ${actual_mac_raw} ${expected_mac_raw} || goto wrong_host
+
+# ---- Base URLs (uses your DHCP "next-server" as the PXE web host) ----
+# If your DHCP isn't setting next-server for iPXE, replace this with a hard-coded IP/FQDN.
+set pxe http://${next-server}
+set ai  ${pxe}/assets/auto-install
+
+# ---- Per-node identity (used by your shared debian-proxmox.ipxe and/or late-commands) ----
+set node_name pve-03
+set node_mac  ${net0/mac}
+
+# Static network configuration for pve-03
+set node_ip 10.10.10.17
+set node_netmask 255.255.255.0
+set node_gw 10.10.10.1
+set node_dns 10.10.10.12
+
+echo [pve-03] MAC verified (${node_mac}). Chaining to shared Proxmox auto-install...
+echo [pve-03] Static IP: ${node_ip}/${node_netmask}, Gateway: ${node_gw}, DNS: ${node_dns}
+chain ${ai}/debian-proxmox.ipxe || goto chain_failed
+exit
+
+:no_net
+echo ERROR: No usable network interface found (net0 missing).
+shell
+exit
+
+:wrong_host
+echo ERROR: This script is locked to pve-03.
+echo Expected MAC (raw): ${expected_mac_raw}
+echo Actual MAC (raw):   ${actual_mac_raw}
+echo Refusing to continue to prevent installing on the wrong machine.
+shell
+exit
+
+:chain_failed
+echo ERROR: Failed to chain ${ai}/debian-proxmox.ipxe
+shell
+exit

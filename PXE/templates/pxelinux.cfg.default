@@ -1,8 +1,0 @@
-DEFAULT debian
-PROMPT 0
-TIMEOUT 50
-
-LABEL debian
-  KERNEL debian/linux
-  INITRD debian/initrd.gz
-  APPEND auto=true priority=critical url=http://PXE_HTTP_HOST/preseed/bookworm.cfg ---

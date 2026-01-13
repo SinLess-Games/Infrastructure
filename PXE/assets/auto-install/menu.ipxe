@@ -1,0 +1,134 @@
+#!ipxe
+# PXE/assets/auto-install/menu.ipxe
+#
+# Improvements:
+# - Prefer DHCP-provided addresses (next-server / dhcp-server) with sane fallback
+# - Clearer UI + timeout behavior
+# - Confirmation prompt before destructive install paths
+# - More useful failure diagnostics (shows last URL attempted)
+# - Consistent return-to-netboot flow
+
+# ---------------------------
+# Resolve PXE base URL
+# ---------------------------
+# Prefer next-server (DHCP option 66), then dhcp-server, then hardcode.
+:resolve_pxe
+isset ${next-server} && goto have_next
+isset ${dhcp-server} && set next-server ${dhcp-server} && goto have_next
+set next-server 10.10.10.10
+
+:have_next
+set pxe http://${next-server}
+set ai  ${pxe}/assets/auto-install
+
+# ---------------------------
+# Helper: banner
+# ---------------------------
+:banner
+echo
+echo ==========================================
+echo   Auto-Install / Homelab
+echo   PXE:  ${pxe}
+echo   Node: ${node_name}.${node_domain}
+echo ==========================================
+echo
+return
+
+# ---------------------------
+# Menu
+# ---------------------------
+call banner
+
+menu Auto-Install / Homelab
+item --gap -- ------------------------------------------
+item --gap -- Proxmox (Debian netboot + preseed + PVE)
+item pve_all      Proxmox: generic unattended (no MAC lock)
+item pve_01       Proxmox node: pve-01 (MAC-locked)
+item pve_02       Proxmox node: pve-02 (MAC-locked)
+item pve_03       Proxmox node: pve-03 (MAC-locked)
+item pve_04       Proxmox node: pve-04 (MAC-locked)
+item pve_05       Proxmox node: pve-05 (MAC-locked)
+item --gap -- ------------------------------------------
+item shell        iPXE shell
+item netinfo      Show network info
+item back         Back to netboot.xyz
+
+choose --default back --timeout 15000 target || set target back
+goto ${target}
+
+# ---------------------------
+# Actions
+# ---------------------------
+
+:pve_all
+set last_chain ${ai}/debian-proxmox.ipxe
+echo
+echo WARNING: This path is NOT MAC-locked.
+echo It can start an unattended install on whatever machine booted it.
+prompt --key y --timeout 8000 Press 'y' to continue, any other key to cancel... && goto pve_all_go || goto main
+
+:pve_all_go
+chain ${last_chain} || goto failed
+goto back
+
+:pve_01
+set last_chain ${ai}/macs/pve-01.ipxe
+chain ${last_chain} || goto failed
+goto back
+
+:pve_02
+set last_chain ${ai}/macs/pve-02.ipxe
+chain ${last_chain} || goto failed
+goto back
+:pve_03
+set last_chain ${ai}/macs/pve-03.ipxe
+chain ${last_chain} || goto failed
+goto back
+
+:pve_04
+set last_chain ${ai}/macs/pve-04.ipxe
+chain ${last_chain} || goto failed
+goto back
+
+:pve_05
+set last_chain ${ai}/macs/pve-05.ipxe
+chain ${last_chain} || goto failed
+goto back
+
+:netinfo
+echo
+echo --- Network Info ---
+echo net0/mac:     ${net0/mac}
+echo net0/ip:      ${net0/ip}
+echo net0/netmask: ${net0/netmask}
+echo net0/gateway: ${net0/gateway}
+echo dhcp-server:  ${dhcp-server}
+echo next-server:  ${next-server}
+echo
+prompt --timeout 8000 Press any key to return to menu...
+goto main
+
+:shell
+shell
+goto main
+
+:back
+# Chain back into netboot.xyz menu (local first, hosted fallback)
+set last_chain ${pxe}/menu.ipxe
+chain ${last_chain} || chain http://boot.netboot.xyz/menu.ipxe || goto failed
+exit
+
+# ---------------------------
+# Control flow + errors
+# ---------------------------
+:main
+call banner
+goto menu
+
+:failed
+echo
+echo ERROR: Failed loading iPXE script.
+echo Last attempted: ${last_chain}
+echo
+prompt --timeout 8000 Press any key to return to menu...
+goto main

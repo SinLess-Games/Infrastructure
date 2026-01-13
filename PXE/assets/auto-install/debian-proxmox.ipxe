@@ -1,0 +1,467 @@
+#!ipxe
+# PXE/assets/auto-install/debian-proxmox.ipxe
+# Debian Bookworm + Proxmox VE unattended installer with firmware support
+
+echo
+echo ============================================================================
+echo  PROXMOX NODE UNATTENDED INSTALLER (Debian + PVE)
+echo ============================================================================
+echo
+
+echo [STEP 1] Validating required variables...
+isset ${node_name}   || goto missing_node_name
+isset ${node_ip}     || goto missing_node_ip
+isset ${node_netmask} || set node_netmask 255.255.255.0
+isset ${node_gw}     || goto missing_node_gw
+isset ${node_dns}    || goto missing_node_dns
+isset ${node_domain} || set node_domain local.sinlessgamesllc.com
+set node_fqdn ${node_name}.${node_domain}
+echo  ✓ Node name: ${node_fqdn}
+echo  ✓ Node IP: ${node_ip}
+echo  ✓ Netmask: ${node_netmask}
+echo  ✓ Gateway: ${node_gw}
+echo  ✓ DNS: ${node_dns}
+echo
+
+echo [STEP 2] Resolving PXE server...
+isset ${next-server} || goto set_next_server
+goto have_next_server
+
+:set_next_server
+isset ${dhcp-server} && set next-server ${dhcp-server} || set next-server 10.10.10.10
+
+:have_next_server
+set pxe http://${next-server}
+set ai  ${pxe}/assets/auto-install
+echo  ✓ PXE server: ${next-server}
+echo  ✓ Auto-install base: ${ai}
+echo
+
+echo [STEP 3] Configuring Debian installer (Bookworm + firmware)...
+# Use local PXE server mirror (cached from deb.debian.org)
+set di_kernel_url http://${next-server}/assets/debian-installer/linux
+set di_initrd_url http://${next-server}/assets/debian-installer/initrd.gz
+echo  ✓ Kernel:  ${di_kernel_url}
+echo  ✓ Initrd:  ${di_initrd_url}
+echo  ✓ Note: Using local PXE mirror (faster, more reliable)
+echo
+
+echo [STEP 4] Locating preseed configuration...
+# Preseed URLs
+set preseed_host    ${ai}/preseed/${node_name}.cfg
+set preseed_generic ${ai}/preseed/proxmox.cfg
+echo  ✓ Host-specific:  ${preseed_host}
+echo  ✓ Generic fallback: ${preseed_generic}
+echo  >> Attempting host-specific preseed first...
+set preseed_url ${preseed_host}
+echo  ✓ Using preseed:  ${preseed_url}
+echo
+goto boot_di
+
+:boot_di
+echo
+echo ============================================================================
+echo  PRE-FLIGHT SYSTEM CHECKS
+echo ============================================================================
+echo
+
+echo [INFO] Hardware & Network Configuration:
+echo  Platform:      ${platform}
+echo  Build arch:    ${buildarch}
+echo  Chip:          ${chip}
+isset ${memsize} && echo  Memory:         ${memsize} bytes || echo  Memory:         unknown (skipping validation)
+echo  MAC:           ${mac}
+echo  IP:            ${ip}
+echo  Gateway:       ${gateway}
+echo  DNS:           ${dns}
+echo  Next-server:   ${next-server}
+echo
+
+echo [CHECK] Validating network interface...
+ifstat || goto check_failed_network
+echo [CHECK] Opening network interface...
+ifopen || goto check_failed_network
+echo  ✓ Network interface operational
+echo
+
+echo [INFO] Memory validation:
+isset ${memsize} && echo  ✓ ${memsize} bytes available || echo  ⚠ Memory size unknown (installer may detect dynamically)
+echo
+
+echo [SUCCESS] All pre-flight checks passed
+echo ============================================================================
+echo
+goto setup_boot
+
+:check_failed_network
+echo
+echo ============================================================================
+echo  ✗ ERROR: NETWORK INTERFACE FAILED
+echo ============================================================================
+echo
+echo [REASON] Network interface is not operational.
+echo
+echo [HARDWARE INFO]
+echo  MAC Address:    ${mac}
+echo  IP Address:     ${ip}
+echo  Gateway:        ${gateway}
+echo  DNS Server:     ${dns}
+echo  DHCP Server:    ${dhcp-server}
+echo
+echo [DIAGNOSTICS]
+ifstat
+echo
+echo [REMEDIATION]
+echo  1. Verify network cable is connected
+echo  2. Check DHCP server is operational on subnet
+echo  3. Confirm switch/router is forwarding DHCP
+echo  4. Retry PXE boot
+echo
+echo ============================================================================
+goto fail_and_reboot
+
+:check_failed_memory
+echo
+echo ===================================================================
+echo ERROR: MEMORY CHECK FAILED
+echo ===================================================================
+echo Insufficient or undetected memory.
+echo Required: At least 512MB
+echo Detected: ${memsize} bytes
+echo Platform: ${platform}
+echo ===================================================================
+goto fail_and_reboot
+
+:setup_boot
+
+echo
+echo ============================================================================
+echo  BUILDING INSTALLER BOOT CONFIGURATION
+echo ============================================================================
+echo
+
+echo [STEP 5] Constructing kernel command line...
+
+# Configure static networking via kernel ip= parameter
+# Use eth0 explicitly (with net.ifnames=0 we guarantee classic name) so the installer
+# brings the link up without prompting.
+echo [INFO] Building installer boot parameters with static network...
+set di_cmdline auto=true priority=critical \
+  preseed/url=${preseed_url} \
+  preseed/interactive=false \
+  debian-installer/allow_unauthenticated_ssl=true \
+  debian-installer/exit/always_go_to_finish=true \
+  ip=${node_ip}::${node_gw}:${node_netmask}:${node_name}::off \
+  nameserver=${node_dns} \
+  netcfg/choose_interface=auto \
+  netcfg/dhcp_timeout=120 \
+  netcfg/dhcp_failed=continue \
+  netcfg/dhcp_ntp_servers= \
+  hw-detect/load_firmware=false \
+  DEBIAN_FRONTEND=noninteractive \
+  debian-installer/framebuffer=false \
+  fb=false nomodeset video=vesafb:off \
+  intel_iommu=on iommu=pt pcie_acs_override=downstream,multifunction \
+  net.ifnames=0 biosdevname=0 ipv6.disable=1
+echo  ✓ Command line built with static IP: ${node_ip} on eth0 (DHCP disabled)
+echo
+goto have_cmdline
+
+:have_cmdline
+
+echo [INFO] Installer configuration summary:
+echo  Kernel URL:   ${di_kernel_url}
+echo  Initrd URL:   ${di_initrd_url}
+echo  Preseed URL:  ${preseed_url}
+echo  Node FQDN:    ${node_fqdn}
+echo  Boot pattern: netboot.xyz (proven reliable)
+echo
+
+echo
+echo ============================================================================
+echo  INSTALLATION PARAMETERS
+echo ============================================================================
+echo
+echo  [AUTO-INSTALL] Auto mode enabled
+echo  [PARTITIONING] LVM with automatic disk selection
+echo  [PRESEED] Configuration will be fetched and applied automatically
+echo  [DISPLAY] Text-only mode (framebuffer disabled)
+echo  [FIRMWARE] Broadcom bnx2x and Intel WiFi firmware included
+echo  [IOMMU] PCIe passthrough enabled (intel_iommu=on iommu=pt)
+echo
+echo ============================================================================
+echo  FINAL COUNTDOWN
+echo ============================================================================
+echo
+echo  WARNING: This node will be wiped and reformatted.
+echo  Preseed-controlled installation will begin in 30 seconds.
+echo  Press Ctrl+C NOW to abort and return to iPXE menu.
+echo
+sleep 30
+echo
+echo ============================================================================
+echo  EXECUTING INSTALLER BOOT
+echo ============================================================================
+echo
+
+echo [STEP 6] Clearing cached images...
+imgfree
+echo  ✓ Image cache cleared
+echo
+
+echo [STEP 7] Loading Debian installer kernel...
+kernel ${di_kernel_url} ${di_cmdline} ${cmdline}
+echo  ✓ Kernel loaded
+echo
+
+echo [STEP 8] Loading initial ramdisk...
+initrd ${di_initrd_url}
+echo  ✓ Initrd loaded
+echo
+
+echo [STEP 9] Booting into Debian installer...
+echo  Handing off to kernel...
+echo
+boot
+
+:mirror_failed
+echo
+echo ============================================================================
+echo  ✗ ERROR: KERNEL/INITRD BOOT FAILED
+echo ============================================================================
+echo
+echo [REASON] Failed to load or execute installer kernel.
+echo
+echo [BOOT CONFIGURATION]
+echo  Node FQDN:    ${node_fqdn}
+echo  Preseed URL:  ${preseed_url}
+echo  Kernel URL:   ${di_kernel_url}
+echo  Initrd URL:   ${di_initrd_url}
+echo  Cmdline:      ${di_cmdline}
+echo
+echo [NETWORK STATE]
+echo  IP:      ${ip}
+echo  Gateway: ${gateway}
+echo  DNS:     ${dns}
+echo
+echo [DIAGNOSTICS]
+echo  Loaded images:
+imgstat
+echo
+echo [POSSIBLE CAUSES]
+echo  • Kernel/initrd URL is unreachable
+echo  • iPXE version does not support boot parameters
+echo  • Memory exhausted during image load
+echo  • Corrupted kernel or initrd file
+echo
+echo [REMEDIATION]
+echo  1. Verify internet connectivity: ping 8.8.8.8
+echo  2. Check kernel URL: curl -I ${di_kernel_url}
+echo  3. Retry PXE boot
+echo  4. If persistent, contact infrastructure team
+echo
+echo ============================================================================
+goto fail_and_reboot
+
+:no_network
+echo
+echo ============================================================================
+echo  ✗ ERROR: NETWORK INTERFACE DOWN
+echo ============================================================================
+echo
+echo [REASON] Network interface became unavailable during boot.
+echo
+echo [NODE INFO]
+echo  FQDN: ${node_fqdn}
+echo
+echo [NETWORK STATE]
+echo  MAC:         ${mac}
+echo  IP:          ${ip}
+echo  Gateway:     ${gateway}
+echo  DNS Server:  ${dns}
+echo  DHCP Server: ${dhcp-server}
+echo
+echo [DIAGNOSTICS]
+ifstat
+echo
+echo [POSSIBLE CAUSES]
+echo  • Network cable disconnected
+echo  • NIC driver issue or firmware loading problem
+echo  • DHCP lease expired
+echo  • Switch port disabled mid-boot
+echo
+echo [REMEDIATION]
+echo  1. Verify network cable is connected
+echo  2. Check switch/router for port errors
+echo  3. Retry PXE boot
+echo  4. If persistent, try different NIC port
+echo
+echo ============================================================================
+goto fail_and_reboot
+
+:missing_node_name
+echo
+echo ============================================================================
+echo  ✗ ERROR: MISSING REQUIRED VARIABLE
+echo ============================================================================
+echo
+echo [REASON] The variable 'node_name' is required but not set.
+echo
+echo [SOLUTION] This script must be chained from a MAC-specific iPXE file.
+echo
+echo [EXAMPLES]
+echo  Correct:   /auto-install/macs/pve-01.ipxe
+echo  Correct:   /auto-install/macs/pve-02.ipxe
+echo  Incorrect: /auto-install/debian-proxmox.ipxe (directly)
+echo
+echo [CURRENT STATE]
+echo  MAC Address: ${mac}
+echo  IP Address:  ${ip}
+echo  Platform:    ${platform}
+echo
+echo [NEXT STEPS]
+echo  1. Boot into PXE menu
+echo  2. Select 'Proxmox: node: pve-XX (MAC-locked)'
+echo  3. This will chain to the correct MAC-specific script
+echo
+echo ============================================================================
+goto fail_and_reboot
+
+:missing_node_ip
+echo
+echo ============================================================================
+echo  ✗ ERROR: MISSING REQUIRED VARIABLE
+echo ============================================================================
+echo
+echo [REASON] The variable 'node_ip' (static IP) is required but not set.
+echo
+echo [SOLUTION] This script must be chained from a MAC-specific iPXE file.
+echo
+echo [REQUIRED VARIABLES]
+echo  - node_name: Node hostname (e.g., pve-01)
+echo  - node_ip: Static IP address (e.g., 10.10.10.51)
+echo  - node_gw: Gateway IP (e.g., 10.10.10.1)
+echo  - node_dns: DNS server (e.g., 10.10.10.10)
+echo
+echo [CURRENT STATE]
+echo  MAC Address: ${mac}
+echo  DHCP IP:     ${ip}
+echo  Platform:    ${platform}
+echo
+echo [NEXT STEPS]
+echo  1. Return to PXE menu
+echo  2. Select 'Proxmox: node: pve-XX (MAC-locked)'
+echo  3. Verify MAC-specific iPXE file sets all required variables
+echo
+echo ============================================================================
+goto fail_and_reboot
+
+:missing_node_gw
+echo
+echo ============================================================================
+echo  ✗ ERROR: MISSING REQUIRED VARIABLE
+echo ============================================================================
+echo
+echo [REASON] The variable 'node_gw' (gateway) is required but not set.
+echo
+echo [SOLUTION] This script must be chained from a MAC-specific iPXE file.
+echo
+echo [REQUIRED VARIABLES]
+echo  - node_name: Node hostname (e.g., pve-01)
+echo  - node_ip: Static IP address (e.g., 10.10.10.51)
+echo  - node_gw: Gateway IP (e.g., 10.10.10.1)
+echo  - node_dns: DNS server (e.g., 10.10.10.10)
+echo
+echo [CURRENT STATE]
+echo  MAC Address: ${mac}
+echo  DHCP IP:     ${ip}
+echo  Platform:    ${platform}
+echo
+echo [NEXT STEPS]
+echo  1. Return to PXE menu
+echo  2. Select 'Proxmox: node: pve-XX (MAC-locked)'
+echo  3. Verify MAC-specific iPXE file sets all required variables
+echo
+echo ============================================================================
+goto fail_and_reboot
+
+:missing_node_dns
+echo
+echo ============================================================================
+echo  ✗ ERROR: MISSING REQUIRED VARIABLE
+echo ============================================================================
+echo
+echo [REASON] The variable 'node_dns' is required but not set.
+echo
+echo [SOLUTION] This script must be chained from a MAC-specific iPXE file.
+echo
+echo [REQUIRED VARIABLES]
+echo  - node_name: Node hostname (e.g., pve-01)
+echo  - node_ip: Static IP address (e.g., 10.10.10.51)
+echo  - node_gw: Gateway IP (e.g., 10.10.10.1)
+echo  - node_dns: DNS server (e.g., 10.10.10.10)
+echo
+echo [CURRENT STATE]
+echo  MAC Address: ${mac}
+echo  DHCP IP:     ${ip}
+echo  Platform:    ${platform}
+echo
+echo [NEXT STEPS]
+echo  1. Return to PXE menu
+echo  2. Select 'Proxmox: node: pve-XX (MAC-locked)'
+echo  3. Verify MAC-specific iPXE file sets all required variables
+echo
+echo ============================================================================
+goto fail_and_reboot
+
+:failed
+echo
+echo ============================================================================
+echo  ✗ ERROR: DEBIAN INSTALLER BOOT FAILED
+echo ============================================================================
+echo
+echo [REASON] Boot sequence did not complete successfully.
+echo
+echo [INSTALLATION CONTEXT]
+echo  Node FQDN:  ${node_fqdn}
+echo  Preseed:    ${preseed_url}
+echo
+echo [NETWORK STATE]
+echo  IP:      ${ip}
+echo  Gateway: ${gateway}
+echo  DNS:     ${dns}
+echo
+echo [POSSIBLE CAUSES]
+echo  • Preseed URL not reachable (${preseed_url})
+echo  • Kernel parameters invalid or unsupported
+echo  • Hardware compatibility issue
+echo  • Insufficient system resources
+echo  • DHCP/network misconfiguration
+echo
+echo [REMEDIATION STEPS]
+echo  1. Verify preseed file exists: curl -I ${preseed_url}
+echo  2. Check network connectivity: ping gateway
+echo  3. Review iPXE shell for detailed error messages
+echo  4. Consult installer logs in shell: Alt+F4 for syslog, Alt+F2 for shell
+echo  5. Contact infrastructure team with boot logs
+echo
+echo ============================================================================
+goto fail_and_reboot
+
+:fail_and_reboot
+echo
+echo ============================================================================
+echo  BOOT HALTED - REBOOTING IN 30 SECONDS
+echo ============================================================================
+echo
+echo [ACTION] System will reboot automatically.
+echo [HINT] Press Ctrl+C within 30 seconds to stop reboot and enter iPXE shell.
+echo [OPTION] Run 'imgstat' in shell to check loaded images.
+echo [OPTION] Run 'ifstat' in shell to check network status.
+echo [OPTION] Type 'exit' to return to iPXE menu.
+echo
+sleep 30
+echo
+echo [REBOOT] Rebooting system now...
+echo
+reboot

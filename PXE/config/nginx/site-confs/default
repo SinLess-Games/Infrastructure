@@ -1,0 +1,42 @@
+server {
+    listen 80;
+    server_name _;
+
+    access_log /dev/stdout combined;
+    error_log  /dev/stderr notice;
+
+    root /config/menus;
+
+    # Exact matches MUST also set type/headers, or they override the regex block
+    location = /menu.ipxe {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        try_files /menu.ipxe =404;
+    }
+
+    location = /boot.cfg {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        try_files /boot.cfg =404;
+    }
+
+    # Applies to everything else .ipxe/.cfg
+    location ~* \.(ipxe|cfg)$ {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        try_files $uri =404;
+    }
+
+    location ^~ /assets/ {
+        alias /assets/;
+        autoindex on;
+        try_files $uri $uri/ =404;
+    }
+
+    # Debian mirror (local repository)
+    location ^~ /debian/ {
+        alias /assets/debian/;
+        autoindex on;
+        add_header Cache-Control "public, max-age=3600" always;
+    }
+}

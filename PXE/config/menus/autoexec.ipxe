@@ -1,0 +1,3 @@
+#!ipxe
+# Optional: chain into your menu (adjust if your entry point differs)
+chain --autofree http://10.10.10.10/menu.ipxe || chain --autofree http://10.10.10.10/boot.cfg || shell
