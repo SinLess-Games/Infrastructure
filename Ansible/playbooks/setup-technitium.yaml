@@ -22,12 +22,15 @@
 - name: "Configure Technitium DNS Appliance"
   hosts: dns
   become: true
-  gather_facts: true
+  gather_facts: false
+  timeout: 300
 
   vars:
     # Optional override of how long to wait for the API
     technitium_api_timeout: 90
     technitium_api_delay: 5
+    ansible_timeout: 300
+    ansible_connection_timeout: 30
   
   vars_files:
     - ../group_vars/technitium/main.yaml

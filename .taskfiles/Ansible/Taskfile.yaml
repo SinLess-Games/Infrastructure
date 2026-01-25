@@ -65,6 +65,17 @@ tasks:
           -i {{.ANSIBLE_DIR}}/inventory \
           {{.ANSIBLE_DIR}}/playbooks/configure-localhost.yaml \
           --ask-pass {{.CLI_ARGS}}
+
+  fix-apt-lock-dns:
+    desc: "Resolve apt lock and update packages on dns hosts"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/fix-apt-lock.yaml \
+          --ask-pass {{.CLI_ARGS}}
   
   setup-proxmox-nodes:
     desc: "Configure the proxmox nodes"

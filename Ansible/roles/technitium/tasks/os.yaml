@@ -1,8 +1,16 @@
 ---
+- name: OS | Gather facts
+  ansible.builtin.setup:
+    gather_timeout: 30
+
 - name: OS | Update apt cache
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 3600
+  register: _apt_update
+  retries: 3
+  delay: 5
+  until: _apt_update is succeeded
 
 - name: OS | Install prerequisites
   ansible.builtin.apt:
@@ -12,6 +20,10 @@
       - gnupg
       - ufw
     state: present
+  register: _apt_install
+  retries: 3
+  delay: 5
+  until: _apt_install is succeeded
 
 - name: OS | Gather service facts
   ansible.builtin.service_facts:
@@ -29,7 +41,9 @@
   ansible.builtin.service:
     name: systemd-resolved
     state: restarted
+    daemon_reload: true
   when: "'systemd-resolved.service' in ansible_facts.services"
+  ignore_errors: true
 
 - name: OS | Ensure resolv.conf is symlink to resolved real file
   ansible.builtin.file:
@@ -61,19 +75,29 @@
   ansible.builtin.apt:
     name: ufw
     state: present
+  register: _ufw_install
+  retries: 3
+  delay: 5
+  until: _ufw_install is succeeded
 
 - name: OS | Set UFW default policies (deny incoming, allow outgoing)
   community.general.ufw:
     state: enabled
     direction: incoming
     policy: deny
+  ignore_errors: true
+  register: _ufw_policy_in
 
 - name: OS | Set UFW allow outgoing
   community.general.ufw:
     state: enabled
     direction: outgoing
     policy: allow
+  ignore_errors: true
+  register: _ufw_policy_out
 
 - name: OS | Enable UFW
   community.general.ufw:
     state: enabled
+  ignore_errors: true
+  register: _ufw_enable
