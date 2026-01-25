@@ -1,0 +1,194 @@
+---
+# =============================================================================
+# SSH Host Key Collection and Distribution
+# =============================================================================
+#
+# Purpose:
+#   Collect SSH host keys from all inventory hosts and distribute them to all
+#   machines as traditional known_hosts entries. Complements the existing
+#   SSH CA-based architecture for fallback scenarios and initial bootstrapping.
+#
+# Key Features:
+#   - Uses ssh-keyscan to reliably collect host keys from all inventory hosts
+#   - Supports ed25519 (primary), RSA, and ECDSA keys
+#   - Generates /etc/ssh/ssh_known_hosts with explicit host key entries
+#   - Idempotent and follows codebase patterns
+#   - Works alongside existing @cert-authority trust model
+#
+# Usage:
+#   - Import this task file from a playbook
+#   - Ensure all target hosts are in the inventory
+#   - Run against any host with network access to all inventory hosts
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Phase 1: Controller-side setup
+# -----------------------------------------------------------------------------
+
+- name: Create controller SSH hostkeys output directory
+  ansible.builtin.file:
+    path: "{{ ssh_controller_outputs_dir }}/ssh/hostkeys"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-hostkeys
+
+- name: Set SSH hostkeys collection directory fact
+  ansible.builtin.set_fact:
+    ssh__hostkeys_dir: "{{ ssh_controller_outputs_dir }}/ssh/hostkeys"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-hostkeys
+
+# Ensure OpenSSH client is installed on controller
+- name: Ensure openssh-client is installed on controller
+  ansible.builtin.package:
+    name: openssh-client
+    state: present
+  become: true
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-hostkeys
+
+# -----------------------------------------------------------------------------
+# Phase 2: Test connectivity and collect SSH host keys
+# -----------------------------------------------------------------------------
+
+# Test connectivity to each host FIRST before attempting keyscan
+- name: Test SSH connectivity to all inventory hosts
+  ansible.builtin.wait_for:
+    host: "{{ hostvars[item]['ansible_host'] | default(item) }}"
+    port: 22
+    state: started
+    timeout: 5
+  loop: "{{ groups['all'] }}"
+  delegate_to: localhost
+  ignore_errors: true
+  register: ssh__connectivity_results
+  run_once: true
+  tags:
+    - ssh
+    - ssh-hostkeys
+
+# Collect SSH keys from reachable hosts
+- name: Collect SSH keys from reachable hosts
+  ansible.builtin.shell:
+    cmd: |
+      timeout 10 ssh-keyscan -T 5 -t ed25519,rsa,ecdsa \
+        "{{ hostvars[item.item]['ansible_host'] | default(item.item) }}" \
+        2>/dev/null
+  loop: "{{ ssh__connectivity_results.results }}"
+  when: item is succeeded
+  delegate_to: localhost
+  changed_when: false
+  failed_when: false
+  register: ssh__collected_keys
+  run_once: true
+  tags:
+    - ssh
+    - ssh-hostkeys
+
+# Parse and aggregate all collected keys on controller
+- name: Build aggregated known_hosts content from all hosts
+  ansible.builtin.set_fact:
+    ssh__collected_hostkeys: |
+      # SSH Host Keys Collection
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # Inventory: {{ groups['all'] | length }} total hosts
+      {% if ssh__collected_keys is defined and ssh__collected_keys.results is defined %}
+      {% for result in ssh__collected_keys.results %}
+      {% if result.get('stdout') %}
+      # Host: {{ result.item.get('item') if result.item is mapping else result.item }}
+      {{ result.stdout }}
+      {% endif %}
+      {% endfor %}
+      {% endif %}
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-hostkeys
+
+- name: Display connectivity and collection results
+  ansible.builtin.debug:
+    msg: |
+      SSH Host Key Collection Summary:
+      Total hosts in inventory: {{ groups['all'] | length }}
+      
+      Connectivity Results:
+      {% for result in ssh__connectivity_results.results %}
+      - {{ result.item }}: {% if result is succeeded %}REACHABLE{% else %}UNREACHABLE ({{ result.msg }}){% endif %}
+      {% endfor %}
+      
+      Keys collected: {{ ssh__collected_hostkeys | regex_findall('ssh-(ed25519|rsa|ecdsa)') | length }} key entries
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-hostkeys
+    - debug
+
+- name: Verify keys were collected from at least one host
+  ansible.builtin.assert:
+    that:
+      - ssh__collected_hostkeys | regex_findall('ssh-(ed25519|rsa|ecdsa)') | length > 0
+    fail_msg: |
+      No SSH host keys collected - all inventory hosts appear to be unreachable.
+      Ensure that:
+      1. All hosts in inventory are powered on and reachable
+      2. SSH port 22 is open and accessible from the controller
+      3. DNS or IP routing is properly configured
+      
+      To skip this check and continue: ansible-playbook ... -e ssh_skip_hostkeys_assert=true
+    success_msg: "{{ ssh__collected_hostkeys | regex_findall('ssh-(ed25519|rsa|ecdsa)') | length }} key entries collected from accessible hosts"
+  delegate_to: localhost
+  run_once: true
+  when: not (ssh_skip_hostkeys_assert | default(false) | bool)
+  tags:
+    - ssh
+    - ssh-hostkeys
+
+# Save to controller for reference and audit trail
+- name: Save collected host keys to controller (audit record)
+  ansible.builtin.copy:
+    content: "{{ ssh__collected_hostkeys }}"
+    dest: "{{ ssh__hostkeys_dir }}/collected_hostkeys_{{ ansible_date_time.date }}.txt"
+    mode: "0644"
+  delegate_to: localhost
+  run_once: true
+  when: ssh__collected_hostkeys | regex_findall('ssh-(ed25519|rsa|ecdsa)') | length > 0
+  tags:
+    - ssh
+    - ssh-hostkeys
+    - audit
+
+# -----------------------------------------------------------------------------
+# Phase 3: Deploy known_hosts to all nodes (only if we have keys)
+# -----------------------------------------------------------------------------
+
+- name: Deploy explicit known_hosts to all hosts
+  ansible.builtin.copy:
+    content: "{{ ssh__collected_hostkeys }}"
+    dest: /etc/ssh/ssh_known_hosts
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  become: true
+  when: 
+    - ansible_connection != 'local'
+    - ssh__collected_hostkeys | regex_findall('ssh-(ed25519|rsa|ecdsa)') | length > 0
+  tags:
+    - ssh
+    - ssh-hostkeys
+  notify:
+    - Restart SSH service

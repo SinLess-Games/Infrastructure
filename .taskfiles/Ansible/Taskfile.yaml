@@ -61,7 +61,10 @@ tasks:
     cmds:
       - |
         set -e
-        {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/configure-localhost.yaml" --ask-pass
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/configure-localhost.yaml \
+          --ask-pass {{.CLI_ARGS}}
   
   setup-proxmox-nodes:
     desc: "Configure the proxmox nodes"

@@ -24,3 +24,7 @@
     - ssh
     - shell-config
     - packages
+
+  tasks:
+    - name: Ensure SSH host keys are present in inventory
+      import_tasks: ../tasks/ssh-hostkeys.yaml

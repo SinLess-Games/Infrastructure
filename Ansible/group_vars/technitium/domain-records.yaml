@@ -42,6 +42,26 @@ technitium_domain_records:
         type: "A"
         value: "10.10.10.12"
         ttl: 300
+      - name: "pve-01"
+        type: "A"
+        value: "10.10.10.15"
+        ttl: 300
+      - namme: " pve-02"
+        type: "A"
+        value: "10.10.10.16"
+        ttl: 300
+      - name: "pve-03"
+        type: "A"
+        value: "10.10.10.17"
+        ttl: 300
+      - name: "pve-04"
+        type: "A"
+        value: "10.10.10.18"
+        ttl: 300
+      - name: "pve-05"
+        type: "A"
+        value: "10.10.10.19"
+        ttl: 300
 
   # ---------------------------------------------------------------------------
   # Zone: local.sinlessgamesllc.com

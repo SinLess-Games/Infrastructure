@@ -1,0 +1,19 @@
+# =============================================================================
+# SSH Known Hosts File
+# =============================================================================
+# Ansible managed - /etc/ssh/ssh_known_hosts
+# Generated: {{ ansible_date_time.iso8601 }}
+# Host: {{ inventory_hostname }}
+#
+# This file contains explicit SSH host key entries for all hosts in the
+# infrastructure. It complements the CA-based trust model defined in user
+# ~/.ssh/known_hosts and provides fallback host key verification.
+#
+# Format:
+#   - Collected via ssh-keyscan from all inventory hosts
+#   - Includes ed25519 (preferred), RSA, and ECDSA keys
+#   - Works alongside @cert-authority entries in user known_hosts
+#
+# =============================================================================
+
+{{ ssh__collected_hostkeys | default('# WARNING: No host keys available') }}

@@ -11,15 +11,15 @@ proxmox:
     pve_nodes:
       hosts:
         pve-01:
-          ansible_host: 10.10.10.5
-        # pve-02:
-        #   ansible_host: 10.10.10.6
+          ansible_host: 10.10.10.15
+        pve-02:
+          ansible_host: 10.10.10.16
         pve-03:
-          ansible_host: 10.10.10.7
+          ansible_host: 10.10.10.17
         pve-04:
-          ansible_host: 10.10.10.8
+          ansible_host: 10.10.10.18
         pve-05:
-          ansible_host: 10.10.10.9
+          ansible_host: 10.10.10.19
 
     pve_bootstrap:
       hosts:
