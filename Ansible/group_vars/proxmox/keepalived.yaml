@@ -1,0 +1,96 @@
+# =============================================================================
+# Keepalived Configuration for Proxmox HA UI
+# =============================================================================
+# This file configures Keepalived for High Availability of the Proxmox UI
+# using VRRP protocol and automatic failover with a virtual IP.
+#
+# See: Ansible/roles/proxmox-ha-ui/README.md for detailed documentation
+
+# =============================================================================
+# Virtual IP Configuration
+# =============================================================================
+
+# Virtual IP address for HA UI access
+# Clients will connect to this IP for Proxmox UI
+# Must be on the same network as cluster nodes and not already in use
+keepalived_vip: "10.10.10.14"
+
+# VIP netmask (CIDR notation)
+keepalived_vip_netmask: 24
+
+# Network interface to bind VIP to (should match cluster management network)
+keepalived_vip_interface: "{{ proxmox_cluster_network_interface | default('vmbr0') }}"
+
+# =============================================================================
+# VRRP Configuration
+# =============================================================================
+
+# Router ID - identifies the VRRP group (0-255)
+# Must be the same on all nodes in the HA group
+keepalived_router_id: 100
+
+# Priority for VRRP master election
+# Higher priority = more likely to become master (0-255)
+# Set dynamically: highest on primary node, lower on secondary/tertiary
+keepalived_priority: "{{ 100 if inventory_hostname == hostvars[groups['proxmox'][0]]['inventory_hostname'] else 90 }}"
+
+# =============================================================================
+# Authentication
+# =============================================================================
+
+# VRRP authentication password (must be same on all nodes)
+# Randomly generated - at least 8 characters
+keepalived_auth_pass: "pxmx-ha-ui-7k9mQw2nX5rL"
+
+# =============================================================================
+# Health Check Configuration
+# =============================================================================
+
+# Interval between health checks (seconds)
+# Lower values = faster failover detection but more overhead
+keepalived_health_check_interval: 2
+
+# Timeout for health check script (seconds)
+# Must be less than interval
+keepalived_health_check_timeout: 5
+
+# Number of failed checks before marking service down
+# Higher = more tolerant to temporary issues
+keepalived_health_check_fall: 3
+
+# Number of successful checks before marking service up
+# Higher = slower recovery but more stable
+keepalived_health_check_rise: 2
+
+# =============================================================================
+# Notification (optional)
+# =============================================================================
+
+# Commands to execute on state change (master/backup/fault)
+# These are templates and will be created by the role
+# Uncomment to enable notifications (e.g., send alerts)
+
+# keepalived_notify_master: "/usr/local/bin/notify-ha-ui.sh MASTER"
+# keepalived_notify_backup: "/usr/local/bin/notify-ha-ui.sh BACKUP"
+# keepalived_notify_fault: "/usr/local/bin/notify-ha-ui.sh FAULT"
+
+# =============================================================================
+# HAProxy Configuration
+# =============================================================================
+
+# HAProxy frontend port (exposed to clients)
+haproxy_frontend_port: 443
+
+# HAProxy stats monitoring port
+haproxy_stats_port: 8404
+
+# Proxmox internal UI port
+proxmox_ui_port: 8006
+
+# Enable SSL/TLS termination
+haproxy_use_ssl: true
+
+# Certificate paths (will be auto-generated if not present)
+haproxy_cert_path: /etc/ssl/private/proxmox-ha-ui.pem
+haproxy_key_path: /etc/ssl/private/proxmox-ha-ui.key
+haproxy_ca_path: /etc/ssl/certs/ca-certificates.crt

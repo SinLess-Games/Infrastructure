@@ -1,0 +1,114 @@
+# =============================================================================
+# Proxmox Certificate Management Configuration
+# =============================================================================
+# This file configures SSL/TLS certificate management for Proxmox nodes
+#
+# Supports:
+# - Self-signed certificates
+# - ACME (Let's Encrypt) certificates
+# - Manual CA-signed certificates
+# - Certificate renewal and rotation
+#
+# See: Ansible/roles/proxmox-certs/README.md for detailed documentation
+
+# =============================================================================
+# Certificate Source Configuration
+# =============================================================================
+
+# Certificate source: 'self-signed', 'acme', or 'manual'
+proxmox_cert_source: "self-signed"
+
+# Certificate validity period (days)
+proxmox_cert_validity_days: 365
+
+# =============================================================================
+# Self-Signed Certificate Configuration
+# =============================================================================
+
+# Self-signed certificate paths
+proxmox_cert_dir: /etc/pve/nodes/{{ inventory_hostname }}/pve-ssl.pem
+proxmox_key_dir: /etc/pve/nodes/{{ inventory_hostname }}/pve-ssl.key
+
+# Certificate Common Name (CN)
+proxmox_cert_cn: "{{ inventory_hostname }}"
+
+# Certificate Subject Alternative Names (SANs)
+proxmox_cert_san:
+  - "{{ inventory_hostname }}"
+  - "{{ ansible_host }}"
+  - "proxmox.local"
+  - "*.proxmox.local"
+
+# Certificate subject fields
+proxmox_cert_country: "US"
+proxmox_cert_state: "State"
+proxmox_cert_locality: "City"
+proxmox_cert_organization: "Sinless Games"
+proxmox_cert_ou: "Infrastructure"
+
+# =============================================================================
+# ACME / Let's Encrypt Configuration
+# =============================================================================
+
+# Enable ACME certificate management (requires acme.sh)
+proxmox_acme_enabled: false
+
+# ACME provider: 'letsencrypt' or 'zerossl'
+proxmox_acme_provider: "letsencrypt"
+
+# ACME email for certificate notifications
+proxmox_acme_email: "admin@example.com"
+
+# ACME challenge type: 'http-01', 'dns-01', 'tls-alpn-01'
+proxmox_acme_challenge_type: "http-01"
+
+# ACME domains (for Let's Encrypt)
+proxmox_acme_domains:
+  - "proxmox.example.com"
+  - "*.proxmox.example.com"
+
+# =============================================================================
+# Manual Certificate Configuration
+# =============================================================================
+
+# Use manually provided certificates
+proxmox_cert_manual: false
+
+# Path to manual certificate file (PEM format)
+# proxmox_cert_manual_path: "/path/to/cert.pem"
+
+# Path to manual private key file
+# proxmox_cert_manual_key_path: "/path/to/key.pem"
+
+# =============================================================================
+# Certificate Management
+# =============================================================================
+
+# Automatically renew certificates before expiration
+proxmox_cert_auto_renew: true
+
+# Days before expiration to trigger renewal
+proxmox_cert_renewal_threshold: 30
+
+# Certificate backup before replacement
+proxmox_cert_backup: true
+
+# Backup retention (number of old certificate versions to keep)
+proxmox_cert_backup_retention: 5
+
+# Restart Proxmox services after certificate update
+proxmox_cert_restart_services: true
+
+# =============================================================================
+# Certificate Locations (Read-only, for reference)
+# =============================================================================
+
+# Proxmox certificate storage directory
+proxmox_certs_base_dir: /etc/pve/nodes
+
+# Proxmox certificate file naming
+proxmox_cert_filename: "pve-ssl.pem"
+proxmox_key_filename: "pve-ssl.key"
+
+# Backup directory
+proxmox_cert_backup_dir: "/var/backups/proxmox-certs"

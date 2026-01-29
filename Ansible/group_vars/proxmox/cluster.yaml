@@ -1,0 +1,163 @@
+---
+# =============================================================================
+# Proxmox Cluster Configuration
+# =============================================================================
+# Purpose:
+#   - Configure Proxmox VE cluster initialization and node joining
+#   - Define cluster identity, quorum rules, and safety controls
+#
+# Used by:
+#   - roles/proxmox-cluster
+#   - playbooks/setup-proxmox-nodes.yaml
+#
+# Source of truth:
+#   Ansible/group_vars/proxmox/cluster.yaml
+# =============================================================================
+
+# =============================================================================
+# Cluster Control
+# =============================================================================
+
+# Enable or disable cluster operations entirely
+proxmox_cluster_enabled: true
+
+# Cluster mode (will be overridden dynamically per node):
+#   'create'  - Initialize a NEW cluster on the first node ONLY
+#   'expand'  - Join additional nodes to an existing cluster
+# NOTE: Ansible will set this automatically based on whether the node is the init node
+proxmox_cluster_mode: "{% if inventory_hostname == proxmox_cluster_init_node %}create{% else %}expand{% endif %}"
+
+# Initial cluster node (the node that creates/owns the cluster)
+# Set to hostname of your primary Proxmox node
+proxmox_cluster_init_node: pve-01
+
+# =============================================================================
+# Cluster Identity
+# =============================================================================
+
+proxmox_cluster:
+  # Cluster name (REQUIRED — must match exactly across all nodes)
+  # Used by Corosync and Proxmox cluster management
+  name: sinless-games
+
+  # Expected number of nodes in the cluster
+  # Used for quorum validation and safety checks
+  expected_nodes: 5
+
+  # =============================================================================
+  # Node Role Behavior
+  # =============================================================================
+
+  # Allow re-joining a node that was previously part of a cluster
+  # ⚠️ DANGEROUS — requires manual cleanup in many cases
+  # Set to true only if you know what you're doing
+  allow_rejoin: false
+
+  # Enforce quorum checks after cluster changes
+  # If true, role will FAIL if quorum is not healthy after operations
+  enforce_quorum: true
+
+  # =============================================================================
+  # Corosync Configuration (cluster transport)
+  # =============================================================================
+
+  corosync:
+    # Transport type for cluster heartbeat
+    # knet = modern, recommended (Proxmox 8.0+)
+    transport: knet
+
+    # Primary cluster network binding address
+    # Set to the cluster network subnet (e.g., 10.10.10.0/24)
+    # Required for multi-node clusters
+    bindnetaddr: 10.10.10.0
+
+    # Link mode for redundant rings
+    # active = both rings active simultaneously (recommended)
+    # passive = failover only when primary fails
+    # rr = round-robin
+    link_mode: active
+
+    # Enable secure authentication between cluster members
+    # Strongly recommended — enabled by default
+    secure_auth: true
+
+    # Number of redundant communication rings
+    # 1 = single ring (default, sufficient for most setups)
+    # 2+ = advanced HA configurations
+    ring_count: 1
+
+  # =============================================================================
+  # Quorum & Safety Controls
+  # =============================================================================
+
+  quorum:
+    # Fail role execution if quorum is lost
+    # Set to true for production clusters
+    fail_on_quorum_loss: true
+
+    # Minimum votes required for quorum (auto-calculated if null)
+    # Leave null to auto-calculate (recommended)
+    expected_votes: null
+
+    # Allow single-node clusters (development/lab only)
+    # Set to true only for testing environments
+    allow_single_node: false
+
+  # =============================================================================
+  # API & Cluster Services
+  # =============================================================================
+
+  api:
+    # Validate Proxmox API availability during cluster operations
+    validate_api: true
+
+    # Timeout (seconds) when waiting for API to become available
+    api_timeout: 15
+
+  # =============================================================================
+  # Timeouts & Retries
+  # =============================================================================
+
+  timeouts:
+    # Maximum time to wait for Proxmox cluster filesystem (/etc/pve) to sync
+    pve_fs_sync: 30
+
+    # Maximum time to wait for Corosync to stabilize after membership change
+    corosync_stabilize: 20
+
+  # =============================================================================
+  # Debugging & Verbosity
+  # =============================================================================
+
+  debug:
+    # Display cluster discovery status details during execution
+    show_cluster_status: true
+
+    # Display effective Corosync configuration after changes
+    show_corosync_config: false
+
+# =============================================================================
+# Notes
+# =============================================================================
+#
+# Initial Cluster Creation (first run):
+# 1. Set proxmox_cluster_mode: 'create' on the init node (pve-01)
+# 2. Run the playbook with just the init node
+# 3. Verify cluster exists: `pvecm status` on pve-01
+# 4. Change back to proxmox_cluster_mode: 'expand'
+#
+# Adding Nodes to Cluster:
+# 1. Ensure proxmox_cluster_mode: 'expand'
+# 2. Run playbook on new nodes (they will join the cluster)
+# 3. Verify: `pvecm nodes` on any cluster member
+#
+# Removing Nodes from Cluster:
+# 1. On the node to remove: `pvecm delnode <hostname>`
+# 2. Rebuild and configure independently
+#
+# Troubleshooting:
+# - Check Corosync status: `corosync-cfgtool -s`
+# - View cluster members: `pvecm nodes`
+# - Test cluster connectivity: `ping` between nodes on cluster network
+#
+# =============================================================================

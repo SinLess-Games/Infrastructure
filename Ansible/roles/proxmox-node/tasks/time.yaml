@@ -75,6 +75,22 @@
     mode: "0644"
   notify: Restart chrony
 
+- name: Ensure chrony run directory exists with correct permissions
+  ansible.builtin.file:
+    path: /run/chrony
+    state: directory
+    owner: chrony
+    group: chrony
+    mode: "0755"
+
+- name: Ensure chrony lib directory exists with correct permissions
+  ansible.builtin.file:
+    path: /var/lib/chrony
+    state: directory
+    owner: chrony
+    group: chrony
+    mode: "0755"
+
 # -----------------------------------------------------------------------------
 # Enable and start chrony
 # -----------------------------------------------------------------------------

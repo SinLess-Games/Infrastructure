@@ -52,7 +52,11 @@ maxslewrate 1000
 # -----------------------------------------------------------------------------
 # Network access control
 # -----------------------------------------------------------------------------
-{% if chrony_allow is defined and chrony_allow | length > 0 %}
+{% if chrony_allow_networks is defined and chrony_allow_networks | length > 0 %}
+{% for cidr in chrony_allow_networks %}
+allow {{ cidr }}
+{% endfor %}
+{% elif chrony_allow is defined and chrony_allow | length > 0 %}
 {% for cidr in chrony_allow %}
 allow {{ cidr }}
 {% endfor %}
@@ -71,8 +75,8 @@ user chrony
 # Disable NTP command port (unless explicitly needed)
 cmdport 0
 
-# Drop privileges ASAP
-lock_all
+# Drop privileges - commented out as it can break networking on some systems
+# lock_all
 
 # -----------------------------------------------------------------------------
 # Local clock (optional – last-resort only)

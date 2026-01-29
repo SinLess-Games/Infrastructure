@@ -43,12 +43,48 @@
 # Perform cluster join
 # -----------------------------------------------------------------------------
 
-- name: Join Proxmox cluster with password
+# First, backup and replace the joining node's CA with the init node's CA
+- name: Backup local CA on joining node
+  ansible.builtin.command: mv /etc/pve/pve-root-ca.pem /etc/pve/pve-root-ca.pem.bak
+  args:
+    removes: /etc/pve/pve-root-ca.pem
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Copy init node CA to joining node
+  ansible.builtin.command: >
+    scp -o StrictHostKeyChecking=no
+    root@{{ proxmox_cluster_join_address }}:/etc/pve/pve-root-ca.pem
+    /etc/pve/pve-root-ca.pem
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Ensure CA has correct permissions
+  ansible.builtin.command: chmod 644 /etc/pve/pve-root-ca.pem
+  failed_when: false
+  changed_when: false
+  when: not proxmox_cluster_is_clustered | bool
+
+# Get the fingerprint from the init node's API certificate (not CA)
+- name: Get init node API certificate fingerprint
+  ansible.builtin.shell: |
+    openssl s_client -connect {{ proxmox_cluster_join_address }}:8006 < /dev/null 2>/dev/null | \
+    openssl x509 -fingerprint -sha256 -noout | \
+    cut -d'=' -f2
+  delegate_to: localhost
+  register: init_node_fingerprint
+  changed_when: false
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Set fingerprint variable
+  ansible.builtin.set_fact:
+    proxmox_ca_fingerprint: "{{ init_node_fingerprint.stdout | trim }}"
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Join Proxmox cluster with password and fingerprint
   ansible.builtin.command: >
     bash -c "echo {{ proxmox_cluster_join_password | quote }} |
     pvecm add {{ proxmox_cluster_join_address }}
     --link0 {{ proxmox_cluster_bind_address }}
-    --use_ssh"
+    --fingerprint {{ proxmox_ca_fingerprint }}"
   register: proxmox_join
   changed_when: proxmox_join.rc == 0
   failed_when:
@@ -56,21 +92,57 @@
     - "'already contains node' not in (proxmox_join.stderr | default(''))"
   when: not proxmox_cluster_is_clustered | bool
 
-# -----------------------------------------------------------------------------
-# Post-join validation
-# -----------------------------------------------------------------------------
+- name: Display join command output
+  ansible.builtin.debug:
+    msg: "{{ proxmox_join }}"
+  when: not proxmox_cluster_is_clustered | bool
 
-- name: Wait for local corosync config
+- name: Restart corosync service after join
+  ansible.builtin.service:
+    name: corosync
+    state: restarted
+    enabled: true
+  when: proxmox_join is changed
+
+- name: Allow corosync to stabilize after restart
+  ansible.builtin.pause:
+    seconds: 30
+  when: proxmox_join is changed
+
+- name: Ensure pvedaemon is running after cluster join
+  ansible.builtin.service:
+    name: pvedaemon
+    state: restarted
+    enabled: true
+  when: proxmox_join is changed
+
+- name: Wait for cluster filesystem to mount
   ansible.builtin.wait_for:
-    path: /etc/corosync/corosync.conf
+    path: /etc/pve
     timeout: 120
   when: not proxmox_cluster_is_clustered | bool
 
-- name: Ensure corosync service is running
-  ansible.builtin.service:
-    name: corosync
-    state: started
-    enabled: true
+- name: Allow additional stabilization time
+  ansible.builtin.pause:
+    seconds: 10
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Check if node appears in cluster membership from init node
+  ansible.builtin.command: pvecm nodes
+  delegate_to: "{{ proxmox_cluster_init_node }}"
+  register: cluster_membership_check
+  retries: 20
+  delay: 5
+  until: >
+    (inventory_hostname in cluster_membership_check.stdout) or
+    (ansible_host in cluster_membership_check.stdout)
+  failed_when: false
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Display cluster membership check
+  ansible.builtin.debug:
+    msg: "{{ cluster_membership_check.stdout_lines }}"
+  when: not proxmox_cluster_is_clustered | bool
 
 - name: Wait for this node to appear in init node membership
   ansible.builtin.command: pvecm nodes

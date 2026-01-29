@@ -17,31 +17,28 @@
   hosts: proxmox
   become: true
   gather_facts: true
-
-  # ---------------------------------------------------------------------------
-  # CRITICAL:
-  # Proxmox cluster join MUST be serialized
-  # ---------------------------------------------------------------------------
-  # serial: 1
-
-  vars_prompt:
-    - name: "proxmox_cluster_join_password"
-      prompt: "Enter the Proxmox cluster join password"
-      private: true
+  timeout: 7200
 
   vars:
     proxmox_node_playbook: true
 
   vars_files:
     - ../group_vars/all/chrony.yaml
-    - ../group_vars/proxmox.yaml
+    - ../group_vars/proxmox/proxmox.yaml
     - ../group_vars/proxmox/cluster.yaml
+    - ../group_vars/proxmox/keepalived.yaml
     - ../group_vars/all/ssh.yaml
     - ../group_vars/all/users.yaml
 
+  vars_prompt:
+    - name: proxmox_cluster_join_password
+      prompt: "Enter Proxmox cluster join password"
+      private: true
+      confirm: true
+
   roles:
     # -------------------------------------------------------------------------
-    # Phase 0: Common SSH configuration
+    # Phase 0: Gather facts early with timeout
     # -------------------------------------------------------------------------
     - role: ssh
       tags: [ssh, common]
@@ -55,21 +52,33 @@
     # -------------------------------------------------------------------------
     # Phase 2: Proxmox cluster lifecycle
     # -------------------------------------------------------------------------
-    # - role: proxmox-cluster
-    #   tags: [proxmox, cluster]
+    - role: proxmox-cluster
+      tags: [proxmox, cluster]
 
-    # # -------------------------------------------------------------------------
-    # # Phase 3: Proxmox hardware inventory collection
-    # # -------------------------------------------------------------------------
-    # - role: proxmox-hardware
-    #   tags: [proxmox, hardware, inventory]
+    # -------------------------------------------------------------------------
+    # Phase 3: Proxmox hardware inventory collection
+    # -------------------------------------------------------------------------
+    - role: proxmox-hardware
+      tags: [proxmox, hardware, inventory]
+
+    # -------------------------------------------------------------------------
+    # Phase 4: Proxmox HA UI setup (HAProxy + Keepalived
+    # -------------------------------------------------------------------------
+    - role: proxmox-ha-ui
+      tags: [proxmox, ha-ui, haproxy, keepalived]
+      
 
   tasks:
 
-    - name: reboot Proxmox VE node if required
-      ansible.builtin.reboot:
-        msg: "Rebooting to apply Proxmox VE configuration changes"
-        pre_reboot_delay: 5
-        reboot_timeout: 6000
-        test_command: whoami
-      tags: [proxmox, node, reboot]
+    - name: Gather facts if not already gathered
+      ansible.builtin.setup:
+        gather_timeout: 30
+      when: ansible_facts is not defined or not ansible_facts
+
+    # - name: reboot Proxmox VE node if required
+    #   ansible.builtin.reboot:
+    #     msg: "Rebooting to apply Proxmox VE configuration changes"
+    #     pre_reboot_delay: 5
+    #     reboot_timeout: 6000
+    #     test_command: whoami
+    #   tags: [proxmox, node, reboot]

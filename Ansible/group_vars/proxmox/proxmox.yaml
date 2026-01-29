@@ -19,4 +19,5 @@ proxmox_cluster_network_interface: vmbr0
 # Bind corosync to the node's management IP
 proxmox_cluster_bind_address: "{{ ansible_host }}"
 
-proxmox_cluster_join_address: 10.10.10.5
+# Address of init node to join (dynamically resolved to init node's IP)
+proxmox_cluster_join_address: "{{ hostvars[proxmox_cluster_init_node]['ansible_host'] }}"

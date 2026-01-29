@@ -44,7 +44,7 @@
 
 - name: Resolve controller runtime dir + user (controller facts)
   ansible.builtin.set_fact:
-    ssh__controller_runtime_dir: "{{ lookup('env', 'XDG_RUNTIME_DIR') | default('/tmp', true) }}"
+    ssh__controller_runtime_dir: "{{ ssh__controller_outputs_dir_effective ~ '/ssh_host_certs' }}"
     ssh__controller_user: "{{ lookup('env', 'USER') | default('ansible', true) }}"
   delegate_to: localhost
   changed_when: false
@@ -55,7 +55,7 @@
       {{
         ssh_controller_host_certs_dir
           | default(
-              ssh__controller_runtime_dir ~ "/ansible-ssh-host-certs-" ~ ssh__controller_user,
+              ssh__controller_runtime_dir,
               true
             )
       }}

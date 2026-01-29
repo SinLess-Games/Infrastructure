@@ -42,6 +42,8 @@
   ansible.builtin.apt:
     upgrade: full
     update_cache: false
+  async: 1800
+  poll: 10
 
 # -----------------------------------------------------------------------------
 # Optional Ceph client tooling ONLY
