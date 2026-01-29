@@ -29,6 +29,7 @@
     - ../group_vars/proxmox/keepalived.yaml
     - ../group_vars/proxmox/certificate.yaml
     - ../group_vars/proxmox/vault-certs.yaml
+    - ../group_vars/proxmox/networking.yaml
     - ../group_vars/all/ssh.yaml
     - ../group_vars/all/users.yaml
 
@@ -74,6 +75,12 @@
     # -------------------------------------------------------------------------
     - role: proxmox-certs
       tags: [proxmox, certs, certificates]
+
+    # -------------------------------------------------------------------------
+    # Phase 6: Proxmox cluster networking (VLAN bridges)
+    # -------------------------------------------------------------------------
+    - role: proxmox-networking
+      tags: [proxmox, networking, bridges]
 
   tasks:
 

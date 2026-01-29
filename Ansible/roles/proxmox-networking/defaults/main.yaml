@@ -1,0 +1,72 @@
+---
+# =============================================================================
+# Proxmox Networking Configuration Defaults
+# =============================================================================
+
+# Enable networking management
+proxmox_networking_enabled: true
+
+# Apply configuration automatically (set to false for dry-run/review only)
+proxmox_networking_apply: true
+
+# Backup interface configuration before changes
+proxmox_networking_backup: true
+
+# Output directory for network interface backups (absolute path)
+proxmox_networking_backup_dir: "/home/sinless777/Projects/Infrastructure/.outputs"
+
+# Network interfaces file location
+proxmox_interfaces_file: "/etc/network/interfaces"
+
+# VM Bridge configuration
+proxmox_vm_bridges:
+  vmbr0:
+    description: "VM Bridge 0 - Infrastructure"
+    ports: ["enp10s0f0", "enp8s0"]
+    vlan_aware: true
+  vmbr1:
+    description: "VM Bridge 1 - Virtual Networks"
+    ports: []
+    vlan_aware: true
+
+# VLAN definitions
+proxmox_vlans:
+  Infrastructure:
+    id: 1
+    subnet: "10.10.10.0/24"
+    gateway: "10.10.10.1"
+    dhcp: true
+  Development:
+    id: 20
+    subnet: "10.10.20.0/24"
+    gateway: "10.10.20.1"
+    dhcp: true
+  Testing:
+    id: 30
+    subnet: "10.10.30.0/24"
+    gateway: "10.10.30.1"
+    dhcp: true
+  Production:
+    id: 40
+    subnet: "10.10.40.0/24"
+    gateway: "10.10.40.1"
+    dhcp: true
+  DMZ:
+    id: 50
+    subnet: "10.10.50.0/24"
+    gateway: "10.10.50.1"
+    dhcp: true
+  Ceph:
+    id: 60
+    subnet: "10.10.60.0/24"
+    gateway: "10.10.60.1"
+    dhcp: true
+
+# Bond configuration (optional)
+proxmox_bonds: {}
+
+# Bridge MTU size (standard is 1500, jumbo is 9000)
+proxmox_bridge_mtu: 1500
+
+# Restart networking after changes
+proxmox_networking_restart: false

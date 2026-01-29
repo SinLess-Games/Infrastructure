@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  author: "SinLess Games Infrastructure Team"
+  description: "Proxmox cluster networking configuration"
+  company: "SinLess Games"
+  license: "Apache 2.0"
+  min_ansible_version: 2.9
+
+  galaxy_tags:
+    - proxmox
+    - networking
+    - vlan
+    - bridge
+
+dependencies: []

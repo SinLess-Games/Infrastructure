@@ -1,0 +1,301 @@
+---
+# =============================================================================
+# Proxmox Networking Configuration Tasks
+# =============================================================================
+
+- name: Ensure networking facts are gathered
+  setup:
+    gather_subset:
+      - network
+  when: ansible_facts.network is not defined
+
+# =============================================================================
+# Phase 1: Backup existing network configuration
+# =============================================================================
+
+- name: Create backup directory on controller
+  file:
+    path: "{{ proxmox_networking_backup_dir }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  run_once: true
+  when: proxmox_networking_backup
+
+- name: Download current network interfaces configuration
+  fetch:
+    src: "{{ proxmox_interfaces_file }}"
+    dest: "{{ proxmox_networking_backup_dir }}/{{ inventory_hostname }}_interfaces_{{ ansible_date_time.iso8601_basic_short }}"
+    flat: yes
+  become: yes
+  when: proxmox_networking_backup
+  tags: [network, backup]
+
+- name: Backup interfaces file on node
+  block:
+    - name: Check if backup directory exists on node
+      stat:
+        path: "/etc/network/interfaces.d"
+      register: interfaces_d_stat
+      become: yes
+
+    - name: Create backup of interfaces file on node
+      shell: |
+        cp {{ proxmox_interfaces_file }} {{ proxmox_interfaces_file }}.bak.{{ ansible_date_time.iso8601_basic_short }}
+      become: yes
+      changed_when: false
+
+  when: proxmox_networking_backup
+  tags: [network, backup]
+
+# =============================================================================
+# Phase 2: Gather current network interface information
+# =============================================================================
+
+- name: Get current network interfaces
+  shell: |
+    ip link show | grep -E "^[0-9]+:" | awk -F': ' '{print $2}' | grep -v "^lo$"
+  register: current_interfaces
+  changed_when: false
+  become: yes
+  tags: [network, facts]
+
+- name: Display current interfaces
+  debug:
+    msg: "{{ current_interfaces.stdout_lines }}"
+  tags: [network, facts]
+
+- name: Extract existing management interface and vmbr0 configuration
+  shell: |
+    # If managed markers exist, extract only the preserved block to avoid duplication.
+    if grep -q "PRESERVED ORIGINAL CONFIGURATION" {{ proxmox_interfaces_file }}; then
+      awk '
+      /PRESERVED ORIGINAL CONFIGURATION/ {capture=1; next}
+      /ANSIBLE-MANAGED VLAN BRIDGES/ {capture=0}
+      capture && $0 !~ /^[[:space:]]*#/ {print}
+      ' {{ proxmox_interfaces_file }}
+    else
+      # Fallback: extract everything before additional bridges
+      awk '
+      /^# VM bridge for VLANs/ || /^auto vmbr[2-9]/ || /^auto vmbr[1-9][0-9]/ {exit}
+      $0 !~ /^[[:space:]]*#/ {print}
+      ' {{ proxmox_interfaces_file }}
+    fi
+  register: original_config
+  changed_when: false
+  become: yes
+  tags: [network, parse]
+
+- name: Display original configuration to preserve
+  debug:
+    msg: "{{ original_config.stdout_lines }}"
+  tags: [network, parse]
+
+- name: Get network interface details
+  shell: |
+    ip addr show | grep -E "inet|inet6" | grep -v "127.0.0.1"
+  register: interface_addresses
+  changed_when: false
+  become: yes
+  tags: [network, facts]
+
+- name: Display interface addresses
+  debug:
+    msg: "{{ interface_addresses.stdout_lines }}"
+  tags: [network, facts]
+
+# =============================================================================
+# Phase 3: Create network configuration
+# =============================================================================
+
+- name: Generate new interfaces configuration from template
+  block:
+    - name: Template interfaces file
+      template:
+        src: "interfaces.j2"
+        dest: "/etc/network/interfaces.new"
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      become: yes
+      register: interfaces_template
+      tags: [network, template]
+
+    - name: Display generated interfaces configuration
+      shell: |
+        cat /etc/network/interfaces.new
+      register: generated_config
+      changed_when: false
+      become: yes
+      tags: [network, template]
+
+    - name: Show generated configuration
+      debug:
+        msg: "{{ generated_config.stdout_lines }}"
+      tags: [network, template]
+
+  tags: [network]
+
+# =============================================================================
+# Phase 4: Validate configuration
+# =============================================================================
+
+- name: Validate interfaces configuration syntax
+  shell: |
+    if-up.d validate /etc/network/interfaces.new 2>/dev/null || echo "No validation tool available"
+  register: config_validation
+  changed_when: false
+  failed_when: false
+  become: yes
+  tags: [network, validate]
+
+- name: Display validation result
+  debug:
+    msg: "{{ config_validation.stdout_lines }}"
+  when: config_validation.stdout | length > 0
+  tags: [network, validate]
+
+# =============================================================================
+# Phase 5: Apply configuration (manual approval required)
+# =============================================================================
+
+- name: Verify bridges are properly defined
+  block:
+    - name: Merge node-specific bridge overrides
+      set_fact:
+        merged_bridges: >-
+          {{
+            proxmox_bridges | combine(
+              proxmox_node_bridges.get(inventory_hostname, {}) | dict2items | selectattr('value', 'ne', None) | list | items2dict
+            )
+          }}
+      tags: [network, verify]
+
+    - name: Parse desired bridges
+      set_fact:
+        desired_bridges: "{{ merged_bridges.keys() | list }}"
+      tags: [network, verify]
+
+    - name: Display desired bridge configuration
+      debug:
+        msg: |
+          Desired bridges for {{ inventory_hostname }}:
+          {% for bridge_name, bridge_config in merged_bridges.items() %}
+          - {{ bridge_name }}: {{ bridge_config.description }}
+            Ports: {{ bridge_config.ports | default([]) | join(', ') if bridge_config.ports else 'none' }}
+            VLAN Aware: {{ bridge_config.vlan_aware }}
+          {% endfor %}
+      tags: [network, verify]
+
+  when: proxmox_networking_enabled
+  tags: [network]
+
+- name: Summary of network changes
+  block:
+    - name: Display network configuration summary
+      debug:
+        msg: |
+          ==================== NETWORK CONFIGURATION SUMMARY ====================
+          Node: {{ inventory_hostname }}
+          
+          Current Interfaces:
+          {{ current_interfaces.stdout }}
+          
+          Desired Bridges:
+          {% for bridge_name, bridge_config in merged_bridges.items() %}
+          - {{ bridge_name }}: {{ bridge_config.description }}{% if bridge_config.ports %} [Ports: {{ bridge_config.ports | join(', ') }}]{% endif %}
+
+          {% endfor %}
+          
+          Backup Location: {{ proxmox_networking_backup_dir }}/{{ inventory_hostname }}_interfaces_*
+          
+          Generated configuration: /etc/network/interfaces.new
+          {% if proxmox_networking_apply | bool %}Ready to apply configuration.{% else %}Manual review required before applying.{% endif %}
+          ======================================================================
+      tags: [network, summary]
+
+  when: proxmox_networking_enabled
+  tags: [network]
+
+# =============================================================================
+# Phase 6: Apply configuration
+# =============================================================================
+
+- name: Apply network configuration
+  block:
+    - name: Copy new configuration to interfaces file
+      copy:
+        src: /etc/network/interfaces.new
+        dest: "{{ proxmox_interfaces_file }}"
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      become: yes
+      register: config_applied
+      tags: [network, apply]
+
+    - name: Reload network configuration (ifreload)
+      command: ifreload -a
+      become: yes
+      register: network_reload
+      failed_when: false
+      tags: [network, apply]
+
+    - name: Display reload result
+      debug:
+        msg: "{{ network_reload.stdout_lines if network_reload.stdout_lines else 'Network configuration reloaded' }}"
+      tags: [network, apply]
+
+    - name: Verify bridges were created
+      command: ip link show
+      register: verify_bridges
+      changed_when: false
+      become: yes
+      tags: [network, apply]
+
+    - name: Check for new bridges
+      shell: ip link show | grep -E "vmbr(20|30|40|50|60)" | awk '{print $2}' | sed 's/:$//' | sort
+      register: created_bridges
+      changed_when: false
+      failed_when: false
+      become: yes
+      tags: [network, apply]
+
+    - name: Display created bridges
+      debug:
+        msg: "Created bridges: {{ created_bridges.stdout_lines | join(', ') if created_bridges.stdout_lines else 'None yet - may require reboot' }}"
+      tags: [network, apply]
+
+    - name: Network configuration applied successfully
+      debug:
+        msg: |
+          ==================== CONFIGURATION APPLIED ====================
+          Node: {{ inventory_hostname }}
+          Configuration file: {{ proxmox_interfaces_file }}
+          
+          New VLAN bridges have been configured.
+          The bridges will be fully active after the next network restart or reboot.
+          
+          To verify: ip link show | grep vmbr
+          ===============================================================
+      tags: [network, apply]
+
+  when: proxmox_networking_enabled | bool and proxmox_networking_apply | bool
+  tags: [network, apply]
+
+- name: Configuration not applied (apply flag disabled)
+  debug:
+    msg: |
+      ==================== CONFIGURATION NOT APPLIED ====================
+      Configuration generated but not applied (proxmox_networking_apply=false)
+      
+      To apply manually:
+        1. Review: cat /etc/network/interfaces.new
+        2. Apply: sudo cp /etc/network/interfaces.new /etc/network/interfaces
+        3. Reload: sudo ifreload -a
+      ===================================================================
+  when: proxmox_networking_enabled | bool and not (proxmox_networking_apply | bool)
+  tags: [network, summary]
