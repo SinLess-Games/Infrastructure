@@ -1,0 +1,349 @@
+---
+# =============================================================================
+# Proxmox Certificate Management
+# =============================================================================
+# Manages SSL/TLS certificates for Proxmox nodes
+# Supports: self-signed, ACME (Let's Encrypt), and manual certificates
+
+- name: Ensure certificate backup directory exists
+  file:
+    path: "{{ proxmox_cert_backup_dir }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+  become: yes
+
+# =============================================================================
+# ACME Configuration in Proxmox
+# =============================================================================
+
+- name: Configure ACME in Proxmox
+  block:
+    - name: Register ACME account via pvesh
+      shell: |
+        pvesh create /cluster/acme/account \
+          --name {{ proxmox_acme_account_name | default('default') }} \
+          --directory {{ proxmox_acme_directory }} \
+          --contact {{ proxmox_acme_email }} \
+          --tos_url https://letsencrypt.org/documents/LE-SA-v1.4-April-3-2024.pdf
+      register: acme_account_result
+      changed_when: acme_account_result.rc == 0
+      failed_when: acme_account_result.rc != 0 and 'already exists' not in acme_account_result.stderr
+      become: yes
+      when:
+        - proxmox_acme_enabled
+
+    - name: Debug ACME account registration result
+      debug:
+        var: acme_account_result
+      when:
+        - proxmox_acme_enabled
+        - acme_account_result is defined
+
+    - name: Encode ACME plugin credentials (base64)
+      shell: |
+        echo -n '{{ proxmox_acme_dns_api_data }}' | base64 -w0
+      register: encoded_plugin_data
+      changed_when: false
+      become: yes
+      when:
+        - proxmox_acme_enabled
+        - proxmox_acme_dns_api is defined
+        - proxmox_acme_dns_api_data is defined
+
+    - name: Configure ACME DNS validation plugin via pvesh
+      shell: |
+        pvesh create /cluster/acme/plugins \
+          --id {{ proxmox_acme_plugin_id }} \
+          --type dns \
+          --api {{ proxmox_acme_dns_api }} \
+          --data {{ encoded_plugin_data.stdout }}
+      register: acme_plugin_result
+      changed_when: acme_plugin_result.rc == 0
+      failed_when: acme_plugin_result.rc != 0 and 'already exists' not in acme_plugin_result.stderr
+      become: yes
+      when:
+        - proxmox_acme_enabled
+        - proxmox_acme_dns_api is defined
+        - proxmox_acme_dns_api_data is defined
+        - encoded_plugin_data is succeeded
+
+    - name: Debug ACME plugin configuration result
+      debug:
+        var: acme_plugin_result
+      when:
+        - proxmox_acme_enabled
+        - acme_plugin_result is defined
+
+    - name: Validate ACME plugin is properly configured
+      shell: |
+        pvesh get /cluster/acme/plugins/{{ proxmox_acme_plugin_id }}
+      register: plugin_validation
+      changed_when: false
+      failed_when: false
+      become: yes
+      when:
+        - proxmox_acme_enabled
+        - acme_plugin_result is changed or (acme_plugin_result.rc is defined and acme_plugin_result.rc == 0)
+
+    - name: Display ACME plugin configuration
+      debug:
+        msg: "ACME plugin {{ proxmox_acme_plugin_id }} successfully configured with API: {{ proxmox_acme_dns_api }}"
+      when:
+        - proxmox_acme_enabled
+        - acme_plugin_result is defined
+
+    - name: Comprehensive challenge plugin validation
+      block:
+        - name: Check plugin configuration in Proxmox config
+          shell: |
+            grep -r "{{ proxmox_acme_plugin_id }}" /etc/pve/priv/acme/ || echo "Plugin configured via API"
+          register: plugin_config_check
+          changed_when: false
+          failed_when: false
+          become: yes
+
+        - name: Verify plugin can be listed
+          shell: |
+            pvesh get /cluster/acme/plugins
+          register: plugins_list
+          changed_when: false
+          become: yes
+
+        - name: Display all configured ACME plugins
+          debug:
+            msg: "{{ plugins_list.stdout | default('No plugins found') }}"
+          when: plugins_list is succeeded
+
+        - name: Verify plugin is in the list
+          assert:
+            that:
+              - plugins_list.stdout is search(proxmox_acme_plugin_id)
+            fail_msg: "Challenge plugin {{ proxmox_acme_plugin_id }} not found in plugin list - plugin creation may have failed"
+            success_msg: "Challenge plugin {{ proxmox_acme_plugin_id }} confirmed in ACME plugin list"
+          when: 
+            - plugins_list is succeeded
+            - not ansible_check_mode
+
+      when:
+        - proxmox_acme_enabled
+        - acme_plugin_result is defined or acme_plugin_result is not skipped
+
+    - name: Configure ACME domains on node
+      shell: |
+        pvenode config set \
+          --acme account={{ proxmox_acme_account_name }} \
+          {% for domain in proxmox_acme_domains %}
+          --acmedomain{{ loop.index0 }} domain={{ domain }},plugin={{ proxmox_acme_plugin_id }} \
+          {% endfor %}
+          --delete acmedomain{{ proxmox_acme_domains | length }}
+      register: acme_domain_result
+      changed_when: acme_domain_result.rc == 0
+      failed_when: acme_domain_result.rc != 0
+      become: yes
+      when:
+        - proxmox_acme_enabled
+        - proxmox_acme_domains is defined
+        - proxmox_acme_domains | length > 0
+
+    - name: Debug ACME domain configuration result
+      debug:
+        var: acme_domain_result
+      when:
+        - proxmox_acme_enabled
+        - acme_domain_result is defined
+
+    - name: Order ACME certificate from Let's Encrypt
+      shell: |
+        pvenode acme cert order
+      register: acme_order_result
+      changed_when: acme_order_result.rc == 0
+      failed_when: false
+      become: yes
+      when:
+        - proxmox_acme_enabled
+        - proxmox_acme_domains is defined
+        - proxmox_acme_domains | length > 0
+
+    - name: Debug ACME certificate order result
+      debug:
+        var: acme_order_result
+      when:
+        - proxmox_acme_enabled
+        - acme_order_result is defined
+
+  when: proxmox_acme_enabled
+
+- name: Backup existing certificate before changes
+  block:
+    - name: Get certificate stat
+      stat:
+        path: "{{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_cert_filename }}"
+      register: current_cert_stat
+
+    - name: Backup current certificate
+      copy:
+        src: "{{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_cert_filename }}"
+        dest: "{{ proxmox_cert_backup_dir }}/{{ proxmox_cert_filename }}.{{ ansible_date_time.iso8601_basic_short }}"
+        remote_src: yes
+        mode: '0600'
+      become: yes
+      when:
+        - current_cert_stat.stat.exists
+        - proxmox_cert_backup
+
+    - name: Cleanup old certificate backups (keep last N)
+      shell: |
+        cd {{ proxmox_cert_backup_dir }}
+        ls -t {{ proxmox_cert_filename }}.* 2>/dev/null | tail -n +{{ proxmox_cert_backup_retention + 1 }} | xargs -r rm
+      become: yes
+      when: proxmox_cert_backup
+      changed_when: false
+
+  when: proxmox_cert_backup
+
+# =============================================================================
+# Self-Signed Certificate Management
+# =============================================================================
+
+- name: Generate self-signed certificate
+  block:
+    - name: Check if certificate exists
+      stat:
+        path: "{{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_cert_filename }}"
+      register: proxmox_cert_exists
+
+    - name: Check certificate expiration
+      shell: |
+        openssl x509 -noout -enddate -in {{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_cert_filename }} | cut -d= -f2
+      register: cert_expiry
+      changed_when: false
+      failed_when: false
+      when: proxmox_cert_exists.stat.exists
+
+    - name: Calculate days until expiration
+      set_fact:
+        days_until_expiry: "{{ ((cert_expiry.stdout | to_datetime('%b %d %H:%M:%S %Y %Z')) - now()).days }}"
+      when:
+        - proxmox_cert_exists.stat.exists
+        - cert_expiry.rc == 0
+        - cert_expiry.stdout | length > 0
+
+    - name: Determine if certificate needs renewal
+      set_fact:
+        cert_needs_renewal: "{{ not proxmox_cert_exists.stat.exists or (days_until_expiry is defined and days_until_expiry | int < proxmox_cert_renewal_threshold) }}"
+
+    - name: Generate new self-signed certificate
+      block:
+        - name: Generate private key
+          openssl_privatekey:
+            path: "{{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_key_filename }}"
+            size: 2048
+            mode: '0600'
+            owner: root
+            group: root
+          become: yes
+
+        - name: Generate certificate signing request
+          openssl_csr:
+            path: "/tmp/proxmox-{{ inventory_hostname }}.csr"
+            privatekey_path: "{{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_key_filename }}"
+            common_name: "{{ proxmox_cert_cn }}"
+            country_name: "{{ proxmox_cert_country }}"
+            state_or_province_name: "{{ proxmox_cert_state }}"
+            locality_name: "{{ proxmox_cert_locality }}"
+            organization_name: "{{ proxmox_cert_organization }}"
+            organizational_unit_name: "{{ proxmox_cert_ou }}"
+            subject_alt_name: "{{ proxmox_cert_san | map(attribute='value') | list if proxmox_cert_san is mapping else ['DNS:' + item for item in proxmox_cert_san] | list }}"
+          become: yes
+
+        - name: Generate self-signed certificate
+          openssl_certificate:
+            path: "{{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_cert_filename }}"
+            csr_path: "/tmp/proxmox-{{ inventory_hostname }}.csr"
+            privatekey_path: "{{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_key_filename }}"
+            provider: selfsigned
+            selfsigned_version: 3
+            selfsigned_not_after: "+{{ proxmox_cert_validity_days }}d"
+            owner: root
+            group: root
+            mode: '0600'
+          become: yes
+          notify: restart proxmox-services
+
+        - name: Cleanup CSR file
+          file:
+            path: "/tmp/proxmox-{{ inventory_hostname }}.csr"
+            state: absent
+          become: yes
+
+      when:
+        - proxmox_cert_source == "self-signed"
+        - cert_needs_renewal
+
+  when: proxmox_cert_source == "self-signed"
+
+# =============================================================================
+# Certificate Information and Validation
+# =============================================================================
+
+- name: Gather certificate information
+  block:
+    - name: Read certificate details
+      openssl_certificate_info:
+        path: "{{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_cert_filename }}"
+      register: proxmox_cert_info
+      become: yes
+
+    - name: Display certificate information
+      debug:
+        msg:
+          - "Certificate CN: {{ proxmox_cert_info.subject.commonName[0] if proxmox_cert_info.subject.commonName is defined else 'N/A' }}"
+          - "Certificate issued: {{ proxmox_cert_info.not_before }}"
+          - "Certificate expires: {{ proxmox_cert_info.not_after }}"
+          - "Days until expiry: {{ days_until_expiry | default('N/A') }}"
+      when: proxmox_cert_info is succeeded and proxmox_cert_info.subject is defined
+
+  when: proxmox_cert_exists.stat.exists or cert_needs_renewal
+
+# =============================================================================
+# Certificate Restart Notification
+# =============================================================================
+
+- name: Ensure proxmox services are restarted if certificate changed
+  block:
+    - name: Restart Proxmox services
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+        daemon_reload: yes
+      become: yes
+      loop:
+        - pvedaemon
+        - pveproxy
+      when: proxmox_cert_restart_services
+      changed_when: true
+
+  when: cert_needs_renewal is defined and cert_needs_renewal
+
+# =============================================================================
+# Validation
+# =============================================================================
+
+- name: Verify certificate is valid and accessible
+  block:
+    - name: Test certificate readability
+      stat:
+        path: "{{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_cert_filename }}"
+      register: final_cert_stat
+      become: yes
+
+    - name: Assert certificate file exists
+      assert:
+        that:
+          - final_cert_stat.stat.exists
+          - final_cert_stat.stat.readable
+        fail_msg: "Certificate file is not readable at {{ proxmox_certs_base_dir }}/{{ inventory_hostname }}/{{ proxmox_cert_filename }}"
+
+  when: proxmox_cert_source == "self-signed"

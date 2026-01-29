@@ -27,6 +27,8 @@
     - ../group_vars/proxmox/proxmox.yaml
     - ../group_vars/proxmox/cluster.yaml
     - ../group_vars/proxmox/keepalived.yaml
+    - ../group_vars/proxmox/certificate.yaml
+    - ../group_vars/proxmox/vault-certs.yaml
     - ../group_vars/all/ssh.yaml
     - ../group_vars/all/users.yaml
 
@@ -62,11 +64,16 @@
       tags: [proxmox, hardware, inventory]
 
     # -------------------------------------------------------------------------
-    # Phase 4: Proxmox HA UI setup (HAProxy + Keepalived
+    # Phase 4: Proxmox HA UI setup (HAProxy + Keepalived)
     # -------------------------------------------------------------------------
     - role: proxmox-ha-ui
       tags: [proxmox, ha-ui, haproxy, keepalived]
-      
+
+    # -------------------------------------------------------------------------
+    # Phase 5: Proxmox certificate management
+    # -------------------------------------------------------------------------
+    - role: proxmox-certs
+      tags: [proxmox, certs, certificates]
 
   tasks:
 

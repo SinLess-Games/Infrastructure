@@ -30,12 +30,15 @@ proxmox_cert_dir: /etc/pve/nodes/{{ inventory_hostname }}/pve-ssl.pem
 proxmox_key_dir: /etc/pve/nodes/{{ inventory_hostname }}/pve-ssl.key
 
 # Certificate Common Name (CN)
-proxmox_cert_cn: "{{ inventory_hostname }}"
+proxmox_cert_cn: "proxmox.sinlessgames.com"
 
 # Certificate Subject Alternative Names (SANs)
 proxmox_cert_san:
   - "{{ inventory_hostname }}"
   - "{{ ansible_host }}"
+  - "proxmox.sinlessgames.com"
+  - "*.sinlessgames.com"
+  - "sinlessgames.com"
   - "proxmox.local"
   - "*.proxmox.local"
 
@@ -49,23 +52,76 @@ proxmox_cert_ou: "Infrastructure"
 # =============================================================================
 # ACME / Let's Encrypt Configuration
 # =============================================================================
+# Configuration for automatic ACME (Let's Encrypt) certificate management.
+#
+# These Ansible variables automatically populate the Proxmox ACME fields in the UI:
+#
+# Proxmox UI → Datacenter → ACME → Accounts:
+#   Account Name:  proxmox_acme_account_name      (default)
+#   E-Mail:        proxmox_acme_email             (admin@sinlessgames.com)
+#   ACME Directory: proxmox_acme_directory        (Let's Encrypt URL)
+#
+# Proxmox UI → Datacenter → ACME → Plugins:
+#   Plugin ID:     proxmox_acme_plugin_id         (dns_cloudflare)
+#   Type:          proxmox_acme_plugin_type       (dns)
+#   DNS API:       proxmox_acme_dns_api           (cloudflare)
+#   API Data:      proxmox_acme_dns_api_data      (CF_Token=..., from vault)
+#
+# See: Docs/Start-Here/09-ACME-Certificate-Management.md for setup guide
 
 # Enable ACME certificate management (requires acme.sh)
-proxmox_acme_enabled: false
+proxmox_acme_enabled: true
 
-# ACME provider: 'letsencrypt' or 'zerossl'
+# Proxmox password for API authentication (required for ACME configuration)
+# Should be set via vault for security
+proxmox_acme_password: "{{ vault_proxmox_root_password }}"
+
+# ACME account name in Proxmox
+proxmox_acme_account_name: "default"
+
+# ACME Directory URLs by provider
+# Let's Encrypt Production
+proxmox_acme_directory_letsencrypt_prod: "https://acme-v02.api.letsencrypt.org/directory"
+# Let's Encrypt Staging
+proxmox_acme_directory_letsencrypt_staging: "https://acme-staging-v02.api.letsencrypt.org/directory"
+# ZeroSSL
+proxmox_acme_directory_zerossl: "https://acme.zerossl.com/v2/DV90"
+# Buypass
+proxmox_acme_directory_buypass: "https://api.buypass.com/acme/directory"
+
+# Selected directory based on provider
 proxmox_acme_provider: "letsencrypt"
+proxmox_acme_provider_staging: false
+
+# Dynamic directory selection
+proxmox_acme_directory: "{{ proxmox_acme_directory_letsencrypt_staging if proxmox_acme_provider_staging else proxmox_acme_directory_letsencrypt_prod }}"
 
 # ACME email for certificate notifications
-proxmox_acme_email: "admin@example.com"
+proxmox_acme_email: "support@sinlessgames.com"
 
 # ACME challenge type: 'http-01', 'dns-01', 'tls-alpn-01'
-proxmox_acme_challenge_type: "http-01"
+proxmox_acme_challenge_type: "dns-01"
+
+# DNS validation provider for automated DNS challenges
+proxmox_acme_plugin_id: "dns_cloudflare"
+proxmox_acme_plugin_type: "dns"
+
+# DNS API Provider Configuration
+# Common providers: route53, cloudflare, digitalocean, ovh, linode, etc.
+# Set based on your DNS provider
+proxmox_acme_dns_api: "cf"
+
+# DNS API credentials (format depends on provider)
+# For Cloudflare: "CF_Token=<token>"
+# For Route53: "AWS_ACCESS_KEY_ID=<key>&AWS_SECRET_ACCESS_KEY=<secret>"
+# For DigitalOcean: "DO_AUTH_TOKEN=<token>"
+# NOTE: For Cloudflare token, use vault: {{ vault_cloudflare_dns_token }}
+proxmox_acme_dns_api_data: "{{ vault_cloudflare_dns_token | default('') }}"
 
 # ACME domains (for Let's Encrypt)
 proxmox_acme_domains:
-  - "proxmox.example.com"
-  - "*.proxmox.example.com"
+  - "{{ inventory_hostname }}.local.sinlessgames.com"
+  - "local.sinlessgames.com"
 
 # =============================================================================
 # Manual Certificate Configuration

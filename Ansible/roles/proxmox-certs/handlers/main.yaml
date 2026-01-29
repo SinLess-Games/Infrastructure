@@ -1,0 +1,21 @@
+---
+- name: restart proxmox-services
+  systemd:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: yes
+  become: yes
+  loop:
+    - pvedaemon
+    - pveproxy
+  listen: restart proxmox-services
+
+- name: reload proxmox-services
+  systemd:
+    name: "{{ item }}"
+    state: reloaded
+  become: yes
+  loop:
+    - pvedaemon
+    - pveproxy
+  listen: reload proxmox-services
