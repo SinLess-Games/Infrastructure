@@ -4,3 +4,4 @@ Packer/proxmox-templates/variables.auto.pkrvars.hcl
 Ansible/.venv/
 .ansible/
 Ansible/.collections/
+Ansible/group_vars/proxmox/vault-certs.yaml
