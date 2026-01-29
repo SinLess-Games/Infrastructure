@@ -1,0 +1,114 @@
+#---------------------------------------------------------------------
+# HAProxy Configuration for Proxmox High Availability UI
+#---------------------------------------------------------------------
+
+#---------------------------------------------------------------------
+# Global Settings
+#---------------------------------------------------------------------
+global
+    log stdout local0
+    log stdout local1 notice
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin
+    stats timeout 30s
+    user haproxy
+    group haproxy
+    daemon
+
+    # Default SSL material locations
+    ca-base /etc/ssl/certs
+    crt-base /etc/ssl/private
+
+    # SSL Default Ciphers & Options
+    ssl-default-bind-ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256
+    ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
+
+#---------------------------------------------------------------------
+# Statistics Page
+#---------------------------------------------------------------------
+listen stats
+    bind 0.0.0.0:{{ haproxy_stats_port }}
+    stats enable
+    stats uri /stats
+    stats refresh 30s
+    stats admin if TRUE
+    log global
+
+#---------------------------------------------------------------------
+# Frontend - Client-facing proxy
+#---------------------------------------------------------------------
+frontend proxmox_ui_https
+    bind *:{{ haproxy_frontend_port }} ssl crt {{ haproxy_cert_path }}.pem
+    bind :::{{ haproxy_frontend_port }} ssl crt {{ haproxy_cert_path }}.pem v6only
+    
+    log global
+    mode http
+    option httplog
+    option dontlognull
+    
+    # Proxmox uses long-lived connections
+    timeout client 3600000
+    
+    # Redirect HTTP to HTTPS
+    http-request redirect scheme https code 301 if !{ ssl_fc }
+    
+    # Add security headers
+    http-response set-header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    http-response set-header X-Frame-Options "SAMEORIGIN"
+    http-response set-header X-Content-Type-Options "nosniff"
+    http-response set-header X-XSS-Protection "1; mode=block"
+    
+    # Set backend
+    default_backend proxmox_ui_backend
+
+#---------------------------------------------------------------------
+# Frontend - HTTP redirect
+#---------------------------------------------------------------------
+frontend proxmox_ui_http
+    bind *:80
+    bind :::80 v6only
+    
+    log global
+    mode http
+    timeout client 50000
+    
+    # Redirect to HTTPS
+    http-request redirect scheme https code 301
+
+#---------------------------------------------------------------------
+# Backend - Proxmox nodes
+#---------------------------------------------------------------------
+backend proxmox_ui_backend
+    log global
+    mode http
+    option forwardfor
+    option http-server-close
+    
+    # Long timeout for Proxmox connections
+    timeout connect 5000
+    timeout server 3600000
+    
+    # Session stickiness (important for Proxmox authentication)
+    cookie SERVERID insert indirect nocache
+    
+    # Health check
+    option httpchk GET /api2/json/version HTTP/1.1
+    http-check expect status 200,401
+    default-server inter 10s fall 3 rise 2
+    
+    # Balance method
+    balance roundrobin
+    
+{% if haproxy_backend_nodes %}
+{% for node in haproxy_backend_nodes %}
+    server {{ node.name }} {{ node.host }}:{{ proxmox_ui_port }} ssl verify none check cookie {{ node.name }}
+{% endfor %}
+{% else %}
+    # Backend nodes will be added dynamically
+    # Default: discover from inventory
+{% if groups.get('proxmox') %}
+{% for host in groups['proxmox'] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:{{ proxmox_ui_port }} ssl verify none check cookie {{ host }}
+{% endfor %}
+{% endif %}
+{% endif %}

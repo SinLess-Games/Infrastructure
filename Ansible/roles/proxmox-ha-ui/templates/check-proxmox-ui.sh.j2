@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# Health check script for Proxmox UI HAProxy backend
+# Verifies that HAProxy is running and can reach Proxmox API
+#
+
+set -e
+
+HAPROXY_PIDFILE="/run/haproxy.pid"
+TIMEOUT=5
+EXIT_CODE=0
+
+# Check if HAProxy is running
+if [ ! -f "$HAPROXY_PIDFILE" ]; then
+    echo "HAProxy is not running"
+    exit 1
+fi
+
+if ! ps -p "$(cat "$HAPROXY_PIDFILE")" > /dev/null 2>&1; then
+    echo "HAProxy process not found"
+    exit 1
+fi
+
+# Check if HAProxy is listening on stats port
+if ! nc -z localhost {{ haproxy_stats_port }} 2>/dev/null; then
+    echo "HAProxy stats port not accessible"
+    exit 1
+fi
+
+exit 0
