@@ -1,0 +1,30 @@
+---
+# Main orchestration for Ceph cluster setup
+
+- name: Install Ceph packages
+  ansible.builtin.import_tasks: install.yaml
+
+- name: Initialize Ceph cluster
+  ansible.builtin.import_tasks: init.yaml
+
+- name: Create Ceph monitors
+  ansible.builtin.import_tasks: monitors.yaml
+
+- name: Create Ceph managers
+  ansible.builtin.import_tasks: managers.yaml
+
+- name: Create Ceph metadata servers
+  ansible.builtin.import_tasks: mds.yaml
+
+- name: Create Ceph OSDs
+  ansible.builtin.import_tasks: osds.yaml
+
+- name: Configure Proxmox storage entries
+  ansible.builtin.import_tasks: storage.yaml
+
+- name: Display Ceph status
+  ansible.builtin.import_tasks: status.yaml
+
+- name: Add Storage to Proxmox Cluster
+  ansible.builtin.import_tasks: add-storage-to-cluster.yaml
+

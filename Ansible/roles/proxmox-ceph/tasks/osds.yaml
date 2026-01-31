@@ -1,0 +1,46 @@
+---
+# Create OSDs on Ceph nodes by auto-detecting empty disks
+
+- name: Collect block device inventory (flat)
+  ansible.builtin.command: lsblk -nr -o NAME,PKNAME,TYPE,MOUNTPOINT,FSTYPE
+  register: ceph_lsblk_flat
+  changed_when: false
+  when: inventory_hostname in ceph_nodes
+
+- name: Determine disks in use (has filesystem, mountpoint, or children)
+  ansible.builtin.shell: >-
+    lsblk -nr -o NAME,PKNAME,TYPE,MOUNTPOINT,FSTYPE
+    | awk '$3 != "disk" && ($4 != "" || $5 != "") {print $2}'
+    | sort -u
+  register: ceph_used_disks
+  changed_when: false
+  when: inventory_hostname in ceph_nodes
+
+- name: Determine empty disks for OSDs
+  ansible.builtin.shell: >-
+    lsblk -nr -o NAME,TYPE
+    | awk '$2 == "disk" {print "/dev/"$1}'
+  register: ceph_all_disks
+  changed_when: false
+  when: inventory_hostname in ceph_nodes
+
+- name: Build final OSD disk list
+  ansible.builtin.set_fact:
+    ceph_empty_disks: >-
+      {{ (ceph_all_disks.stdout_lines | default([]))
+         | reject('match', '^/dev/(' + (ceph_used_disks.stdout_lines | default([]) | join('|')) + ')$')
+         | list }}
+  when:
+    - inventory_hostname in ceph_nodes
+    - ceph_all_disks is defined
+
+- name: Create OSDs on empty disks
+  ansible.builtin.command: "pveceph osd create {{ item }}"
+  loop: "{{ ceph_empty_disks | default([]) }}"
+  when:
+    - inventory_hostname in ceph_nodes
+    - ceph_empty_disks is defined
+    - ceph_empty_disks | length > 0
+  register: ceph_osd_result
+  notify:
+    - Restart Ceph OSDs

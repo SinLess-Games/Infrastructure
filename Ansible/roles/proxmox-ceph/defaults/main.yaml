@@ -1,0 +1,37 @@
+---
+# Default variables for proxmox-ceph role
+
+# Nodes to configure Ceph on (should match inventory)
+ceph_nodes:
+  - pve-01
+  - pve-04
+  - pve-05
+
+# Node used for cluster bootstrap and pool creation
+ceph_bootstrap_node: pve-01
+
+# Packages required for Ceph
+ceph_packages:
+  - ceph
+  - ceph-common
+
+# Retry settings for cluster join and service creation
+ceph_join_retries: 60
+ceph_join_delay: 10
+ceph_port_wait_timeout: 5
+
+# Optional OSD devices per node (fill in as needed)
+ceph_osd_devices: {}
+
+# Ceph pools configuration
+ceph_pools:
+  - name: VM_Disks
+    storage_type: replicated
+    pg_num: 64
+    size: 2
+    application: rbd
+  - name: ISOs
+    storage_type: replicated
+    pg_num: 32
+    size: 2
+    application: rbd

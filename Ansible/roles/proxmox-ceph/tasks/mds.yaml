@@ -1,0 +1,360 @@
+---
+# Ansible/roles/proxmox-ceph/tasks/mds.yaml
+#
+# Ceph MDS provisioning for Proxmox clusters.
+# - Runs ONLY on ceph nodes
+# - Deterministically defines per-node MDS instance IDs
+# - Prunes extra local ceph-mds@*.service instances + data dirs
+# - On bootstrap: creates missing MDS auth, and normalizes caps via `ceph auth caps`
+#   (fixes: "Error EINVAL: key exists but cap mds does not match")
+# - Writes keyrings into /var/lib/ceph/mds/<cluster>-<id>/keyring
+# - Starts/restarts ceph-mds@<id> units
+
+# -------------------------
+# Inputs / defaults
+# -------------------------
+
+- name: Build effective Ceph node list
+  ansible.builtin.set_fact:
+    ceph_nodes_effective: "{{ (ceph_nodes | default(groups.get('ceph', groups.get('ceph_nodes', [])))) | list }}"
+  become: true
+
+- name: Set effective bootstrap node
+  ansible.builtin.set_fact:
+    ceph_bootstrap_node_effective: "{{ ceph_bootstrap_node | default(ceph_nodes_effective | first) }}"
+  become: true
+
+- name: Set Ceph cluster name default
+  ansible.builtin.set_fact:
+    ceph_cluster_name_effective: "{{ ceph_cluster_name | default('ceph') }}"
+  become: true
+
+- name: Set effective MDS instances per node (supports both var names)
+  ansible.builtin.set_fact:
+    ceph_mds_instances_per_node_effective: "{{ (ceph_mds_instances_per_node | default(ceph_mds_per_node | default(2))) }}"
+  become: true
+
+# -------------------------
+# Per-node desired IDs (ceph nodes only)
+# -------------------------
+
+- name: Initialize local MDS instance IDs for node (ceph nodes only)
+  ansible.builtin.set_fact:
+    mds_instance_ids_local:
+      - "{{ inventory_hostname }}"
+  when: inventory_hostname in ceph_nodes_effective
+  become: true
+
+- name: Add additional local MDS instance IDs for node (ceph nodes only)
+  ansible.builtin.set_fact:
+    mds_instance_ids_local: "{{ mds_instance_ids_local + [inventory_hostname ~ '-' ~ (item | string)] }}"
+  loop: "{{ range(1, (ceph_mds_instances_per_node_effective | int)) | list }}"
+  loop_control:
+    label: "{{ inventory_hostname }}-{{ item }}"
+  when:
+    - inventory_hostname in ceph_nodes_effective
+    - (ceph_mds_instances_per_node_effective | int) > 1
+  become: true
+
+# -------------------------
+# Prune extra local MDS daemons (dirs + units)
+# -------------------------
+
+- name: Detect existing MDS instances on node (data dirs)
+  ansible.builtin.find:
+    paths: /var/lib/ceph/mds
+    patterns: "{{ ceph_cluster_name_effective }}-{{ inventory_hostname }}*"
+    file_type: directory
+  register: existing_mds_dirs
+  when: inventory_hostname in ceph_nodes_effective
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Build list of existing MDS instance names (local)
+  ansible.builtin.set_fact:
+    existing_mds_instances: >-
+      {{
+        (existing_mds_dirs.files | default([]))
+        | map(attribute='path')
+        | map('basename')
+        | map('regex_replace', '^' ~ ceph_cluster_name_effective ~ '-', '')
+        | list
+      }}
+  when: inventory_hostname in ceph_nodes_effective
+  become: true
+
+- name: Identify extra MDS instances to remove (local)
+  ansible.builtin.set_fact:
+    extra_mds_instances: "{{ (existing_mds_instances | default([])) | difference(mds_instance_ids_local | default([])) }}"
+  when: inventory_hostname in ceph_nodes_effective
+  become: true
+
+- name: Stop and disable extra MDS instances (local)
+  ansible.builtin.systemd:
+    name: "ceph-mds@{{ item }}"
+    enabled: false
+    state: stopped
+  loop: "{{ extra_mds_instances | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - inventory_hostname in ceph_nodes_effective
+    - (extra_mds_instances | default([])) | length > 0
+  failed_when: false
+  become: true
+
+- name: Remove extra MDS data dirs (local)
+  ansible.builtin.file:
+    path: "/var/lib/ceph/mds/{{ ceph_cluster_name_effective }}-{{ item }}"
+    state: absent
+  loop: "{{ extra_mds_instances | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - inventory_hostname in ceph_nodes_effective
+    - (extra_mds_instances | default([])) | length > 0
+  failed_when: false
+  become: true
+
+- name: Remove auth entries for extra MDS instances (bootstrap only)
+  ansible.builtin.command:
+    argv:
+      - ceph
+      - --cluster
+      - "{{ ceph_cluster_name_effective }}"
+      - auth
+      - del
+      - "mds.{{ item }}"
+  loop: "{{ extra_mds_instances | default([]) }}"
+  loop_control:
+    label: "mds.{{ item }}"
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (extra_mds_instances | default([])) | length > 0
+  failed_when: false
+  become: true
+
+# -------------------------
+# Bootstrap: ensure auth exists + normalize caps
+# -------------------------
+
+- name: Build desired MDS ID list across all Ceph nodes (bootstrap only)
+  ansible.builtin.set_fact:
+    mds_instance_ids_all: >-
+      {{
+        (
+          (mds_instance_ids_all | default([]))
+          + (hostvars[item].mds_instance_ids_local | default([]))
+        ) | unique | list
+      }}
+  loop: "{{ ceph_nodes_effective }}"
+  loop_control:
+    label: "{{ item }}"
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Check which MDS auth entries exist (bootstrap only)
+  ansible.builtin.command:
+    argv:
+      - ceph
+      - --cluster
+      - "{{ ceph_cluster_name_effective }}"
+      - auth
+      - get
+      - "mds.{{ item }}"
+  loop: "{{ mds_instance_ids_all | default([]) }}"
+  loop_control:
+    label: "mds.{{ item }}"
+  register: mds_auth_get
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Create missing MDS auth entries (bootstrap only)
+  ansible.builtin.command:
+    argv:
+      - ceph
+      - --cluster
+      - "{{ ceph_cluster_name_effective }}"
+      - auth
+      - get-or-create
+      - "mds.{{ item }}"
+      - mon
+      - allow
+      - profile
+      - mds
+      - osd
+      - allow
+      - rwx
+      - mds
+      - allow
+  loop: "{{ (mds_auth_get.results | default([])) | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}"
+  loop_control:
+    label: "mds.{{ item }}"
+  register: mds_auth_create
+  changed_when: true
+  failed_when: mds_auth_create.rc is defined and mds_auth_create.rc != 0
+  no_log: true
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (mds_instance_ids_all | default([])) | length > 0
+  become: true
+
+- name: Normalize caps for all desired MDS auth entries (bootstrap only)
+  ansible.builtin.command:
+    argv:
+      - ceph
+      - --cluster
+      - "{{ ceph_cluster_name_effective }}"
+      - auth
+      - caps
+      - "mds.{{ item }}"
+      - mon
+      - allow
+      - profile
+      - mds
+      - osd
+      - allow
+      - rwx
+      - mds
+      - allow
+  loop: "{{ mds_instance_ids_all | default([]) }}"
+  loop_control:
+    label: "mds.{{ item }}"
+  register: mds_auth_caps
+  changed_when: "'updated caps for' in (mds_auth_caps.stdout | default(''))"
+  failed_when: false
+  no_log: true
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (mds_instance_ids_all | default([])) | length > 0
+  become: true
+
+# -------------------------
+# Per-node keyrings + service start (ceph nodes only)
+# -------------------------
+
+- name: Ensure MDS data directories exist (ceph nodes only)
+  ansible.builtin.file:
+    path: "/var/lib/ceph/mds/{{ ceph_cluster_name_effective }}-{{ item }}"
+    state: directory
+    owner: ceph
+    group: ceph
+    mode: "0750"
+  loop: "{{ mds_instance_ids_local | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: inventory_hostname in ceph_nodes_effective
+  become: true
+
+- name: Fetch keyring text for local MDS instances (delegated to bootstrap)
+  ansible.builtin.command:
+    argv:
+      - ceph
+      - --cluster
+      - "{{ ceph_cluster_name_effective }}"
+      - auth
+      - get
+      - "mds.{{ item }}"
+  loop: "{{ mds_instance_ids_local | default([]) }}"
+  loop_control:
+    label: "mds.{{ item }}"
+  register: mds_keyrings_raw
+  changed_when: false
+  failed_when: mds_keyrings_raw.rc is defined and mds_keyrings_raw.rc != 0
+  no_log: true
+  delegate_to: "{{ ceph_bootstrap_node_effective }}"
+  when: inventory_hostname in ceph_nodes_effective
+  become: true
+
+- name: Write keyrings for local MDS instances (ceph nodes only)
+  ansible.builtin.copy:
+    dest: "/var/lib/ceph/mds/{{ ceph_cluster_name_effective }}-{{ item.item }}/keyring"
+    content: "{{ item.stdout }}\n"
+    owner: ceph
+    group: ceph
+    mode: "0600"
+  loop: "{{ mds_keyrings_raw.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: mds_keyring_write
+  no_log: true
+  when: inventory_hostname in ceph_nodes_effective
+  become: true
+
+- name: Determine whether any keyrings changed on this node (ceph nodes only)
+  ansible.builtin.set_fact:
+    mds_any_keyring_changed: >-
+      {{
+        (mds_keyring_write.results | default([]))
+        | selectattr('changed', 'defined')
+        | selectattr('changed')
+        | list
+        | length > 0
+      }}
+  when: inventory_hostname in ceph_nodes_effective
+  become: true
+
+- name: Reset failed state for local MDS units (ceph nodes only)
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - reset-failed
+      - "ceph-mds@{{ item }}"
+  loop: "{{ mds_instance_ids_local | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: inventory_hostname in ceph_nodes_effective
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Enable and start/restart local MDS units (ceph nodes only)
+  ansible.builtin.systemd:
+    name: "ceph-mds@{{ item }}"
+    enabled: true
+    state: "{{ 'restarted' if (mds_any_keyring_changed | default(false)) else 'started' }}"
+    daemon_reload: true
+  loop: "{{ mds_instance_ids_local | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: inventory_hostname in ceph_nodes_effective
+  become: true
+
+# -------------------------
+# Status / summary (bootstrap only, never fatal)
+# -------------------------
+
+- name: Get MDS status (bootstrap)
+  ansible.builtin.command:
+    argv:
+      - ceph
+      - --cluster
+      - "{{ ceph_cluster_name_effective }}"
+      - mds
+      - stat
+  register: ceph_mds_status
+  delegate_to: "{{ ceph_bootstrap_node_effective }}"
+  run_once: true
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Compute MDS totals (bootstrap)
+  ansible.builtin.set_fact:
+    mds_total: "{{ (ceph_nodes_effective | length) * (ceph_mds_instances_per_node_effective | int) }}"
+    mds_standby: "{{ [((ceph_nodes_effective | length) * (ceph_mds_instances_per_node_effective | int) - 1), 0] | max }}"
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Display MDS configuration summary (bootstrap)
+  ansible.builtin.debug:
+    msg: "MDS configured: {{ ceph_mds_instances_per_node_effective | int }} instances per node ({{ ceph_nodes_effective | length }} nodes = {{ mds_total | int }} total, 1 active + {{ mds_standby | int }} standby)."
+  run_once: true
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  changed_when: false
+  failed_when: false

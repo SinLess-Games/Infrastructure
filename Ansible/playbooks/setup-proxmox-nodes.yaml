@@ -30,6 +30,7 @@
     - ../group_vars/proxmox/certificate.yaml
     - ../group_vars/proxmox/vault-certs.yaml
     - ../group_vars/proxmox/networking.yaml
+    - ../group_vars/proxmox/ceph.yaml
     - ../group_vars/all/ssh.yaml
     - ../group_vars/all/users.yaml
 
@@ -81,6 +82,12 @@
     # -------------------------------------------------------------------------
     - role: proxmox-networking
       tags: [proxmox, networking, bridges]
+
+    # -------------------------------------------------------------------------
+    # Phase 7: Proxmox Ceph cluster
+    # -------------------------------------------------------------------------
+    - role: proxmox-ceph
+      tags: [proxmox, ceph]
 
   tasks:
 

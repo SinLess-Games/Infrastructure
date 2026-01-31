@@ -4,7 +4,7 @@ all:
     ansible_python_interpreter: /usr/bin/python3
     proxmox_cluster_name: Sinless-Games
     proxmox_cluster_network: 10.10.10.0/24
-    proxmox_ceph_network: 10.20.20.0/24
+    proxmox_ceph_network: 10.10.60.0/24
 
 proxmox:
   children:

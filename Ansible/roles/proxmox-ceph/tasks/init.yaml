@@ -1,0 +1,78 @@
+---
+# Initialize Ceph cluster on bootstrap node
+
+- name: Initialize Ceph cluster (bootstrap node only)
+  ansible.builtin.command: >-
+    pveceph init --network {{ proxmox_ceph_network }}
+  args:
+    creates: /etc/ceph/ceph.conf
+  when:
+    - inventory_hostname == ceph_bootstrap_node
+    - inventory_hostname in ceph_nodes
+  register: ceph_init_result
+- name: Create monitor on bootstrap node
+  ansible.builtin.command: pveceph mon create
+  args:
+    creates: "/var/lib/ceph/mon/ceph-{{ ceph_bootstrap_node }}"
+  when:
+    - inventory_hostname == ceph_bootstrap_node
+    - inventory_hostname in ceph_nodes
+  register: ceph_mon_create_result
+
+
+- name: Wait for Ceph mon to start on bootstrap node
+  ansible.builtin.wait_for:
+    path: "/var/lib/ceph/mon/ceph-{{ ceph_bootstrap_node }}"
+    state: present
+    timeout: 60
+  delegate_to: "{{ ceph_bootstrap_node }}"
+  run_once: true
+  when: inventory_hostname == ceph_bootstrap_node
+
+- name: Set Ceph network IP facts
+  ansible.builtin.set_fact:
+    ceph_public_ip: "{{ (proxmox_node_bridges[inventory_hostname].vmbr60.address | default('')) | regex_replace('/.*', '') }}"
+    ceph_bootstrap_ip: "{{ (proxmox_node_bridges[ceph_bootstrap_node].vmbr60.address | default('')) | regex_replace('/.*', '') }}"
+  when:
+    - inventory_hostname in ceph_nodes
+    - proxmox_node_bridges is defined
+    - proxmox_node_bridges[inventory_hostname] is defined
+    - proxmox_node_bridges[ceph_bootstrap_node] is defined
+    - proxmox_node_bridges[ceph_bootstrap_node].vmbr60 is not none
+    - proxmox_node_bridges[inventory_hostname].vmbr60 is not none
+
+- name: Wait for Ceph bootstrap monitor port to be reachable
+  ansible.builtin.wait_for:
+    host: "{{ ceph_bootstrap_ip }}"
+    port: 6789
+    timeout: "{{ ceph_port_wait_timeout }}"
+    state: started
+  register: ceph_bootstrap_port_check
+  retries: "{{ ceph_join_retries }}"
+  delay: "{{ ceph_join_delay }}"
+  until: ceph_bootstrap_port_check is succeeded
+  when:
+    - inventory_hostname in ceph_nodes
+    - inventory_hostname != ceph_bootstrap_node
+    - ceph_bootstrap_ip is defined
+
+- name: Copy /etc/pve/ceph.conf to /etc/ceph/ceph.conf (all nodes)
+  ansible.builtin.copy:
+    src: /etc/pve/ceph.conf
+    dest: /etc/ceph/ceph.conf
+    owner: root
+    group: root
+    mode: '0644'
+    remote_src: true
+  when:
+    - inventory_hostname in ceph_nodes
+
+- name: Copy ceph keyrings from bootstrap node
+  ansible.builtin.synchronize:
+    src: /etc/pve/priv/
+    dest: /etc/pve/priv/
+    mode: push
+  delegate_to: "{{ ceph_bootstrap_node }}"
+  when:
+    - inventory_hostname in ceph_nodes
+    - inventory_hostname != ceph_bootstrap_node

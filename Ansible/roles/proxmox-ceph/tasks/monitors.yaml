@@ -1,0 +1,30 @@
+---
+# Create Ceph monitors on all designated nodes
+
+- name: Create Ceph monitor on each node
+  ansible.builtin.command: pveceph mon create
+  args:
+    creates: "/var/lib/ceph/mon/ceph-{{ inventory_hostname }}"
+  when: inventory_hostname in ceph_nodes
+  register: ceph_mon_result
+  retries: "{{ ceph_join_retries }}"
+  delay: "{{ ceph_join_delay }}"
+  until: ceph_mon_result.rc == 0 or "'already exists' in ceph_mon_result.stderr"
+  notify:
+    - Restart Ceph monitors
+  failed_when:
+    - ceph_mon_result.rc != 0
+    - "'already exists' not in ceph_mon_result.stderr"
+
+- name: Wait for monitor to be ready
+  ansible.builtin.wait_for:
+    path: "/var/lib/ceph/mon/ceph-{{ inventory_hostname }}"
+    state: present
+    timeout: 30
+  register: ceph_mon_wait_result
+  retries: "{{ ceph_join_retries }}"
+  delay: "{{ ceph_join_delay }}"
+  until: ceph_mon_wait_result is succeeded
+  when: 
+    - inventory_hostname in ceph_nodes
+    - ceph_mon_result is changed

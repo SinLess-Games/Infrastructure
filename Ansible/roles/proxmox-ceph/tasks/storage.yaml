@@ -1,0 +1,404 @@
+---
+# Ansible/roles/proxmox-ceph/tasks/storage.yaml
+#
+# Proxmox Ceph storage provisioning:
+# - RBD pools (create + enable app + set size + rbd pool init)
+# - CephFS (create pools + enable cephfs app + create FS + set max_mds/standby_count_wanted)
+# - Add storages to Proxmox via pvesm (bootstrap only)
+#
+# IMPORTANT:
+# - MDS provisioning/keyrings/auth belong in tasks/mds.yaml (NOT here).
+# - Keeping this file "storage-only" prevents pve-02/pve-03 from trying to fetch mds.* keyrings.
+
+- name: Set Ceph cluster name + node defaults
+  ansible.builtin.set_fact:
+    ceph_cluster_name_effective: "{{ ceph_cluster_name | default('ceph') }}"
+    ceph_nodes_effective: "{{ ceph_nodes | default(groups.get('ceph', groups.get('ceph_nodes', []))) }}"
+    ceph_bootstrap_node_effective: >-
+      {{
+        ceph_bootstrap_node
+          | default((ceph_nodes | default(groups.get('ceph', groups.get('ceph_nodes', []))) | first)
+          | default(inventory_hostname))
+      }}
+  become: true
+
+- name: Build input lists with sane defaults (bootstrap only)
+  ansible.builtin.set_fact:
+    ceph_mon_hosts_effective: "{{ ceph_mon_hosts | default(ceph_nodes_effective | default([])) }}"
+    cephfs_input: "{{ cephfs_definitions | default(cephfs_filesystems | default(cephfs | default([]))) }}"
+    rbd_input: "{{ rbd_pool_definitions | default(rbd_pools | default(ceph_rbd_pools | default([]))) }}"
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Compute default CephFS standby_count_wanted (bootstrap only)
+  ansible.builtin.set_fact:
+    cephfs_default_standby_count_wanted: >-
+      {{
+        [
+          (
+            ((ceph_nodes_effective | length) * (ceph_mds_instances_per_node | default(1) | int)) - 1
+          ),
+          0
+        ] | max
+      }}
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Normalize CephFS definitions (bootstrap only)
+  ansible.builtin.set_fact:
+    cephfs_normalized: >-
+      {{
+        (cephfs_normalized | default([])) + [
+          {
+            'name': item.name,
+            'fs_name': (item.fs_name | default(item.name)),
+            'metadata_pool': (item.metadata_pool | default(((item.fs_name | default(item.name)) | lower) + '_metadata')),
+            'data_pool': (item.data_pool | default(((item.fs_name | default(item.name)) | lower) + '_data')),
+            'pg_num': (item.pg_num | default(32) | int),
+            'size': (item.size | default(2) | int),
+            'max_mds': (item.max_mds | default(1) | int),
+            'standby_count_wanted': (
+              (item.standby_count_wanted is defined)
+              | ternary((item.standby_count_wanted | int), (cephfs_default_standby_count_wanted | int))
+            ),
+            'content': (item.content | default(None)),
+            'path': (item.path | default('/mnt/pve/' + item.name)),
+            'subdir': (item.subdir | default(None)),
+            'fuse': (item.fuse | default(false)),
+            'username': (item.username | default(None)),
+            'mon_hosts': (item.mon_hosts | default(ceph_mon_hosts_effective)),
+            'keyring_path': (item.keyring_path | default(None))
+          }
+        ]
+      }}
+  loop: "{{ cephfs_input }}"
+  loop_control:
+    label: "{{ item.name | default('cephfs') }}"
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (cephfs_input | length) > 0
+  become: true
+
+- name: Normalize RBD pool definitions (bootstrap only)
+  ansible.builtin.set_fact:
+    rbd_pools_normalized: >-
+      {{
+        (rbd_pools_normalized | default([])) + [
+          {
+            'name': item.name,
+            'pg_num': (item.pg_num | default(64) | int),
+            'size': (item.size | default(2) | int),
+            'application': (item.application | default('rbd')),
+            'content': (item.content | default('images,rootdir')),
+            'mon_hosts': (item.mon_hosts | default(ceph_mon_hosts_effective)),
+            'username': (item.username | default(None)),
+            'keyring_path': (item.keyring_path | default(None)),
+            'krbd': (item.krbd | default(false))
+          }
+        ]
+      }}
+  loop: "{{ rbd_input }}"
+  loop_control:
+    label: "{{ item.name | default('rbd') }}"
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (rbd_input | length) > 0
+  become: true
+
+- name: Set effective normalized lists from bootstrap facts (all nodes)
+  ansible.builtin.set_fact:
+    cephfs_effective: "{{ hostvars[ceph_bootstrap_node_effective].cephfs_normalized | default([]) }}"
+    rbd_pools_effective: "{{ hostvars[ceph_bootstrap_node_effective].rbd_pools_normalized | default([]) }}"
+  become: true
+
+- name: Allow multiple CephFS filesystems if needed (safe/no-op if unsupported)
+  ansible.builtin.command: ceph fs flag set enable_multiple true
+  register: ceph_enable_multiple
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (cephfs_effective | length) > 1
+  become: true
+
+- name: Get existing Ceph pools (bootstrap only)
+  ansible.builtin.command: ceph osd pool ls -f json
+  register: ceph_pool_ls
+  changed_when: false
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Parse existing Ceph pools (bootstrap only)
+  ansible.builtin.set_fact:
+    ceph_existing_pools: "{{ ceph_pool_ls.stdout | from_json }}"
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Get existing CephFS filesystems (bootstrap only)
+  ansible.builtin.command: ceph fs ls -f json
+  register: ceph_fs_ls
+  changed_when: false
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Parse existing CephFS filesystems (bootstrap only)
+  ansible.builtin.set_fact:
+    ceph_existing_fs_names: "{{ (ceph_fs_ls.stdout | from_json) | map(attribute='name') | list }}"
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+# -------------------------
+# RBD pools
+# -------------------------
+
+- name: Ensure RBD pools exist
+  ansible.builtin.command: ceph osd pool create "{{ item.name }}" "{{ item.pg_num }}"
+  register: rbd_pool_create
+  changed_when: rbd_pool_create.rc == 0
+  failed_when: rbd_pool_create.rc != 0
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - item.name not in ceph_existing_pools
+  loop: "{{ rbd_pools_effective }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+- name: Ensure RBD application is enabled
+  ansible.builtin.command: ceph osd pool application enable "{{ item.name }}" rbd
+  register: rbd_app_enable
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (rbd_pools_effective | length) > 0
+  loop: "{{ rbd_pools_effective }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+- name: Ensure RBD pool size is set
+  ansible.builtin.command: ceph osd pool set "{{ item.name }}" size "{{ item.size }}"
+  register: rbd_size_set
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (rbd_pools_effective | length) > 0
+  loop: "{{ rbd_pools_effective }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+- name: Ensure RBD pool is initialized
+  ansible.builtin.command: rbd pool init "{{ item.name }}"
+  register: rbd_init
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (rbd_pools_effective | length) > 0
+  loop: "{{ rbd_pools_effective }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+# -------------------------
+# CephFS pools + filesystems
+# -------------------------
+
+- name: Ensure CephFS metadata pools exist
+  ansible.builtin.command: ceph osd pool create "{{ item.metadata_pool }}" "{{ item.pg_num }}"
+  register: cephfs_meta_create
+  changed_when: cephfs_meta_create.rc == 0
+  failed_when: cephfs_meta_create.rc != 0
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - item.metadata_pool not in ceph_existing_pools
+  loop: "{{ cephfs_effective }}"
+  loop_control:
+    label: "{{ item.fs_name }}:{{ item.metadata_pool }}"
+  become: true
+
+- name: Ensure CephFS data pools exist
+  ansible.builtin.command: ceph osd pool create "{{ item.data_pool }}" "{{ item.pg_num }}"
+  register: cephfs_data_create
+  changed_when: cephfs_data_create.rc == 0
+  failed_when: cephfs_data_create.rc != 0
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - item.data_pool not in ceph_existing_pools
+  loop: "{{ cephfs_effective }}"
+  loop_control:
+    label: "{{ item.fs_name }}:{{ item.data_pool }}"
+  become: true
+
+- name: Enable cephfs application on CephFS pools
+  ansible.builtin.command: ceph osd pool application enable "{{ item }}" cephfs
+  register: cephfs_app_enable
+  changed_when: false
+  failed_when: false
+  loop: >-
+    {{
+      (
+        (cephfs_effective | map(attribute='metadata_pool') | list)
+        + (cephfs_effective | map(attribute='data_pool') | list)
+      ) | unique | list
+    }}
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Create CephFS filesystems if missing
+  ansible.builtin.command: ceph fs new "{{ item.fs_name }}" "{{ item.metadata_pool }}" "{{ item.data_pool }}"
+  register: cephfs_create
+  changed_when: cephfs_create.rc == 0
+  failed_when: cephfs_create.rc != 0
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - item.fs_name not in ceph_existing_fs_names
+  loop: "{{ cephfs_effective }}"
+  loop_control:
+    label: "{{ item.fs_name }}"
+  become: true
+
+- name: Set CephFS max_mds
+  ansible.builtin.command: ceph fs set "{{ item.fs_name }}" max_mds "{{ item.max_mds }}"
+  register: cephfs_max_mds
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  loop: "{{ cephfs_effective }}"
+  loop_control:
+    label: "{{ item.fs_name }}"
+  become: true
+
+- name: Set CephFS standby_count_wanted
+  ansible.builtin.command: ceph fs set "{{ item.fs_name }}" standby_count_wanted "{{ item.standby_count_wanted }}"
+  register: cephfs_standby
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  loop: "{{ cephfs_effective }}"
+  loop_control:
+    label: "{{ item.fs_name }}"
+  become: true
+
+# -------------------------
+# MDS readiness (non-fatal)
+# -------------------------
+
+- name: Check MDS active status for each CephFS (non-fatal)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    timeout 20 ceph fs status "{{ item.fs_name }}" -f json | grep -q '"state": "up:active"'
+  args:
+    executable: /bin/bash
+  register: cephfs_mds_checks
+  retries: 3
+  delay: 5
+  until: cephfs_mds_checks.rc == 0
+  failed_when: false
+  changed_when: false
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  loop: "{{ cephfs_effective }}"
+  loop_control:
+    label: "{{ item.fs_name }}"
+  become: true
+
+- name: Build list of CephFS that are active (bootstrap only)
+  ansible.builtin.set_fact:
+    cephfs_active_fs_names: >-
+      {{
+        (cephfs_mds_checks.results | default([]))
+        | selectattr('rc', 'equalto', 0)
+        | map(attribute='item.fs_name')
+        | list
+      }}
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+# -------------------------
+# Proxmox storage.cfg entries
+# -------------------------
+
+- name: Read Proxmox storage.cfg (bootstrap only)
+  ansible.builtin.slurp:
+    src: /etc/pve/storage.cfg
+  register: storage_cfg_slurp
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Decode storage.cfg text (bootstrap only)
+  ansible.builtin.set_fact:
+    storage_cfg_text: "{{ storage_cfg_slurp.content | b64decode }}"
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Add RBD storages to Proxmox (bootstrap only)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    timeout 60 pvesm add rbd "{{ item.name }}" \
+      --pool "{{ item.name }}" \
+      --content "{{ item.content }}" \
+      --monhost "{{ item.mon_hosts | join(' ') }}" \
+      {% if item.username is not none %}--username "{{ item.username }}"{% endif %} \
+      {% if item.keyring_path is not none %}--keyring "{{ item.keyring_path }}"{% endif %} \
+      {% if item.krbd | default(false) %}--krbd 1{% endif %}
+  args:
+    executable: /bin/bash
+  register: pvesm_add_rbd
+  changed_when: pvesm_add_rbd.rc == 0
+  failed_when: false
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (storage_cfg_text | regex_search('(?m)^rbd:\\s*' ~ item.name ~ '\\s*$')) is none
+  loop: "{{ rbd_pools_effective }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+- name: Decide if we should add CephFS storages now (bootstrap only)
+  ansible.builtin.set_fact:
+    cephfs_add_when_inactive_effective: "{{ cephfs_add_when_inactive | default(false) | bool }}"
+  when: inventory_hostname == ceph_bootstrap_node_effective
+  become: true
+
+- name: Add CephFS storages to Proxmox (bootstrap only, gated to avoid hangs)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    timeout 60 pvesm add cephfs "{{ item.name }}" \
+      --fs-name "{{ item.fs_name }}" \
+      --monhost "{{ item.mon_hosts | join(' ') }}" \
+      --content "{{ (item.content | default('backup', true)) }}" \
+      {% if item.path is not none %}--path "{{ item.path }}"{% endif %} \
+      {% if item.subdir is not none %}--subdir "{{ item.subdir }}"{% endif %} \
+      {% if item.username is not none %}--username "{{ item.username }}"{% endif %} \
+      {% if item.keyring_path is not none %}--keyring "{{ item.keyring_path }}"{% endif %} \
+      {% if item.fuse | default(false) %}--fuse 1{% endif %}
+  args:
+    executable: /bin/bash
+  register: pvesm_add_cephfs
+  changed_when: pvesm_add_cephfs.rc == 0
+  failed_when: false
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - (storage_cfg_text | regex_search('(?m)^cephfs:\\s*' ~ item.name ~ '\\s*$')) is none
+    - (cephfs_add_when_inactive_effective) or (item.fs_name in (cephfs_active_fs_names | default([])))
+  loop: "{{ cephfs_effective }}"
+  loop_control:
+    label: "{{ item.name }} (fs={{ item.fs_name }})"
+  become: true
+
+- name: Report skipped CephFS storages because MDS is not active (bootstrap only)
+  ansible.builtin.debug:
+    msg: >-
+      Skipping CephFS storage "{{ item.name }}" (fs="{{ item.fs_name }}") because MDS is not up:active yet.
+      This avoids hangs on /mnt/pve/* mounts. Set cephfs_add_when_inactive=true to force.
+  when:
+    - inventory_hostname == ceph_bootstrap_node_effective
+    - not (cephfs_add_when_inactive | default(false) | bool)
+    - item.fs_name not in (cephfs_active_fs_names | default([]))
+  loop: "{{ cephfs_effective }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
