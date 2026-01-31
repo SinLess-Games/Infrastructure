@@ -62,17 +62,16 @@ proxmox_node_bridges:
       ports:
         - "enp10s0f1"  # 10Gb SFP+ port for Ceph
       address: "10.10.60.15/24"
-      vlan_aware: true
+      vlan_aware: false
       auto: true
-      stp: true
+      stp: false
       stp_forward_delay: 0
   
   pve-02:
     vmbr40:
       description: "VM Bridge - VLAN 40 (Production)"
       vlan_id: 40
-      ports:
-        - "enp0s25"  # 1Gb port for Production
+      ports: []
       address: "10.10.40.16/24"
       vlan_aware: true
       auto: true
@@ -115,9 +114,9 @@ proxmox_node_bridges:
       ports:
         - "enp10s0f1"  # 10Gb SFP+ port for Ceph
       address: "10.10.60.18/24"
-      vlan_aware: true
+      vlan_aware: false
       auto: true
-      stp: true
+      stp: false
       stp_forward_delay: 0
   
   pve-05:
@@ -138,9 +137,9 @@ proxmox_node_bridges:
       ports:
         - "enp6s0f1"  # 10Gb SFP+ port for Ceph
       address: "10.10.60.19/24"
-      vlan_aware: true
+      vlan_aware: false
       auto: true
-      stp: true
+      stp: false
       stp_forward_delay: 0
 
 # Global bridge defaults (applied to all nodes unless overridden above)

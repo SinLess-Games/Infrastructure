@@ -55,8 +55,10 @@ iface {{ bridge_name }} inet {{ 'static' if bridge_config.get('address') else 'm
 	bridge-stp {{ 'on' if bridge_config.get('stp', true) else 'off' }}
 	bridge-fd {{ bridge_config.get('stp_forward_delay', 0) }}
 	bridge-vlan-aware {{ 'yes' if bridge_config.get('vlan_aware', true) else 'no' }}
+{% if bridge_config.get('vlan_aware', true) %}	bridge-pvid {{ bridge_config.vlan_id }}
 	bridge-vids {{ bridge_config.vlan_id }}
-	mtu 1500
+{% else %}	post_up /sbin/ip link set {{ bridge_name }} type bridge vlan_filtering 0
+{% endif %}	mtu 1500
 
 {% endif %}
 {% endfor %}
