@@ -1,0 +1,53 @@
+---
+# Validate storage configuration variables
+
+- name: Set default storage variables
+  ansible.builtin.set_fact:
+    proxmox_storage_enabled: "{{ proxmox_storage_enabled | default(true) }}"
+    proxmox_storage_nodes: "{{ proxmox_storage_nodes | default(groups.get('proxmox', [])) }}"
+    proxmox_storage_skip_ceph_nodes: "{{ proxmox_storage_skip_ceph_nodes | default(true) }}"
+    proxmox_storage_auto_discover_disks: "{{ proxmox_storage_auto_discover_disks | default(true) }}"
+    proxmox_storage_pools: "{{ proxmox_storage_pools | default([]) }}"
+    proxmox_storage_node_overrides: "{{ proxmox_storage_node_overrides | default({}) }}"
+    ceph_nodes_list: "{{ ceph_nodes | default([]) }}"
+  become: true
+
+- name: Apply node-specific pool overrides if defined
+  ansible.builtin.set_fact:
+    proxmox_storage_pools: "{{ proxmox_storage_node_overrides[inventory_hostname]['pools'] | default(proxmox_storage_pools) }}"
+  when: inventory_hostname in proxmox_storage_node_overrides
+  become: true
+
+- name: Filter nodes for storage configuration
+  ansible.builtin.set_fact:
+    proxmox_storage_target_nodes: >-
+      {%- set nodes = proxmox_storage_nodes -%}
+      {%- if proxmox_storage_skip_ceph_nodes -%}
+        {{- nodes | difference(ceph_nodes_list) | list -}}
+      {%- else -%}
+        {{- nodes -}}
+      {%- endif -%}
+  become: true
+
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - proxmox_storage_enabled | bool
+      - proxmox_storage_pools is defined
+      - proxmox_storage_pools is iterable
+    fail_msg: >
+      Storage configuration incomplete.
+      Check: proxmox_storage_enabled, proxmox_storage_pools
+    quiet: true
+  become: true
+
+- name: Display storage configuration
+  ansible.builtin.debug:
+    msg:
+      - "Storage Configuration"
+      - "  Enabled: {{ proxmox_storage_enabled }}"
+      - "  Target Nodes: {{ proxmox_storage_target_nodes | join(', ') }}"
+      - "  Auto-discover Disks: {{ proxmox_storage_auto_discover_disks }}"
+      - "  Pools Defined: {{ proxmox_storage_pools | length }}"
+  tags: [always]
+  become: true

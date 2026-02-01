@@ -1,0 +1,83 @@
+---
+# Configure ZFS storage pools
+
+- name: Check if ZFS is available
+  ansible.builtin.shell: which zpool
+  register: zfs_available
+  failed_when: false
+  changed_when: false
+  become: true
+  when: inventory_hostname in proxmox_storage_target_nodes
+
+- name: Create ZFS pools
+  ansible.builtin.shell: |
+    if ! zpool list "{{ item.name }}" 2>/dev/null; then
+      zpool create -f "{{ item.name }}" "{{ item.device }}"
+      zfs set compression=lz4 "{{ item.name }}"
+    fi
+  register: zpool_result
+  changed_when: "'created' in zpool_result.stdout or zpool_result.rc == 0"
+  failed_when:
+    - zpool_result.rc != 0
+    - "'already exists' not in zpool_result.stderr"
+  become: true
+  when:
+    - inventory_hostname in proxmox_storage_target_nodes
+    - zfs_available.rc == 0
+    - item.type | default('') in ['zfspool']
+    - item.device is defined
+  loop: "{{ proxmox_storage_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags: [proxmox, storage, storage:zfs]
+
+- name: Create ZFS datasets
+  ansible.builtin.shell: |
+    DATASET="{{ item.name }}/vm-data"
+    if ! zfs list "$DATASET" 2>/dev/null; then
+      zfs create -p "{{ item.name }}/vm-data"
+      zfs set compression=lz4 "$DATASET"
+    fi
+  register: zfs_dataset_result
+  changed_when: "'created' in zfs_dataset_result.stdout or zfs_dataset_result.rc == 0"
+  failed_when:
+    - zfs_dataset_result.rc != 0
+    - "'already exists' not in zfs_dataset_result.stderr"
+  become: true
+  when:
+    - inventory_hostname in proxmox_storage_target_nodes
+    - zfs_available.rc == 0
+    - item.type | default('') == 'zfspool'
+    - item.device is defined
+  loop: "{{ proxmox_storage_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags: [proxmox, storage, storage:zfs]
+
+- name: Verify ZFS pools
+  ansible.builtin.shell: |
+    zpool status "{{ item.name }}" 2>/dev/null || echo "Pool not found"
+  register: zfs_verify
+  changed_when: false
+  failed_when: false
+  become: true
+  when:
+    - inventory_hostname in proxmox_storage_target_nodes
+    - zfs_available.rc == 0
+    - item.type | default('') == 'zfspool'
+  loop: "{{ proxmox_storage_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags: [proxmox, storage, storage:zfs]
+
+- name: Display ZFS pool status
+  ansible.builtin.debug:
+    msg: "{{ item.item.name }}: {{ item.stdout_lines | default(['Not configured']) | join('\n') }}"
+  when:
+    - inventory_hostname in proxmox_storage_target_nodes
+    - zfs_available.rc == 0
+    - item.item.type | default('') == 'zfspool'
+  loop: "{{ zfs_verify.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  tags: [proxmox, storage, storage:zfs]

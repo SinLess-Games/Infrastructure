@@ -30,6 +30,7 @@
     - ../group_vars/proxmox/certificate.yaml
     - ../group_vars/proxmox/vault-certs.yaml
     - ../group_vars/proxmox/networking.yaml
+    - ../group_vars/proxmox/storage.yaml
     - ../group_vars/proxmox/ceph.yaml
     - ../group_vars/all/ssh.yaml
     - ../group_vars/all/users.yaml
@@ -84,7 +85,13 @@
       tags: [proxmox, networking, bridges]
 
     # -------------------------------------------------------------------------
-    # Phase 7: Proxmox Ceph cluster
+    # Phase 7: Proxmox local storage (non-Ceph nodes)
+    # -------------------------------------------------------------------------
+    - role: proxmox-storage
+      tags: [proxmox, storage]
+
+    # -------------------------------------------------------------------------
+    # Phase 8: Proxmox Ceph cluster
     # -------------------------------------------------------------------------
     - role: proxmox-ceph
       tags: [proxmox, ceph]

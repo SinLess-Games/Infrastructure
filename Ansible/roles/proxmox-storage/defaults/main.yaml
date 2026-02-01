@@ -1,0 +1,22 @@
+---
+# Default values for proxmox-storage role
+
+# Enable storage configuration
+proxmox_storage_enabled: true
+
+# Automatically discover free disks
+proxmox_storage_auto_discover_disks: true
+
+# Skip nodes that are part of Ceph cluster
+proxmox_storage_skip_ceph_nodes: true
+
+# List of nodes to configure storage on
+# Defaults to all nodes in 'proxmox' group
+proxmox_storage_nodes: "{{ groups.get('proxmox', []) }}"
+
+# Ceph nodes to skip (if proxmox_storage_skip_ceph_nodes is true)
+ceph_nodes: []
+
+# Storage pools to create
+# See group_vars/proxmox/storage.yaml for examples
+proxmox_storage_pools: []

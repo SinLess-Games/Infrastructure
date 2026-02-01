@@ -1,0 +1,113 @@
+---
+# Discover available disks on target nodes
+
+- name: Gather disk facts
+  ansible.builtin.setup:
+    gather_subset:
+      - hardware
+  become: true
+  when: inventory_hostname in proxmox_storage_target_nodes
+
+- name: Find root disk
+  ansible.builtin.shell: |
+    lsblk -n -o NAME / | head -1 | sed 's/[0-9]*$//'
+  register: root_disk_raw
+  changed_when: false
+  failed_when: false
+  become: true
+  when: inventory_hostname in proxmox_storage_target_nodes
+
+- name: Discover free disks (excluding root disk and partitions)
+  block:
+    - name: Get list of all disks
+      ansible.builtin.shell: |
+        set -o pipefail
+        lsblk -d -n -o NAME,SIZE 2>/dev/null | grep -v "loop\|rom\|sr"
+      register: all_disks_raw
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: Get disk details
+      ansible.builtin.shell: |
+        set -o pipefail
+        for disk_line in $(lsblk -d -n -o NAME,SIZE 2>/dev/null | grep -v "loop\|rom\|sr"); do
+          disk=$(echo "$disk_line" | awk '{print $1}')
+          size=$(lsblk -d -n -b -o SIZE /dev/"$disk" 2>/dev/null)
+          
+          # Skip root disk
+          if [[ "$disk" == "{{ root_disk_raw.stdout }}" ]]; then
+            continue
+          fi
+          
+          # Skip if disk has partitions (check for children)
+          if lsblk -n /dev/"$disk" | tail -n +2 | grep -q .; then
+            continue
+          fi
+          
+          # Skip if already used by LVM
+          if pvdisplay -S /dev/"$disk" 2>/dev/null | grep -q "LVM"; then
+            continue
+          fi
+          
+          # Skip if used by ZFS
+          if zpool status 2>/dev/null | grep -q "$disk"; then
+            continue
+          fi
+          
+          # Skip if mounted
+          if grep -q "$disk" /etc/mtab 2>/dev/null; then
+            continue
+          fi
+          
+          # Only include disks with size
+          if [ "$size" -gt 0 ]; then
+            echo "$disk:$size"
+          fi
+        done
+      register: available_disks_raw
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: Parse disk information
+      ansible.builtin.set_fact:
+        discovered_disks: >-
+          {%-
+            set disks = []
+          -%}
+          {%- for disk_entry in available_disks_raw.stdout_lines | default([]) -%}
+            {%-
+              set disk_name, disk_size = disk_entry.split(':')
+            -%}
+            {{
+              disks.append({
+                'name': disk_name,
+                'path': '/dev/' + disk_name,
+                'size': disk_size | int,
+                'size_gb': (disk_size | int / 1073741824) | round(2)
+              })
+            }}
+          {%- endfor -%}
+          {{- disks | sort(attribute='name') -}}
+      become: true
+
+    - name: Set empty disk list if no free disks found
+      ansible.builtin.set_fact:
+        discovered_disks: []
+      become: true
+      when: available_disks_raw.stdout_lines | default([]) | length == 0
+
+  tags: [proxmox, storage, storage:discover]
+  become: true
+  when:
+    - proxmox_storage_auto_discover_disks | bool
+    - inventory_hostname in proxmox_storage_target_nodes
+
+- name: Display discovered disks
+  ansible.builtin.debug:
+    msg:
+      - "Discovered {{ discovered_disks | length }} free disk(s) on {{ inventory_hostname }}:"
+      - "{{ discovered_disks | to_nice_yaml }}"
+  tags: [proxmox, storage, storage:discover]
+  when: inventory_hostname in proxmox_storage_target_nodes

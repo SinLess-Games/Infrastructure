@@ -1,0 +1,34 @@
+---
+# Display storage configuration summary
+
+- name: Gather storage summary
+  ansible.builtin.shell: |
+    echo "=== Discovered Free Disks ==="
+    lsblk -d -n -o NAME,SIZE,TYPE | grep -v "loop\|rom\|sr"
+    
+    echo ""
+    echo "=== LVM Volumes ==="
+    lvs 2>/dev/null || echo "No LVM volumes found"
+    
+    echo ""
+    echo "=== ZFS Pools ==="
+    zpool list 2>/dev/null || echo "No ZFS pools found"
+    
+    echo ""
+    echo "=== Proxmox Storage Entries ==="
+    pvesm status 2>/dev/null || echo "Failed to list storage"
+  register: storage_summary
+  changed_when: false
+  failed_when: false
+  become: true
+  when: inventory_hostname in proxmox_storage_target_nodes
+  tags: [proxmox, storage, storage:summary]
+
+- name: Display storage summary
+  ansible.builtin.debug:
+    msg: |
+      Storage Configuration Summary for {{ inventory_hostname }}:
+      
+      {{ storage_summary.stdout }}
+  when: inventory_hostname in proxmox_storage_target_nodes
+  tags: [proxmox, storage, storage:summary]
