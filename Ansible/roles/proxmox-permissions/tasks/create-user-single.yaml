@@ -1,0 +1,139 @@
+---
+# Task: Create a single Proxmox user and generate API token
+
+- name: "Generate password for {{ item.key }}"
+  set_fact:
+    user_password: "{{ lookup('community.general.random_string', length=proxmox_password_length, special=true) }}"
+  no_log: true
+
+- name: "Create user: {{ item.key }}@{{ item.value.realm }}"
+  shell: |
+    # Check if user exists
+    existing_user=$(pveum user list | grep -F "{{ item.key }}@{{ item.value.realm }}" || true)
+
+    if [ -z "$existing_user" ]; then
+      echo "Creating user: {{ item.key }}@{{ item.value.realm }}"
+      pveum user add "{{ item.key }}@{{ item.value.realm }}" \
+        -comment "{{ item.value.description }}" \
+        -password "{{ user_password }}"
+      echo "CREATED"
+    else
+      echo "User {{ item.key }}@{{ item.value.realm }} already exists"
+      echo "EXISTS"
+    fi
+  register: user_result
+  vars:
+    ansible_host: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
+  delegate_to: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
+  become: true
+  no_log: true
+  ignore_unreachable: true
+  ignore_errors: true
+  run_once: true
+  when: not proxmox_permissions_dev_mode
+
+- name: "[DEV MODE] Display user creation (simulated): {{ item.key }}"
+  debug:
+    msg: "Would create user: {{ item.key }}@{{ item.value.realm }} with groups: {{ item.value.groups | default([]) }}"
+  when: proxmox_permissions_dev_mode
+  no_log: true
+
+- name: "Add user to groups: {{ item.key }}"
+  shell: |
+    userid="{{ item.key }}@{{ item.value.realm }}"
+    groups_csv="{{ item.value.groups | join(',') }}"
+    if [ -n "$groups_csv" ]; then
+      pveum user modify "$userid" --groups "$groups_csv"
+    fi
+  vars:
+    ansible_host: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
+  delegate_to: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
+  become: true
+  ignore_unreachable: true
+  ignore_errors: true
+  run_once: true
+  when: item.value.groups is defined and item.value.groups | length > 0 and not proxmox_permissions_dev_mode
+
+- name: "Generate API token for {{ item.key }}"
+  block:
+    - name: "Create API token on Proxmox"
+      shell: |
+        user_id="{{ item.key }}@{{ item.value.realm }}"
+        token_name="{{ item.value.api_token_name }}"
+
+        # Check if token already exists and delete it first
+        if pveum user token list "$user_id" 2>/dev/null | grep -q "$token_name"; then
+          echo "Removing existing token: $token_name"
+          pveum user token delete "$user_id" "$token_name" 2>/dev/null || true
+          sleep 1
+        fi
+
+        # Create new token with JSON output for reliable parsing
+        token_output=$(pveum user token add "$user_id" "$token_name" --privsep=1 --output-format json 2>&1 || true)
+
+        if echo "$token_output" | grep -q "Token already exists"; then
+          echo "Token already exists after delete; retrying"
+          pveum user token delete "$user_id" "$token_name" 2>/dev/null || true
+          sleep 1
+          token_output=$(pveum user token add "$user_id" "$token_name" --privsep=1 --output-format json 2>&1 || true)
+        fi
+
+        # Parse JSON output
+        full_tokenid=$(echo "$token_output" | grep -o '"full-tokenid":"[^"]*"' | cut -d'"' -f4)
+        token_secret=$(echo "$token_output" | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
+
+        if [ -n "$full_tokenid" ] && [ -n "$token_secret" ]; then
+          echo "FULL_TOKENID=$full_tokenid"
+          echo "TOKEN_SECRET=$token_secret"
+          echo "PROXMOX_VE_API_TOKEN=$full_tokenid=$token_secret"
+        else
+          echo "ERROR: Failed to parse token output"
+          echo "$token_output"
+        fi
+      register: api_token_result
+      delegate_to: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
+      become: true
+      ignore_unreachable: true
+      ignore_errors: true
+      run_once: true
+      when: not proxmox_permissions_dev_mode
+
+    - name: "[DEV MODE] Display API token (simulated)"
+      set_fact:
+        api_token_result:
+          stdout: "{{ item.key }}@pve!{{ item.value.api_token_name }}=simulated-token-id:simulated-secret"
+      when: proxmox_permissions_dev_mode
+
+    - name: "Save API token to file: {{ item.key }}"
+      copy:
+        content: |
+          # Proxmox API Token for {{ item.key }}
+          # Generated: {{ now(utc=true).isoformat() }}
+          # User: {{ item.key }}@{{ item.value.realm }}
+          # Token Name: {{ item.value.api_token_name }}
+
+          TOKEN DETAILS:
+          {{ api_token_result.stdout | default('No token output captured') }}
+
+          # To use this token in your Terraform configuration:
+          # export PROXMOX_VE_ENDPOINT="https://<proxmox-host>:8006"
+          # export PROXMOX_VE_API_TOKEN="<full-tokenid>=<token-secret>"
+
+        dest: "{{ proxmox_api_token_output_dir }}/{{ item.key }}-api-token.txt"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      register: token_save_result
+      ignore_errors: true
+      run_once: true
+
+    - name: "API token saved for {{ item.key }}"
+      debug:
+        msg: "API token saved to {{ proxmox_api_token_output_dir }}/{{ item.key }}-api-token.txt"
+      ignore_errors: true
+
+  when: item.value.generate_api_token | default(false)
+  tags:
+    - proxmox
+    - permissions
+    - api-tokens

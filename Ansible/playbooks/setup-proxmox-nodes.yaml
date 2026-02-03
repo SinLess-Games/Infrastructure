@@ -21,6 +21,10 @@
 
   vars:
     proxmox_node_playbook: true
+    # Permissions role defaults (normally from role defaults/main.yaml)
+    proxmox_permissions_enabled: true
+    proxmox_permissions_dev_mode: false
+    proxmox_api_token_output_dir: "{{ playbook_dir }}/../../.outputs/api-tokens"
 
   vars_files:
     - ../group_vars/all/chrony.yaml
@@ -34,6 +38,11 @@
     - ../group_vars/proxmox/ceph.yaml
     - ../group_vars/all/ssh.yaml
     - ../group_vars/all/users.yaml
+    - ../group_vars/proxmox/roles.yaml
+    - ../group_vars/proxmox/groups.yaml
+    - ../group_vars/proxmox/pools.yaml
+    - ../group_vars/proxmox/users.yaml
+    - ../group_vars/proxmox/vault-users.yaml
 
   vars_prompt:
     - name: proxmox_cluster_join_password
@@ -89,12 +98,20 @@
     # -------------------------------------------------------------------------
     - role: proxmox-storage
       tags: [proxmox, storage]
+      when: "'storage' in ansible_run_tags or 'all' in ansible_run_tags"
 
     # -------------------------------------------------------------------------
     # Phase 8: Proxmox Ceph cluster
     # -------------------------------------------------------------------------
     - role: proxmox-ceph
       tags: [proxmox, ceph]
+      when: "'ceph' in ansible_run_tags or 'all' in ansible_run_tags"
+
+    # -------------------------------------------------------------------------
+    # Phase 9: Proxmox user permissions
+    # -------------------------------------------------------------------------
+    - role: proxmox-permissions
+      tags: [proxmox, permissions]
 
   tasks:
 

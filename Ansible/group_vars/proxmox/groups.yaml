@@ -1,0 +1,13 @@
+# Proxmox groups for organizing users with shared permissions
+proxmox_groups:
+  automation:
+    comment: "Automation tools (Terraform, Ansible, etc.)"
+    users: []  # Will be populated from users config
+
+  operators:
+    comment: "Infrastructure operators"
+    users: []
+
+  readonly:
+    comment: "Read-only access for monitoring/auditing"
+    users: []

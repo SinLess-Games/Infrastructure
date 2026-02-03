@@ -1,0 +1,30 @@
+---
+# Task: Create Proxmox users and generate API tokens
+
+- name: "Create users and generate API tokens"
+  block:
+    - name: "Check if proxmox_users is defined"
+      assert:
+        that:
+          - proxmox_users is defined
+          - proxmox_users | type_debug == 'dict'
+        fail_msg: "proxmox_users must be defined in group_vars"
+
+    - name: "Create user and generate API token: {{ item.key }}"
+      include_tasks: create-user-single.yaml
+      loop: "{{ proxmox_users | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      tags:
+        - proxmox
+        - permissions
+        - users
+
+  tags:
+    - proxmox
+    - permissions
+    - users
+  tags:
+    - proxmox
+    - permissions
+    - users

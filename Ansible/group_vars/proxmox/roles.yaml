@@ -1,0 +1,50 @@
+# Proxmox custom roles definition
+# Roles can be assigned to users and groups for RBAC
+proxmox_roles:
+  # Read-only role for monitoring and auditing
+  ReadOnly:
+    description: "Read-only access for monitoring and auditing"
+    privileges:
+      - "Datastore.Audit"
+      - "VM.Audit"
+      - "Sys.Audit"
+
+  # Terraform provider role for infrastructure automation
+  TerraformProv:
+    description: "Role for Terraform provider to manage infrastructure"
+    privileges:
+      - "Datastore.AllocateSpace"
+      - "Datastore.Audit"
+      - "Pool.Allocate"
+      - "Sys.Audit"
+      - "Sys.Console"
+      - "Sys.Modify"
+      - "VM.Allocate"
+      - "VM.Audit"
+      - "VM.Clone"
+      - "VM.Config.CDROM"
+      - "VM.Config.Cloudinit"
+      - "VM.Config.CPU"
+      - "VM.Config.Disk"
+      - "VM.Config.HWType"
+      - "VM.Config.Memory"
+      - "VM.Config.Network"
+      - "VM.Config.Options"
+      - "VM.Migrate"
+      - "VM.Monitor"
+      - "VM.PowerMgmt"
+      - "SDN.Use"
+
+  # Ansible provisioning role
+  AnsibleProv:
+    description: "Role for Ansible to manage node configuration"
+    privileges:
+      - "Datastore.Audit"
+      - "Sys.Audit"
+      - "Sys.Console"
+      - "Sys.Modify"
+      - "Sys.PowerMgmt"
+      - "VM.Allocate"
+      - "VM.Audit"
+      - "VM.Console"
+      - "VM.PowerMgmt"

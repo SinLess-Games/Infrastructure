@@ -92,3 +92,15 @@ tasks:
       - |
         set -e
         {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/setup-technitium.yaml"
+
+  setup-proxmox-permissions:
+    desc: "Configure Proxmox permissions (users, groups, roles, ACLs)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/setup-proxmox-nodes.yaml \
+          --tags permissions \
+          --vault-password-file .vault-password {{.CLI_ARGS}}

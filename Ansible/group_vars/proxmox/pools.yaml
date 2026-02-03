@@ -1,0 +1,22 @@
+# Proxmox resource pools for organizing VMs and storage
+# Pools help organize resources and can have separate permissions
+proxmox_pools:
+  automation:
+    comment: "Resources for automation tools (Terraform, Ansible)"
+    nodes: []  # Leave empty for all nodes, or specify: ['pve-01', 'pve-02']
+    storage: []  # Leave empty for all storage, or specify: ['local', 'ceph']
+
+  production:
+    comment: "Production environment resources"
+    nodes: []
+    storage: []
+
+  staging:
+    comment: "Staging environment resources"
+    nodes: []
+    storage: []
+
+  development:
+    comment: "Development environment resources"
+    nodes: []
+    storage: []

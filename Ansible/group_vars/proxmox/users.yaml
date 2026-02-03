@@ -1,0 +1,34 @@
+# Proxmox users configuration
+# API tokens are optionally generated and output to .outputs/api-tokens/
+proxmox_users:
+  terraform-prov:
+    description: "Terraform provider for infrastructure automation"
+    realm: "pve"  # Proxmox VE local authentication realm
+    groups:
+      - automation
+    roles:
+      - TerraformProv
+    acl_path: "/"
+    generate_api_token: true
+    api_token_name: "terraform-automation"
+
+  ansible-prov:
+    description: "Ansible provisioner for node configuration"
+    realm: "pve"
+    groups:
+      - automation
+    roles:
+      - AnsibleProv
+    acl_path: "/"
+    generate_api_token: true
+    api_token_name: "ansible-automation"
+
+  monitor:
+    description: "Read-only monitoring and auditing user"
+    realm: "pve"
+    groups:
+      - readonly
+    roles:
+      - ReadOnly
+    acl_path: "/"
+    generate_api_token: false

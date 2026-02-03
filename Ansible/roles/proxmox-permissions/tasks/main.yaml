@@ -1,0 +1,64 @@
+---
+# Proxmox Permissions Management Role
+# Manages users, groups, roles, and ACL assignments
+
+- name: "Proxmox Permissions Management"
+  when: proxmox_permissions_enabled
+  block:
+    - name: "Ensure API token output directory exists"
+      file:
+        path: "{{ proxmox_api_token_output_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: "Create custom roles"
+      include_tasks: create-roles.yaml
+      tags:
+        - proxmox
+        - permissions
+        - roles
+
+    - name: "Create groups"
+      include_tasks: create-groups.yaml
+      tags:
+        - proxmox
+        - permissions
+        - groups
+
+    - name: "Create resource pools"
+      include_tasks: create-pools.yaml
+      tags:
+        - proxmox
+        - permissions
+        - pools
+
+    - name: "Create users and generate API tokens"
+      include_tasks: create-users.yaml
+      tags:
+        - proxmox
+        - permissions
+        - users
+
+    - name: "Assign users to groups"
+      include_tasks: assign-users-to-groups.yaml
+      tags:
+        - proxmox
+        - permissions
+        - groups
+        - users
+
+    - name: "Configure ACLs"
+      include_tasks: configure-acls.yaml
+      tags:
+        - proxmox
+        - permissions
+        - acls
+
+    - name: "Validate permissions setup"
+      include_tasks: validate.yaml
+      tags:
+        - proxmox
+        - permissions
+        - validate

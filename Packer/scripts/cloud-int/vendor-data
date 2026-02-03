@@ -7,15 +7,15 @@ write_files:
       #!/bin/sh
       cat << 'EOF'
       ############################################################
-      #               WELCOME TO SinLess Games LLC                 #
+      #               WELCOME TO SinLess Games LLC               #
       ############################################################
       #                                                          #
-      # By accessing this server, you acknowledge and agree to    #
+      # By accessing this server, you acknowledge and agree to   #
       # the Terms of Use and Privacy Policy of SinLess Games LLC #
       #                                                          #
-      # All actions on this system are logged and actively        #
-      # monitored. Unauthorized access or misuse is strictly      #
-      # prohibited.                                               #
+      # All actions on this system are logged and actively       #
+      # monitored. Unauthorized access or misuse is strictly     #
+      # prohibited.                                              #
       #                                                          #
       # If you are not an authorized user, exit immediately.     #
       ############################################################

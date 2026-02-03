@@ -1,0 +1,58 @@
+---
+# Task: Create custom Proxmox roles via SSH to first cluster node
+
+- name: "Create custom roles"
+  block:
+    - name: "Check if proxmox_roles is defined"
+      assert:
+        that:
+          - proxmox_roles is defined
+          - proxmox_roles | type_debug == 'dict'
+        fail_msg: "proxmox_roles must be defined as a dictionary in group_vars"
+
+    - name: "Create role: {{ item.key }}"
+      shell: |
+        # Check if role exists
+        existing_role=$(pveum role list | grep -F "{{ item.key }}" || true)
+        
+        if [ -z "$existing_role" ]; then
+          echo "Creating role: {{ item.key }}"
+          pveum role add "{{ item.key }}" \
+            -privs "{{ item.value.privileges | join(' ') }}"
+          echo "CHANGED"
+        else
+          echo "Role {{ item.key }} already exists"
+          echo "UNCHANGED"
+        fi
+      register: role_result
+      changed_when: "'CHANGED' in role_result.stdout"
+      loop: "{{ proxmox_roles | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      delegate_to: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
+      become: true
+      ignore_unreachable: true
+      ignore_errors: true
+      run_once: true
+      when: not proxmox_permissions_dev_mode
+      tags:
+        - proxmox
+        - permissions
+        - roles
+
+    - name: "[DEV MODE] Display role creation (simulated): {{ item.key }}"
+      debug:
+        msg: "Would create role: {{ item.key }} with privileges: {{ item.value.privileges }}"
+      loop: "{{ proxmox_roles | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: proxmox_permissions_dev_mode
+      tags:
+        - proxmox
+        - permissions
+        - roles
+
+  tags:
+    - proxmox
+    - permissions
+    - roles
