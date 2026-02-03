@@ -5,3 +5,4 @@ Ansible/.venv/
 .ansible/
 Ansible/.collections/
 Ansible/group_vars/proxmox/vault-certs.yaml
+.vault-password
