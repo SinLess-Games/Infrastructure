@@ -29,6 +29,7 @@
   vars_files:
     - ../group_vars/all/chrony.yaml
     - ../group_vars/proxmox/proxmox.yaml
+    - ../group_vars/proxmox/dns.yaml
     - ../group_vars/proxmox/cluster.yaml
     - ../group_vars/proxmox/keepalived.yaml
     - ../group_vars/proxmox/certificate.yaml

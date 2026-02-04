@@ -16,6 +16,21 @@
   changed_when: false
   when: inventory_hostname in ceph_nodes
 
+- name: Determine disks in use by LVM (PVs)
+  ansible.builtin.shell: >-
+    pvs --noheadings -o pv_name 2>/dev/null
+    | awk 'NF {print $1}'
+  register: ceph_used_lvm_pvs
+  changed_when: false
+  when: inventory_hostname in ceph_nodes
+
+- name: Build combined used disk list
+  ansible.builtin.set_fact:
+    ceph_used_disk_paths: >-
+      {{ (ceph_used_disks.stdout_lines | default([]) | map('regex_replace', '^', '/dev/') | list)
+         + (ceph_used_lvm_pvs.stdout_lines | default([])) }}
+  when: inventory_hostname in ceph_nodes
+
 - name: Determine empty disks for OSDs
   ansible.builtin.shell: >-
     lsblk -nr -o NAME,TYPE
@@ -28,7 +43,7 @@
   ansible.builtin.set_fact:
     ceph_empty_disks: >-
       {{ (ceph_all_disks.stdout_lines | default([]))
-         | reject('match', '^/dev/(' + (ceph_used_disks.stdout_lines | default([]) | join('|')) + ')$')
+         | reject('in', (ceph_used_disk_paths | default([])))
          | list }}
   when:
     - inventory_hostname in ceph_nodes

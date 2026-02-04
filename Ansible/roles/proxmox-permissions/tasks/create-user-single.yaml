@@ -6,22 +6,40 @@
     user_password: "{{ lookup('community.general.random_string', length=proxmox_password_length, special=true) }}"
   no_log: true
 
-- name: "Create user: {{ item.key }}@{{ item.value.realm }}"
-  shell: |
-    # Check if user exists
-    existing_user=$(pveum user list | grep -F "{{ item.key }}@{{ item.value.realm }}" || true)
+- name: "Check if user exists: {{ item.key }}@{{ item.value.realm }}"
+  ansible.builtin.command:
+    argv:
+      - pveum
+      - user
+      - list
+  register: user_list_result
+  vars:
+    ansible_host: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
+  delegate_to: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
+  become: true
+  changed_when: false
+  ignore_unreachable: true
+  ignore_errors: true
+  run_once: true
+  when: not proxmox_permissions_dev_mode
 
-    if [ -z "$existing_user" ]; then
-      echo "Creating user: {{ item.key }}@{{ item.value.realm }}"
-      pveum user add "{{ item.key }}@{{ item.value.realm }}" \
-        -comment "{{ item.value.description }}" \
-        -password "{{ user_password }}"
-      echo "CREATED"
-    else
-      echo "User {{ item.key }}@{{ item.value.realm }} already exists"
-      echo "EXISTS"
-    fi
-  register: user_result
+- name: "Set user existence flag: {{ item.key }}@{{ item.value.realm }}"
+  ansible.builtin.set_fact:
+    user_exists: "{{ (user_list_result.stdout | default('')) is search(item.key ~ '@' ~ item.value.realm) }}"
+  when: not proxmox_permissions_dev_mode
+
+- name: "Create user: {{ item.key }}@{{ item.value.realm }}"
+  ansible.builtin.command:
+    argv:
+      - pveum
+      - user
+      - add
+      - "{{ item.key }}@{{ item.value.realm }}"
+      - -comment
+      - "{{ item.value.description }}"
+      - -password
+      - "{{ user_password }}"
+  register: user_add_result
   vars:
     ansible_host: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
   delegate_to: "{{ hostvars[groups['pve_nodes'] | first]['ansible_host'] }}"
@@ -30,7 +48,25 @@
   ignore_unreachable: true
   ignore_errors: true
   run_once: true
+  when:
+    - not proxmox_permissions_dev_mode
+    - user_exists is defined
+    - not user_exists
+
+- name: "Set user present flag: {{ item.key }}@{{ item.value.realm }}"
+  ansible.builtin.set_fact:
+    user_present: >-
+      {{ (user_exists | default(false))
+         or (user_add_result is defined and user_add_result.rc == 0) }}
   when: not proxmox_permissions_dev_mode
+
+- name: "Report user creation failure: {{ item.key }}@{{ item.value.realm }}"
+  ansible.builtin.debug:
+    msg: "Failed to create user {{ item.key }}@{{ item.value.realm }}. Skipping groups and token."
+  when:
+    - not proxmox_permissions_dev_mode
+    - user_present is defined
+    - not user_present
 
 - name: "[DEV MODE] Display user creation (simulated): {{ item.key }}"
   debug:
@@ -52,7 +88,11 @@
   ignore_unreachable: true
   ignore_errors: true
   run_once: true
-  when: item.value.groups is defined and item.value.groups | length > 0 and not proxmox_permissions_dev_mode
+  when:
+    - item.value.groups is defined
+    - item.value.groups | length > 0
+    - not proxmox_permissions_dev_mode
+    - user_present | default(true)
 
 - name: "Generate API token for {{ item.key }}"
   block:
@@ -132,7 +172,9 @@
         msg: "API token saved to {{ proxmox_api_token_output_dir }}/{{ item.key }}-api-token.txt"
       ignore_errors: true
 
-  when: item.value.generate_api_token | default(false)
+  when:
+    - item.value.generate_api_token | default(false)
+    - user_present | default(true)
   tags:
     - proxmox
     - permissions

@@ -3,6 +3,7 @@
 
 # Enable SDN
 proxmox_sdn_enabled: true
+proxmox_sdn_apply_node_network: true
 
 # Primary bridge for VLAN tagging (must exist on all nodes)
 proxmox_sdn_primary_bridge: "vmbr0"
@@ -11,7 +12,23 @@ proxmox_sdn_primary_bridge: "vmbr0"
 proxmox_sdn_zones:
   - name: "vlanzone"
     type: "vlan"
+    bridge: "vmbr0"
     nodes: "pve-01,pve-02,pve-03,pve-04,pve-05"
+    disable_arp_nd_suppression: 0
+  - name: "devzone"
+    type: "vlan"
+    bridge: "vmbr20"
+    nodes: "pve-01,pve-02,pve-03,pve-04,pve-05"
+    disable_arp_nd_suppression: 0
+  - name: "testzone"
+    type: "vlan"
+    bridge: "vmbr30"
+    nodes: "pve-01,pve-02,pve-03,pve-04,pve-05"
+    disable_arp_nd_suppression: 0
+  - name: "prodzone"
+    type: "vlan"
+    bridge: "vmbr40"
+    nodes: "pve-01,pve-04,pve-05"
     disable_arp_nd_suppression: 0
 
 # SDN networks - mapped to actual VLAN structure
@@ -26,7 +43,7 @@ proxmox_sdn_networks:
 
   # Development VLAN
   - name: "dev"
-    zone: "vlanzone"
+    zone: "devzone"
     vlanid: 20
     subnet: "10.10.20.0/24"
     gateway: "10.10.20.1"
@@ -34,7 +51,7 @@ proxmox_sdn_networks:
 
   # Testing/Staging VLAN
   - name: "staging"
-    zone: "vlanzone"
+    zone: "testzone"
     vlanid: 30
     subnet: "10.10.30.0/24"
     gateway: "10.10.30.1"
@@ -42,7 +59,7 @@ proxmox_sdn_networks:
 
   # Production VLAN
   - name: "prod"
-    zone: "vlanzone"
+    zone: "prodzone"
     vlanid: 40
     subnet: "10.10.40.0/24"
     gateway: "10.10.40.1"
@@ -66,8 +83,12 @@ proxmox_sdn_networks:
 
 # DNS servers for SDN networks
 proxmox_sdn_dns_servers:
+  - "10.10.10.12"
   - "1.1.1.1"
   - "8.8.8.8"
+
+# Optional DNS search domain for SDN subnets (if supported by your PVE version)
+proxmox_sdn_dns_domain: "local.sinlessgamesllc.com"
 
 # NTP servers for time synchronization
 proxmox_sdn_ntp_servers:

@@ -63,6 +63,13 @@
   tags: [proxmox, time, chrony]
 
 # -----------------------------------------------------------------------------
+# DNS resolver configuration (node-level)
+# -----------------------------------------------------------------------------
+- name: Configure node DNS
+  ansible.builtin.import_tasks: dns.yaml
+  tags: [proxmox, dns]
+
+# -----------------------------------------------------------------------------
 # Proxmox API & cluster readiness
 # -----------------------------------------------------------------------------
 - name: Configure Proxmox API access

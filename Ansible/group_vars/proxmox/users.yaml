@@ -22,6 +22,15 @@ proxmox_users:
     acl_path: "/"
     generate_api_token: true
     api_token_name: "ansible-automation"
+  
+  packer-prov:
+    description: "Packer provisioner for VM image creation"
+    realm: "pve"
+    groups:
+      - automation
+    acl_path: "/"
+    generate_api_token: true
+    api_token_name: "packer-automation"
 
   monitor:
     description: "Read-only monitoring and auditing user"

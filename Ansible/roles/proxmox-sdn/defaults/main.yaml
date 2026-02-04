@@ -4,6 +4,9 @@
 # Enable/disable SDN
 proxmox_sdn_enabled: true
 
+# Apply pending node network changes when applying SDN (clears "new" state)
+proxmox_sdn_apply_node_network: false
+
 # Primary bridge interface for VLAN tagging
 proxmox_sdn_primary_bridge: "vmbr0"
 

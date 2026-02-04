@@ -23,7 +23,7 @@
     pvesh create /cluster/sdn/zones
     --type "{{ item.0.type }}"
     --zone "{{ item.0.name }}"
-    --bridge "{{ proxmox_sdn_primary_bridge }}"
+    --bridge "{{ item.0.bridge | default(proxmox_sdn_primary_bridge) }}"
     --nodes "{{ item.0.nodes }}"
   args:
     executable: /bin/bash

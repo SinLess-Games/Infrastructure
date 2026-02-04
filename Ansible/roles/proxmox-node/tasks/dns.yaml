@@ -1,0 +1,42 @@
+---
+# Configure node-level DNS settings via Proxmox API (cluster-wide intent)
+
+- name: Check current node DNS settings
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ inventory_hostname }}/dns"
+      - --output-format
+      - json
+  register: proxmox_dns_current
+  changed_when: false
+  failed_when: false
+
+- name: Build desired DNS args
+  ansible.builtin.set_fact:
+    proxmox_dns_args: >-
+      {%- set args = [] -%}
+      {%- for s in (proxmox_cluster_dns_servers | default([])) -%}
+      {%- set _ = args.extend(['-dns' ~ (loop.index), s]) -%}
+      {%- endfor -%}
+      {{ args }}
+
+- name: Apply node DNS settings
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pvesh', 'set', '/nodes/' ~ inventory_hostname ~ '/dns']
+         + ((proxmox_cluster_dns_search_domain | default('') | length > 0)
+            | ternary(['-search', proxmox_cluster_dns_search_domain], []))
+         + (proxmox_dns_args | default([])) }}
+  register: proxmox_dns_set
+  changed_when: proxmox_dns_set.rc == 0
+  failed_when: false
+  when: proxmox_cluster_dns_enabled | default(false)
+
+- name: Report node DNS configuration status
+  ansible.builtin.debug:
+    msg: >-
+      DNS update for {{ inventory_hostname }}:
+      {{ 'Applied' if (proxmox_dns_set is defined and proxmox_dns_set.rc == 0) else 'Skipped/Unavailable' }}
+  when: proxmox_cluster_dns_enabled | default(false)

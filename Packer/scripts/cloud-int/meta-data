@@ -1,2 +1,0 @@
-instance-id: sinless-games-$(hostname)
-local-hostname: $(hostname)

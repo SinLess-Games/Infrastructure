@@ -1,0 +1,10 @@
+---
+# Proxmox Node DNS Configuration (cluster-wide intent)
+
+proxmox_cluster_dns_enabled: true
+proxmox_cluster_dns_servers:
+  - "10.10.10.12"
+  # - "1.1.1.1"
+
+# DNS search domain applied to node resolver config
+proxmox_cluster_dns_search_domain: "local.sinlessgamesllc.com"

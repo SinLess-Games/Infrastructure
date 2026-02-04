@@ -43,36 +43,43 @@
   loop_control:
     label: "{{ item.0.name }}"
 
-- name: Check if SDN subnet exists
-  ansible.builtin.shell: pvesh get /cluster/sdn/vnets/{{ item.name }}/subnets/{{ item.subnet }} 2>/dev/null && echo "exists" || echo "missing"
+- name: Check SDN subnet option support
+  ansible.builtin.shell: >-
+    pvesh help /cluster/sdn/vnets/{{ proxmox_sdn_networks[0].name }}/subnets 2>/dev/null || true
   args:
     executable: /bin/bash
-  register: subnet_check
+  register: sdn_subnet_help
   changed_when: false
-  loop: "{{ proxmox_sdn_networks }}"
-  loop_control:
-    label: "{{ item.name }}"
+  run_once: true
+  when: proxmox_sdn_networks | length > 0
 
 - name: Create SDN subnets
   ansible.builtin.shell: >-
-    pvesh create /cluster/sdn/vnets/{{ item.0.name }}/subnets
-    -subnet "{{ item.0.subnet }}"
+    pvesh create /cluster/sdn/vnets/{{ item.name }}/subnets
+    -subnet "{{ item.subnet }}"
     -type "subnet"
-    -gateway "{{ item.0.gateway }}"
+    -gateway "{{ item.gateway }}"
+    {% if (proxmox_sdn_dns_servers | default([]) | length > 0) and (sdn_subnet_help.stdout | default('') is search('dns')) %}
+    -dns "{{ proxmox_sdn_dns_servers | join(',') }}"
+    {% endif %}
+    {% if (proxmox_sdn_dns_domain | default('') | length > 0) and (sdn_subnet_help.stdout | default('') is search('domain')) %}
+    -domain "{{ proxmox_sdn_dns_domain }}"
+    {% endif %}
   args:
     executable: /bin/bash
   register: subnet_result
   changed_when: subnet_result.rc == 0
-  failed_when: subnet_result.rc != 0
-  loop: "{{ proxmox_sdn_networks | zip(subnet_check.results) }}"
+  failed_when: subnet_result.rc != 0 and not ((subnet_result.stderr | default('') | lower) is search('already defined'))
+  loop: "{{ proxmox_sdn_networks }}"
   loop_control:
-    label: "{{ item.0.name }}"
-  when: item.1.stdout == "missing"
+    label: "{{ item.name }}"
   run_once: true
 
 - name: Report subnet creation status
   ansible.builtin.debug:
-    msg: "Subnet {{ item.0.subnet }} on {{ item.0.name }}: {{ 'Created' if item.1.stdout == 'missing' else 'Already exists' }}"
-  loop: "{{ proxmox_sdn_networks | zip(subnet_check.results) }}"
+    msg: >-
+      Subnet {{ item.item.subnet }} on {{ item.item.name }}:
+      {{ 'Created' if item.rc == 0 else ('Already exists' if (item.stderr | default('') | lower) is search('already defined') else 'Failed') }}
+  loop: "{{ subnet_result.results | default([]) }}"
   loop_control:
-    label: "{{ item.0.name }}"
+    label: "{{ item.item.name }}"
