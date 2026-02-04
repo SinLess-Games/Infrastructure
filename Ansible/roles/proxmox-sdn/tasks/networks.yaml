@@ -1,0 +1,78 @@
+---
+# SDN Network Configuration
+
+- name: Display SDN networks to create
+  ansible.builtin.debug:
+    msg: "Creating SDN network: {{ item.name }} (VLAN {{ item.vlanid }}, {{ item.subnet }})"
+  loop: "{{ proxmox_sdn_networks }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Check if SDN network exists
+  ansible.builtin.shell: pvesh get /cluster/sdn/vnets/{{ item.name }} 2>/dev/null && echo "exists" || echo "missing"
+  args:
+    executable: /bin/bash
+  register: network_check
+  changed_when: false
+  loop: "{{ proxmox_sdn_networks }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create SDN networks
+  ansible.builtin.shell: >-
+    pvesh create /cluster/sdn/vnets
+    -vnet "{{ item.0.name }}"
+    -type "vnet"
+    -zone "{{ item.0.zone }}"
+    -tag "{{ item.0.vlanid }}"
+  args:
+    executable: /bin/bash
+  register: network_result
+  changed_when: network_result.rc == 0
+  failed_when: network_result.rc != 0
+  loop: "{{ proxmox_sdn_networks | zip(network_check.results) }}"
+  loop_control:
+    label: "{{ item.0.name }}"
+  when: item.1.stdout == "missing"
+  run_once: true
+
+- name: Report network creation status
+  ansible.builtin.debug:
+    msg: "Network {{ item.0.name }}: {{ 'Created' if item.1.stdout == 'missing' else 'Already exists' }}"
+  loop: "{{ proxmox_sdn_networks | zip(network_check.results) }}"
+  loop_control:
+    label: "{{ item.0.name }}"
+
+- name: Check if SDN subnet exists
+  ansible.builtin.shell: pvesh get /cluster/sdn/vnets/{{ item.name }}/subnets/{{ item.subnet }} 2>/dev/null && echo "exists" || echo "missing"
+  args:
+    executable: /bin/bash
+  register: subnet_check
+  changed_when: false
+  loop: "{{ proxmox_sdn_networks }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create SDN subnets
+  ansible.builtin.shell: >-
+    pvesh create /cluster/sdn/vnets/{{ item.0.name }}/subnets
+    -subnet "{{ item.0.subnet }}"
+    -type "subnet"
+    -gateway "{{ item.0.gateway }}"
+  args:
+    executable: /bin/bash
+  register: subnet_result
+  changed_when: subnet_result.rc == 0
+  failed_when: subnet_result.rc != 0
+  loop: "{{ proxmox_sdn_networks | zip(subnet_check.results) }}"
+  loop_control:
+    label: "{{ item.0.name }}"
+  when: item.1.stdout == "missing"
+  run_once: true
+
+- name: Report subnet creation status
+  ansible.builtin.debug:
+    msg: "Subnet {{ item.0.subnet }} on {{ item.0.name }}: {{ 'Created' if item.1.stdout == 'missing' else 'Already exists' }}"
+  loop: "{{ proxmox_sdn_networks | zip(subnet_check.results) }}"
+  loop_control:
+    label: "{{ item.0.name }}"

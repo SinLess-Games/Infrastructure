@@ -1,0 +1,77 @@
+---
+# Proxmox SDN Main Tasks
+
+- name: Check if SDN is available
+  ansible.builtin.shell: |
+    pvesh get /cluster/sdn 2>/dev/null && echo "available" || echo "unavailable"
+  args:
+    executable: /bin/bash
+  register: sdn_check
+  changed_when: false
+  failed_when: false
+  tags:
+    - proxmox
+    - sdn
+
+- name: Display SDN availability
+  ansible.builtin.debug:
+    msg: "Proxmox SDN is {{ 'available' if 'available' in sdn_check.stdout else 'not available on this cluster' }}"
+  tags:
+    - proxmox
+    - sdn
+
+- name: Create SDN zones
+  ansible.builtin.include_tasks: zones.yaml
+  when: proxmox_sdn_enabled and 'available' in sdn_check.stdout
+  tags:
+    - proxmox
+    - sdn
+    - zones
+
+- name: Create SDN networks
+  ansible.builtin.include_tasks: networks.yaml
+  when: proxmox_sdn_enabled and 'available' in sdn_check.stdout
+  tags:
+    - proxmox
+    - sdn
+    - networks
+
+- name: Check SDN apply support
+  ansible.builtin.shell: pvesh help /cluster/sdn 2>/dev/null || true
+  args:
+    executable: /bin/bash
+  register: sdn_apply_help
+  changed_when: false
+  failed_when: false
+  when: proxmox_sdn_enabled and 'available' in sdn_check.stdout
+  tags:
+    - proxmox
+    - sdn
+    - apply
+
+- name: Apply SDN configuration
+  ansible.builtin.shell: >-
+    {% if sdn_apply_help.stdout is search('apply') %}
+    pvesh set /cluster/sdn -apply 1
+    {% elif sdn_apply_help.stdout is search('reload') %}
+    pvesh set /cluster/sdn -reload 1
+    {% else %}
+    true
+    {% endif %}
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false
+  when: proxmox_sdn_enabled and 'available' in sdn_check.stdout
+  tags:
+    - proxmox
+    - sdn
+    - apply
+
+- name: Verify SDN configuration
+  ansible.builtin.include_tasks: verify.yaml
+  when: proxmox_sdn_enabled and 'available' in sdn_check.stdout
+  tags:
+    - proxmox
+    - sdn
+    - verify

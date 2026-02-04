@@ -36,6 +36,7 @@
     - ../group_vars/proxmox/networking.yaml
     - ../group_vars/proxmox/storage.yaml
     - ../group_vars/proxmox/ceph.yaml
+    - ../group_vars/proxmox/sdn.yaml
     - ../group_vars/all/ssh.yaml
     - ../group_vars/all/users.yaml
     - ../group_vars/proxmox/roles.yaml
@@ -118,6 +119,12 @@
     # -------------------------------------------------------------------------
     - role: proxmox-ha
       tags: [proxmox, ha]
+
+    # -------------------------------------------------------------------------
+    # Phase 11: SDN configuration
+    # -------------------------------------------------------------------------
+    - role: proxmox-sdn
+      tags: [proxmox, sdn]
 
   tasks:
 

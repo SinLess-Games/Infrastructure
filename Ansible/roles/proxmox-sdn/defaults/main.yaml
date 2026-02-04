@@ -1,0 +1,80 @@
+---
+# Proxmox SDN Configuration Defaults
+
+# Enable/disable SDN
+proxmox_sdn_enabled: true
+
+# Primary bridge interface for VLAN tagging
+proxmox_sdn_primary_bridge: "vmbr0"
+
+# SDN Zone configuration (VLAN-based)
+proxmox_sdn_zones:
+  - name: "vlanzone"
+    type: "vlan"
+    nodes: "pve-01,pve-02,pve-03,pve-04,pve-05"
+    disable_arp_nd_suppression: 0
+
+# SDN Networks mapped to your VLAN structure
+proxmox_sdn_networks:
+  - name: "infrastructure"
+    zone: "local-vlan"
+    vlanid: 1
+    subnet: "10.10.10.0/24"
+    gateway: "10.10.10.1"
+    enabled: true
+
+  - name: "development"
+    zone: "local-vlan"
+    vlanid: 20
+    subnet: "10.10.20.0/24"
+    gateway: "10.10.20.1"
+    enabled: true
+
+  - name: "testing"
+    zone: "local-vlan"
+    vlanid: 30
+    subnet: "10.10.30.0/24"
+    gateway: "10.10.30.1"
+    enabled: true
+
+  - name: "production"
+    zone: "local-vlan"
+    vlanid: 40
+    subnet: "10.10.40.0/24"
+    gateway: "10.10.40.1"
+    enabled: true
+
+  - name: "dmz"
+    zone: "local-vlan"
+    vlanid: 50
+    subnet: "10.10.50.0/24"
+    gateway: "10.10.50.1"
+    enabled: true
+
+  - name: "ceph"
+    zone: "local-vlan"
+    vlanid: 60
+    subnet: "10.10.60.0/24"
+    gateway: "10.10.60.1"
+    enabled: true
+
+# SDN DNS servers
+proxmox_sdn_dns_servers:
+  - "1.1.1.1"
+  - "8.8.8.8"
+
+# SDN NTP servers
+proxmox_sdn_ntp_servers:
+  - "ntp.ubuntu.com"
+  - "time.cloudflare.com"
+
+# DHCP configuration
+proxmox_sdn_dhcp_enabled: false
+proxmox_sdn_dhcp_range_start: "10.10.10.100"
+proxmox_sdn_dhcp_range_end: "10.10.10.200"
+
+# IPAM (IP Address Management) - optional
+proxmox_sdn_ipam_enabled: false
+
+# VRF (Virtual Routing and Forwarding) for advanced setups
+proxmox_sdn_vrf_enabled: false
