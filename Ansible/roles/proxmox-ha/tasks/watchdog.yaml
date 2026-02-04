@@ -1,0 +1,42 @@
+---
+# Configure Proxmox HA watchdog devices for VMs
+
+- name: Check if watchdog module is loaded
+  community.general.modprobe:
+    name: "{{ proxmox_ha_watchdog_type }}"
+    state: present
+  register: watchdog_module
+  failed_when: false
+
+- name: Ensure watchdog module loads on boot
+  ansible.builtin.lineinfile:
+    path: /etc/modules
+    line: "{{ proxmox_ha_watchdog_type }}"
+    state: present
+  when: watchdog_module is changed
+
+- name: Check systemd-watchdog service
+  ansible.builtin.systemd:
+    name: systemd-watchdog
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  register: watchdog_service
+  until: watchdog_service is succeeded
+  retries: 3
+  delay: 5
+
+- name: Verify watchdog device exists
+  ansible.builtin.stat:
+    path: /dev/watchdog
+  register: watchdog_device
+
+- name: HA watchdog status
+  ansible.builtin.debug:
+    msg:
+      - "Watchdog Type: {{ proxmox_ha_watchdog_type }}"
+      - "Watchdog Action: {{ proxmox_ha_watchdog_action }}"
+      - "Watchdog Device Present: {{ watchdog_device.stat.exists }}"
+      - "Watchdog Service Status: {{ watchdog_service.status.ActiveState }}"
+  tags:
+    - debug

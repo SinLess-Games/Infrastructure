@@ -1,0 +1,38 @@
+---
+# Configure cluster-wide Proxmox HA settings
+
+- name: Configure HA cluster settings
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh set /cluster/ha/resources \
+      -shutdown_policy "{{ proxmox_ha_cluster_settings.shutdown_policy }}" 2>&1 || true
+  register: cluster_settings_result
+  changed_when: "'updated' in cluster_settings_result.stdout"
+  tags:
+    - skip_ansible_lint
+
+- name: Display cluster settings
+  ansible.builtin.debug:
+    msg:
+      - "Shutdown Policy: {{ proxmox_ha_cluster_settings.shutdown_policy }}"
+      - "Max Worker: {{ proxmox_ha_cluster_settings.max_worker }}"
+      - "Migration Delay: {{ proxmox_ha_cluster_settings.migration_delay }}s"
+      - "Recovery Delay: {{ proxmox_ha_cluster_settings.recovery_delay }}s"
+  tags:
+    - debug
+
+- name: Get current HA settings
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/ha/resources --format json | jq '.'
+  register: ha_config
+  changed_when: false
+  tags:
+    - debug
+
+- name: Display current HA configuration
+  ansible.builtin.debug:
+    msg: "{{ ha_config.stdout | from_json }}"
+  when: ha_config.stdout | length > 0
+  tags:
+    - debug

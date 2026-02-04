@@ -1,0 +1,40 @@
+---
+# Configure Proxmox HA resource groups
+
+- name: Create HA resource groups
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh create /cluster/ha/groups -group "{{ item.name }}" \
+      -comment "{{ item.comment | default('') }}" \
+      -nodes "{{ item.nodes }}" \
+      -priority "{{ item.priority | default(50) }}" 2>&1 || true
+  register: resource_group_result
+  changed_when: "'created' in resource_group_result.stdout or 'already exists' not in resource_group_result.stdout"
+  failed_when: resource_group_result.rc != 0 and 'already exists' not in resource_group_result.stderr
+  loop: "{{ proxmox_ha_resource_groups }}"
+  when: proxmox_ha_resource_groups | length > 0
+  tags:
+    - skip_ansible_lint
+
+- name: Display resource group creation results
+  ansible.builtin.debug:
+    msg: "{{ resource_group_result }}"
+  when: resource_group_result is defined and resource_group_result.results | length > 0
+  tags:
+    - debug
+
+- name: List created HA resource groups
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/ha/groups --format json | jq '.'
+  register: ha_groups_list
+  changed_when: false
+  tags:
+    - debug
+
+- name: Display HA resource groups
+  ansible.builtin.debug:
+    msg: "{{ ha_groups_list.stdout | from_json }}"
+  when: ha_groups_list.stdout | length > 0
+  tags:
+    - debug

@@ -1,0 +1,21 @@
+---
+# Proxmox HA handlers
+
+- name: Reload pve-ha-manager
+  ansible.builtin.systemd:
+    name: pve-ha-manager
+    state: restarted
+    daemon_reload: yes
+  register: ha_manager_reload
+  until: ha_manager_reload is succeeded
+  retries: 3
+  delay: 5
+
+- name: Reload pve-ha-lrm
+  ansible.builtin.systemd:
+    name: pve-ha-lrm
+    state: restarted
+  register: ha_lrm_reload
+  until: ha_lrm_reload is succeeded
+  retries: 3
+  delay: 5

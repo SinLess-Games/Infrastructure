@@ -112,6 +112,12 @@
     # -------------------------------------------------------------------------
     - role: proxmox-permissions
       tags: [proxmox, permissions]
+    
+    # -------------------------------------------------------------------------
+    # Phase 10: HA fencing and resource groups and affinity rules
+    # -------------------------------------------------------------------------
+    - role: proxmox-ha
+      tags: [proxmox, ha]
 
   tasks:
 

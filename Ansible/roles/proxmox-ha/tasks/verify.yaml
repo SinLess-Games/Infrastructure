@@ -1,0 +1,56 @@
+---
+# Verify Proxmox HA status and health
+
+- name: Check HA manager status
+  ansible.builtin.systemd:
+    name: pve-ha-manager
+  register: ha_manager_status
+  tags:
+    - debug
+
+- name: Check HA LRM status
+  ansible.builtin.systemd:
+    name: pve-ha-lrm
+  register: ha_lrm_status
+  tags:
+    - debug
+
+- name: Display HA services status
+  ansible.builtin.debug:
+    msg:
+      - "HA Manager Status: {{ ha_manager_status.status.ActiveState }}"
+      - "HA LRM Status: {{ ha_lrm_status.status.ActiveState }}"
+      - "Migrate on Error: {{ proxmox_ha_migrate_on_error }}"
+      - "Shutdown Policy: {{ proxmox_ha_shutdown_policy }}"
+  tags:
+    - debug
+
+- name: Get HA cluster status
+  ansible.builtin.shell: |
+    set -o pipefail
+    pvesh get /cluster/ha/status --format json
+  register: ha_status
+  changed_when: false
+  failed_when: ha_status.rc != 0 and 'not (yet) initialized' not in ha_status.stderr
+  tags:
+    - skip_ansible_lint
+
+- name: Display HA cluster status
+  ansible.builtin.debug:
+    msg: "{{ ha_status.stdout | from_json }}"
+  when: ha_status.stdout | length > 0
+  tags:
+    - debug
+
+- name: Show HA configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "=== Proxmox HA Configuration Summary ==="
+      - "Watchdog Enabled: {{ proxmox_ha_watchdog_enabled }}"
+      - "Watchdog Type: {{ proxmox_ha_watchdog_type }}"
+      - "Fencing Enabled: {{ proxmox_ha_fence_enabled }}"
+      - "Resource Groups: {{ proxmox_ha_resource_groups | length }}"
+      - "HA Resources: {{ proxmox_ha_resources | length }}"
+      - "Max Relocate: {{ proxmox_ha_max_relocate }}"
+      - "Max Restart (24h): {{ proxmox_ha_max_restart }}"
+      - "Restart Delay: {{ proxmox_ha_restart_delay }}s"
