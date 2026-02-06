@@ -11,3 +11,81 @@ tasks:
     desc: "Show available Packer tasks"
     cmds:
       - task --list
+
+  download-isos:
+    desc: "Download required ISO images for Packer builds"
+    dir: "{{.PACKER_DIR}}"
+    cmds:
+      - echo "Starting ISO download process..."
+      - bash download-isos.sh
+      - echo "ISO download process completed."
+
+  build:debian-13:
+    desc: "Build Debian 13 template using Packer"
+    dir: "{{.PACKER_DIR}}/debian-13"
+    preconditions:
+      - sh: test -f debian-13.pkr.hcl
+        msg: "Packer template not found: {{.PACKER_DIR}}/debian-13/debian-13.pkr.hcl"
+      - sh: test -f ../credentials.pkvars.hcl
+        msg: "Credentials file not found: {{.PACKER_DIR}}/credentials.pkvars.hcl"
+    cmds:
+      - echo "Validating Packer configuration..."
+      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl debian-13.pkr.hcl
+      - echo "Starting Debian 13 template build (estimated 25-35 minutes)..."
+      - packer build -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl debian-13.pkr.hcl 2>&1 | tee build.log
+
+  build:debian-12:
+    desc: "Build Debian 12 template using Packer"
+    dir: "{{.PACKER_DIR}}/debian-12"
+    preconditions:
+      - sh: test -f debian-12.pkr.hcl
+        msg: "Packer template not found: {{.PACKER_DIR}}/debian-12/debian-12.pkr.hcl"
+      - sh: test -f ../credentials.pkvars.hcl
+        msg: "Credentials file not found: {{.PACKER_DIR}}/credentials.pkvars.hcl"
+      - sh: test -f ../variables.debian-12.pkvars.hcl
+        msg: "Variables file not found: {{.PACKER_DIR}}/variables.debian-12.pkvars.hcl"
+    cmds:
+      - echo "Validating Packer configuration..."
+      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.debian-12.pkvars.hcl debian-12.pkr.hcl
+      - echo "Starting Debian 12 template build (estimated 25-35 minutes)..."
+      - packer build -var-file=../credentials.pkvars.hcl -var-file=../variables.debian-12.pkvars.hcl debian-12.pkr.hcl 2>&1 | tee build.log
+
+  validate:debian-13:
+    desc: "Validate Debian 13 Packer configuration without building"
+    dir: "{{.PACKER_DIR}}/debian-13"
+    preconditions:
+      - sh: test -f debian-13.pkr.hcl
+        msg: "Packer template not found"
+    cmds:
+      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl debian-13.pkr.hcl
+      - echo "✓ Packer configuration is valid"
+
+  validate:debian-12:
+    desc: "Validate Debian 12 Packer configuration without building"
+    dir: "{{.PACKER_DIR}}/debian-12"
+    preconditions:
+      - sh: test -f debian-12.pkr.hcl
+        msg: "Packer template not found"
+      - sh: test -f ../variables.debian-12.pkvars.hcl
+        msg: "Variables file not found: {{.PACKER_DIR}}/variables.debian-12.pkvars.hcl"
+    cmds:
+      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.debian-12.pkvars.hcl debian-12.pkr.hcl
+      - echo "✓ Packer configuration is valid"
+
+  inspect:debian-13:
+    desc: "Inspect Debian 13 Packer template variables and sources"
+    dir: "{{.PACKER_DIR}}/debian-13"
+    preconditions:
+      - sh: test -f debian-13.pkr.hcl
+        msg: "Packer template not found"
+    cmds:
+      - packer inspect debian-13.pkr.hcl
+
+  inspect:debian-12:
+    desc: "Inspect Debian 12 Packer template variables and sources"
+    dir: "{{.PACKER_DIR}}/debian-12"
+    preconditions:
+      - sh: test -f debian-12.pkr.hcl
+        msg: "Packer template not found"
+    cmds:
+      - packer inspect debian-12.pkr.hcl

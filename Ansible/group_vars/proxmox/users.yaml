@@ -28,6 +28,8 @@ proxmox_users:
     realm: "pve"
     groups:
       - automation
+    roles:
+      - PackerProv
     acl_path: "/"
     generate_api_token: true
     api_token_name: "packer-automation"

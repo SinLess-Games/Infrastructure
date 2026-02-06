@@ -6,3 +6,4 @@ Ansible/.venv/
 Ansible/.collections/
 Ansible/group_vars/proxmox/vault-certs.yaml
 .vault-password
+**/build.log
