@@ -7,3 +7,8 @@ Ansible/.collections/
 Ansible/group_vars/proxmox/vault-certs.yaml
 .vault-password
 **/build.log
+Terraform/.terraform
+Terraform/terraform.tfstate
+.gitignore
+Terraform/.terraform.lock.hcl
+Terraform/terraform.tfstate.backup

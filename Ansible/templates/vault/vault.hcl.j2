@@ -4,7 +4,7 @@
 # =====================================================================
 
 ui = true
-disable_mlock = false
+disable_mlock = {{ vault_disable_mlock | default(true) | bool | lower }}
 cluster_name = "{{ vault_cluster_name | default('vault-cluster') }}"
 
 # ---------------------------------------------------------------------
@@ -21,6 +21,18 @@ storage "raft" {
     {% if join.leader_ca_cert is defined %}
     leader_ca_cert  = "{{ join.leader_ca_cert }}"
     {% endif %}
+    {% if join.leader_client_cert_file is defined %}
+    leader_client_cert_file = "{{ join.leader_client_cert_file }}"
+    {% endif %}
+    {% if join.leader_client_key_file is defined %}
+    leader_client_key_file = "{{ join.leader_client_key_file }}"
+    {% endif %}
+    {% if join.leader_tls_servername is defined %}
+    leader_tls_servername = "{{ join.leader_tls_servername }}"
+    {% endif %}
+    {% if join.leader_tls_skip_verify is defined %}
+    leader_tls_skip_verify = {{ join.leader_tls_skip_verify | bool | lower }}
+    {% endif %}
     {% if join.auto_join is defined %}
     auto_join        = "{{ join.auto_join }}"
     auto_join_scheme = "{{ join.auto_join_scheme | default('https') }}"
@@ -35,7 +47,7 @@ storage "raft" {
 # ---------------------------------------------------------------------
 listener "tcp" {
   address          = "{{ vault_listener_address | default('0.0.0.0:8200') }}"
-  tls_disable      = {{ vault_tls_disable | default('0') }}
+  tls_disable      = {{ vault_tls_disable | default(false) | bool | lower }}
 
   {% if not vault_tls_disable %}
   tls_cert_file    = "{{ vault_tls_cert_file }}"
@@ -98,26 +110,4 @@ plugin_directory = "{{ vault_plugin_directory | default('/opt/vault/plugins') }}
 # ---------------------------------------------------------------------
 # Audit Logging
 # ---------------------------------------------------------------------
-
-{% if vault_audit_file_enabled | default(true) %}
-audit {
-  type = "file"
-  path = "{{ vault_audit_file_path | default('/opt/vault/logs/audit.log') }}"
-  description = "Vault audit log (file backend)"
-  options = {
-    log_raw = "{{ vault_audit_log_raw | default(false) }}"
-    mode    = "{{ vault_audit_file_mode | default('0640') }}"
-  }
-}
-{% endif %}
-
-{% if vault_audit_syslog_enabled | default(false) %}
-audit {
-  type = "syslog"
-  path = "vault"
-  description = "Vault audit log (syslog backend)"
-  options = {
-    facility = "{{ vault_audit_syslog_facility | default('LOCAL6') }}"
-  }
-}
-{% endif %}
+# NOTE: Vault audit devices must be enabled via the API/CLI after startup.

@@ -1,0 +1,35 @@
+[Unit]
+Description=HashiCorp Vault
+Documentation=https://www.vaultproject.io/docs/
+Requires=network-online.target
+After=network-online.target
+ConditionFileNotEmpty={{ vault_home_dir }}/vault.hcl
+
+[Service]
+Type=notify
+ExecStart={{ vault_bin_dir }}/vault server -config={{ vault_home_dir }}/vault.hcl
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=process
+KillSignal=SIGINT
+Restart={{ vault_systemd_restart | default('always') }}
+RestartSec={{ vault_systemd_restart_sec | default(5) }}
+TimeoutStopSec=30
+LimitNOFILE={{ vault_systemd_file_limit | default(65536) }}
+LimitNPROC={{ vault_systemd_file_limit | default(65536) }}
+
+# User and group
+User={{ vault_user }}
+Group={{ vault_group }}
+
+# Environment variables
+Environment="VAULT_ADDR=https://127.0.0.1:8200"
+
+# Security hardening
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateDevices=yes
+
+[Install]
+WantedBy=multi-user.target

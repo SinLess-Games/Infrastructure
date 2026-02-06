@@ -1,0 +1,82 @@
+---
+# Unseal all Vault nodes
+# Ensures vault-01, vault-02, and vault-03 are all unsealed and ready to join cluster
+
+- name: "Unseal all Vault nodes"
+  block:
+    # Check sealed status on all nodes
+    - name: "Check if Vault is sealed on each node"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        {{ vault_bin_dir }}/vault status -format=json 2>/dev/null | jq -r '.sealed'
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: vault_sealed_status
+      changed_when: false
+      failed_when: false
+
+    # Read unseal keys from file on first node only
+    - name: "Read unseal keys from file"
+      slurp:
+        src: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
+      register: vault_keys_file
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: vault_initialize | bool
+
+    # Set unseal keys fact on all nodes
+    - name: "Set unseal keys fact for all nodes"
+      set_fact:
+        vault_unseal_keys: "{{ vault_keys_file.content | b64decode | from_json }}"
+      when: 
+        - vault_keys_file is defined
+        - vault_keys_file.content is defined
+
+    # Unseal all sealed nodes
+    - name: "Unseal Vault on sealed nodes"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        
+        {% for key in vault_unseal_keys.unseal_keys_b64[:vault_key_threshold] %}
+        {{ vault_bin_dir }}/vault operator unseal "{{ key }}" 2>&1
+        {% endfor %}
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: unseal_output
+      changed_when: '"Sealed" in unseal_output.stdout'
+      when: 
+        - vault_sealed_status.stdout == 'true'
+        - vault_unseal_keys is defined
+      no_log: true
+
+    # Wait for unsealing to complete
+    - name: "Wait for Vault to unseal"
+      pause:
+        seconds: 2
+      when: vault_sealed_status.stdout == 'true'
+
+    # Verify all nodes are now unsealed
+    - name: "Verify Vault is unsealed"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        {{ vault_bin_dir }}/vault status -format=json | jq -r '.sealed'
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: vault_sealed_check
+      retries: 3
+      delay: 5
+      until: vault_sealed_check.stdout == 'false'
+      changed_when: false
+
+    - name: "Display unseal status"
+      debug:
+        msg: "{{ inventory_hostname }}: Sealed={{ vault_sealed_check.stdout }}"
+
+  tags:
+    - "vault"
+    - "vault-unseal"
+

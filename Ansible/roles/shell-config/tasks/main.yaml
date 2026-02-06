@@ -30,7 +30,7 @@
       {{
         shell_config_users + [
           item | combine({
-            'home_directory': '/home/' ~ item.name
+            'home_directory': item.home_directory | default('/home/' ~ item.name)
           })
         ]
       }}

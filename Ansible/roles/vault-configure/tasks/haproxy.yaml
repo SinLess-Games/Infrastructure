@@ -1,0 +1,34 @@
+---
+# Setup HAProxy load balancing
+# Location: Ansible/roles/vault-configure/tasks/haproxy.yaml
+
+- name: "Setup HAProxy load balancing"
+  block:
+    - name: "Install HAProxy"
+      package:
+        name: "haproxy"
+        state: present
+      when: vault_haproxy_enabled | bool
+
+    - name: "Template HAProxy configuration"
+      template:
+        src: "{{ playbook_dir }}/../templates/vault/haproxy.cfg.j2"
+        dest: "/etc/haproxy/haproxy.cfg"
+        owner: "root"
+        group: "root"
+        mode: "0644"
+        backup: true
+      notify: "restart haproxy"
+      when: vault_haproxy_enabled | bool
+
+    - name: "Enable and start HAProxy"
+      systemd:
+        name: haproxy
+        state: started
+        enabled: true
+      when: vault_haproxy_enabled | bool
+
+  tags:
+    - "vault"
+    - "vault-ha"
+    - "vault-haproxy"

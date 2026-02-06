@@ -1,0 +1,22 @@
+---
+# Example development environment Vault configuration
+# Location: Environments/Development/group_vars/vault/main.yaml
+
+vault_version: "1.16.0"
+vault_initialize: true  # Initialize in dev
+vault_skip_verify: true  # Dev convenience
+
+# Single node setup for development
+vault_cluster_nodes:
+  - name: "vault-dev"
+    ip_address: "10.1.0.100"
+    api_addr: "https://10.1.0.100:8200"
+    raft_node_id: "vault-dev"
+
+vault_key_shares: 3
+vault_key_threshold: 2
+
+# HA disabled in dev
+vault_ha_enabled: false
+vault_keepalived_enabled: false
+vault_haproxy_enabled: false

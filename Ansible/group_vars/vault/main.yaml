@@ -1,0 +1,80 @@
+---
+# Vault Installation & Version
+vault_version: "1.16.0"
+vault_user: "vault"
+vault_group: "vault"
+vault_home: "/etc/vault"
+vault_data_dir: "/opt/vault/data"
+vault_log_dir: "/var/log/vault"
+vault_bin_path: "/usr/local/bin/vault"
+
+# Vault Cluster Configuration
+vault_cluster_name: "sinless-vault"
+vault_cluster_nodes: []  # Override in environment-specific files
+vault_enable_cluster: true
+
+# TLS/Certificate Configuration
+vault_tls_enabled: true
+vault_tls_cert_file: "/etc/vault/tls/vault.crt"
+vault_tls_key_file: "/etc/vault/tls/vault.key"
+vault_tls_ca_cert_file: "/etc/vault/tls/ca.crt"
+vault_tls_min_version: "tls12"
+
+# Raft Storage Configuration
+vault_raft_enabled: true
+vault_raft_retry_join_enabled: true
+vault_raft_autopilot_enabled: true
+vault_raft_retry_join:
+  - leader_api_addr: "https://10.10.10.2:8200"
+    leader_ca_cert: "/etc/vault/tls/ca.crt"
+    leader_client_cert_file: "/etc/vault/tls/vault.crt"
+    leader_client_key_file: "/etc/vault/tls/vault.key"
+    leader_tls_servername: "vault-01"
+  - leader_api_addr: "https://10.10.10.3:8200"
+    leader_ca_cert: "/etc/vault/tls/ca.crt"
+    leader_client_cert_file: "/etc/vault/tls/vault.crt"
+    leader_client_key_file: "/etc/vault/tls/vault.key"
+    leader_tls_servername: "vault-02"
+  - leader_api_addr: "https://10.10.10.4:8200"
+    leader_ca_cert: "/etc/vault/tls/ca.crt"
+    leader_client_cert_file: "/etc/vault/tls/vault.crt"
+    leader_client_key_file: "/etc/vault/tls/vault.key"
+    leader_tls_servername: "vault-03"
+
+# HAProxy & Keepalived (Load Balancing)
+vault_ha_enabled: true
+vault_keepalived_enabled: true
+vault_haproxy_enabled: true
+vault_keepalived_priority: 100  # Override per node
+vault_keepalived_virtual_ip: "10.10.10.180"  # Override in environment
+vault_keepalived_interface: "eth0"  # Override per environment
+
+# Vault API Listeners
+vault_api_addr_protocol: "https"
+vault_api_addr_port: 8200
+vault_cluster_addr_port: 8201
+
+# Vault Unseal Configuration
+vault_unseal_keys_output_dir: "{{ playbook_dir }}/../../.outputs/vault"
+vault_unseal_keys_file: "unseal-keys.json"
+vault_unseal_keys_backup: true
+vault_unseal_keys_backup_vault: true
+
+# Service Configuration
+vault_systemd_service_enabled: true
+vault_systemd_restart_policy: "always"
+vault_systemd_restart_sec: 5
+
+# Backup & High Availability
+vault_backup_raft_snapshots: true
+vault_backup_snapshots_dir: "/opt/vault/snapshots"
+vault_enable_audit_logging: true
+vault_audit_log_file: "{{ vault_log_dir }}/audit.log"
+
+# Default Vault Configuration Options
+vault_default_lease_duration: "168h"  # 7 days
+vault_max_lease_duration: "720h"      # 30 days
+vault_log_level: "info"
+
+# UI Configuration
+vault_ui_enabled: true

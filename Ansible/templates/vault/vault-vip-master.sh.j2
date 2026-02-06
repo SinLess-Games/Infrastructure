@@ -1,0 +1,8 @@
+#!/bin/bash
+# Notification script for becoming MASTER in Vault VRRP
+
+echo "[$(date)] - Vault node has become MASTER (VIP holder)" | logger -t vault-ha
+echo "[$(date)] - Vault node has become MASTER (VIP holder)" >> /var/log/vault/keepalived-notifications.log
+
+# Optional: Can trigger additional actions when becoming primary
+# For example, update DNS, send alerts, etc.

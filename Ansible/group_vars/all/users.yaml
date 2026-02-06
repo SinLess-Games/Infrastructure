@@ -24,6 +24,7 @@ users:
   - name: root
     comment: "Root user"
     shell: /bin/bash
+    home_directory: /root
     ssh_principals: [root, admin]
     sudo: true
     sudo_nopasswd: true

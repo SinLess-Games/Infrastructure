@@ -9,10 +9,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y cloud-init cloud-initramfs-gro
 
 echo "Configuring cloud-init..."
 cat > /etc/cloud/cloud.cfg.d/99-packer.cfg <<EOF
-datasource_list: [ NoCloud, ConfigDrive ]
-datasource:
-  NoCloud:
-    seedfrom: http://169.254.169.254
+datasource_list: [ ConfigDrive, NoCloud ]
 EOF
 
 echo "cloud-init installation complete."

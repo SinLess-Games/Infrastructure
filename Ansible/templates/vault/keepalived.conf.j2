@@ -1,0 +1,36 @@
+---
+# Keepalived configuration for Vault VIP
+global_defs {
+  router_id vault-ha
+  script_user vault
+  enable_script_security
+}
+
+vrrp_script check_vault {
+  script "/usr/local/bin/check-vault-health.sh"
+  interval 5
+  weight -10
+  fall 3
+  rise 2
+}
+
+vrrp_instance vault_vip {
+  state BACKUP
+  interface {{ vault_keepalived_interface }}
+  virtual_router_id 51
+  priority {{ vault_keepalived_priority }}
+  advert_int 1
+  authentication {
+    auth_type PASS
+    auth_pass {{ vault_keepalived_password | default('vault-ha-123') }}
+  }
+  virtual_ipaddress {
+    {{ vault_keepalived_virtual_ip }}/24
+  }
+  track_script {
+    check_vault
+  }
+  notify_master "/usr/local/bin/vault-vip-master.sh"
+  notify_backup "/usr/local/bin/vault-vip-backup.sh"
+  notify_fault "/usr/local/bin/vault-vip-fault.sh"
+}

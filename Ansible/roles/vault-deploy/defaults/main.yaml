@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# Vault Deploy Role - Defaults
+# =============================================================================
+
+# Repository root (derived from playbook location)
+vault_repo_root: "{{ playbook_dir | dirname | dirname }}"
+
+# Terraform directory within repository
+vault_terraform_dir: "{{ vault_repo_root }}/Terraform"

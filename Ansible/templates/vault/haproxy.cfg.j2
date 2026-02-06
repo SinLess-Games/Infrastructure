@@ -1,0 +1,49 @@
+---
+# HAProxy configuration for Vault load balancing
+global
+  log stdout local0
+  log stdout local1 notice
+  chroot /var/lib/haproxy
+  stats socket /run/haproxy/admin.sock mode 660 level admin
+  stats timeout 30s
+  user haproxy
+  group haproxy
+  daemon
+
+defaults
+  log     global
+  mode    tcp
+  option  tcplog
+  timeout connect 5000ms
+  timeout client  50000ms
+  timeout server  50000ms
+
+# Stats page (optional)
+listen stats
+  bind 0.0.0.0:8404
+  stats enable
+  stats uri /stats
+  stats refresh 30s
+  stats show-legends
+
+# Vault API load balancer (TLS passthrough)
+listen vault-api
+  bind 0.0.0.0:8200
+  mode tcp
+  balance roundrobin
+  option ssl-hello-chk
+  default-server inter 10s fall 3 rise 2
+{% for node in vault_cluster_nodes %}
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }} check ssl verify none
+{% endfor %}
+
+# Vault cluster communication (internal only - TLS passthrough)
+listen vault-cluster
+  bind 0.0.0.0:8201
+  mode tcp
+  balance roundrobin
+  option ssl-hello-chk
+  default-server inter 10s fall 3 rise 2
+{% for node in vault_cluster_nodes %}
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_cluster_addr_port }} check ssl verify none
+{% endfor %}

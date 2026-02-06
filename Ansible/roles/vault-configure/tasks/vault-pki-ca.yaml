@@ -1,0 +1,265 @@
+---
+# Generate CA and sign node certificates using Vault PKI
+# Location: Ansible/roles/vault-configure/tasks/vault-pki-ca.yaml
+
+- name: "Generate CA using Vault PKI on leader node"
+  block:
+    # Read root token if not already loaded
+    - name: "Read root token from file if needed"
+      slurp:
+        src: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
+      register: vault_root_token_file_check
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: vault_root_token_data is not defined
+
+    - name: "Set root token fact from file"
+      set_fact:
+        vault_root_token_data: "{{ vault_root_token_file_check.content | b64decode | from_json }}"
+      run_once: true
+      no_log: true
+      when: 
+        - vault_root_token_data is not defined
+        - vault_root_token_file_check.content is defined
+
+    # Enable PKI engine on the leader (vault-01)
+    - name: "Enable PKI engine"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        {{ vault_bin_dir }}/vault secrets enable pki 2>&1 || echo "PKI already enabled"
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: pki_enable
+      changed_when: "'already enabled' not in pki_enable.stderr"
+      failed_when: pki_enable.rc != 0 and 'already enabled' not in pki_enable.stderr
+      run_once: true
+      no_log: true
+      when: vault_root_token_data is defined
+
+    # Tune PKI engine for longer TTL
+    - name: "Tune PKI engine"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        {{ vault_bin_dir }}/vault secrets tune -max-lease-ttl=87600h pki 2>&1 || echo "Tune may have succeeded"
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: tune_result
+      run_once: true
+      no_log: true
+      changed_when: false
+      failed_when: tune_result.rc != 0 and 'may have succeeded' not in tune_result.stdout
+      when: vault_root_token_data is defined
+
+    # Generate root CA
+    - name: "Generate root CA certificate"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        {{ vault_bin_dir }}/vault write -format=json pki/issuers/generate/root/internal \
+          common_name="Vault Root CA" \
+          ttl=87600h \
+          organization="SinLess Games" \
+          country="US" 2>&1
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: ca_generation
+      run_once: true
+      changed_when: '"certificate" in ca_generation.stdout'
+      when: vault_root_token_data is defined
+
+    # Configure CA and CRL URLs
+    - name: "Configure CA URLs"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        {{ vault_bin_dir }}/vault write pki/config/urls \
+          issuing_certificates="https://10.1.0.50:8200/v1/pki/ca" \
+          crl_distribution_points="https://10.1.0.50:8200/v1/pki/crl"
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      run_once: true
+      no_log: true
+      changed_when: false
+      when: vault_root_token_data is defined
+
+    # Create role for node certificates
+    - name: "Create PKI role for Vault nodes"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        {{ vault_bin_dir }}/vault write pki/roles/vault-nodes \
+          allow_any_name=true \
+          allow_localhost=true \
+          allow_bare_domains=true \
+          allow_subdomains=true \
+          max_ttl=8760h \
+          ttl=8760h
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      run_once: true
+      no_log: true
+      changed_when: false
+      when: vault_root_token_data is defined
+
+    # Issue certificates for ALL nodes from leader
+    - name: "Issue certificates for each Vault node"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        {{ vault_bin_dir }}/vault write -format=json pki/issue/vault-nodes \
+          common_name="{{ item }}" \
+          alt_names="localhost,vault.local,{{ item }},{{ hostvars[item]['ansible_host'] | default(item) }}" \
+          ip_sans="127.0.0.1,{{ hostvars[item]['ansible_host'] | default(item) }}" \
+          ttl=8760h
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: node_certs_result
+      loop: "{{ groups['vault'] }}"
+      no_log: true
+      changed_when: true
+      when: vault_root_token_data is defined
+
+    # Store certificates for distribution
+    - name: "Set fact for node certificates"
+      set_fact:
+        vault_node_certificates: "{{ vault_node_certificates | default({}) | combine({ item.item: (item.stdout | from_json).data }) }}"
+      loop: "{{ node_certs_result.results }}"
+      no_log: true
+      when: 
+        - vault_root_token_data is defined
+        - not item.skipped | default(false)
+
+    # Save leader cert and key
+    - name: "Save signed certificate to leader node"
+      copy:
+        content: "{{ vault_node_certificates[inventory_hostname].certificate }}"
+        dest: "{{ vault_tls_cert_file }}"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: "0644"
+      notify: "Restart vault service"
+      when: vault_root_token_data is defined
+
+    # Save private key
+    - name: "Save private key to leader node"
+      copy:
+        content: "{{ vault_node_certificates[inventory_hostname].private_key }}"
+        dest: "{{ vault_tls_key_file }}"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: "0600"
+      notify: "Restart vault service"
+      when: vault_root_token_data is defined
+
+    # Extract and distribute CA cert bundle for all nodes
+    - name: "Create CA output directory"
+      file:
+        path: "{{ playbook_dir }}/../../.outputs/CA"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: vault_root_token_data is defined
+
+    - name: "Fetch CA certificate from Vault"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        {{ vault_bin_dir }}/vault read -field=certificate pki/cert/ca
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: ca_cert_data
+      run_once: true
+      changed_when: false
+      when: vault_root_token_data is defined
+
+    # Save CA cert to outputs directory
+    - name: "Save CA certificate to outputs"
+      copy:
+        content: "{{ ca_cert_data.stdout }}"
+        dest: "{{ playbook_dir }}/../../.outputs/CA/ca.crt"
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when: vault_root_token_data is defined
+
+    # Save CA cert to all nodes
+    - name: "Distribute CA certificate to all nodes"
+      copy:
+        content: "{{ hostvars[groups['vault'][0]]['ca_cert_data']['stdout'] }}"
+        dest: "/etc/vault/tls/ca.crt"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: "0644"
+      when: 
+        - vault_root_token_data is defined
+        - hostvars[groups['vault'][0]]['ca_cert_data'] is defined
+
+  when: 
+    - vault_initialize | bool
+    - inventory_hostname == groups['vault'][0]  # Run only on leader
+
+  tags:
+    - "vault"
+    - "vault-pki"
+    - "vault-ca"
+
+# Distribute CA to follower nodes
+- name: "Distribute CA and certificates to follower nodes"
+  block:
+    - name: "Copy CA certificate from leader"
+      copy:
+        content: "{{ hostvars[groups['vault'][0]]['ca_cert_data']['stdout'] }}"
+        dest: "/etc/vault/tls/ca.crt"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: "0644"
+      notify: "Restart vault service"
+
+    - name: "Copy signed certificate from leader"
+      copy:
+        content: "{{ hostvars[groups['vault'][0]]['vault_node_certificates'][inventory_hostname].certificate }}"
+        dest: "{{ vault_tls_cert_file }}"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: "0644"
+      notify: "Restart vault service"
+
+    - name: "Copy private key from leader"
+      copy:
+        content: "{{ hostvars[groups['vault'][0]]['vault_node_certificates'][inventory_hostname].private_key }}"
+        dest: "{{ vault_tls_key_file }}"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: "0600"
+      notify: "Restart vault service"
+      no_log: true
+
+  when:
+    - vault_initialize | bool
+    - inventory_hostname != groups['vault'][0]
+    - hostvars[groups['vault'][0]]['ca_cert_data'] is defined
+    - hostvars[groups['vault'][0]]['vault_node_certificates'] is defined
+  tags:
+    - "vault"
+    - "vault-pki"
+    - "vault-ca"

@@ -4,11 +4,11 @@
 #   export PKR_VAR_proxmox_api_token_secret="TOKEN_SECRET"
 
 # Proxmox API endpoint
-proxmox_endpoint = "https://10.10.10.14:8006/api2/json"
+proxmox_endpoint = "https://10.10.10.15:8006/api2/json"
 
 # Proxmox API token - split into ID and Secret for security
 proxmox_api_token_id = "packer-prov@pve!packer-automation"
-proxmox_api_token_secret = "bc13bd48-a6ae-4f27-9321-f468bcd50b4b"
+proxmox_api_token_secret = "a87e58b8-57db-4c66-8e29-30cafb058f99"
 
 # Default Proxmox node for builds
 proxmox_node = "pve-01"

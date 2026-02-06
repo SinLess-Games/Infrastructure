@@ -1,0 +1,93 @@
+---
+# Setup Raft cluster formation
+# Location: Ansible/roles/vault-configure/tasks/cluster.yaml
+
+- name: "Setup Raft cluster"
+  block:
+    - name: "Get Vault unseal data from first node"
+      block:
+        - name: "Check if root token file exists"
+          stat:
+            path: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
+          register: root_token_stat
+          delegate_to: localhost
+          become: false
+          run_once: true
+
+        - name: "Read root token from first node"
+          slurp:
+            src: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
+          register: vault_root_token_file
+          delegate_to: localhost
+          become: false
+          run_once: true
+          when: root_token_stat.stat.exists
+
+        - name: "Set root token fact"
+          set_fact:
+            vault_root_token_data: "{{ vault_root_token_file.content | b64decode | from_json }}"
+          run_once: true
+          no_log: true
+          when: root_token_stat.stat.exists
+
+      when: vault_initialize | bool
+
+    - name: "Check if node is already in Raft cluster"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        {{ vault_bin_dir }}/vault status -format=json | jq -r '.initialized'
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: vault_init_status
+      changed_when: false
+      failed_when: false
+
+    - name: "Check Raft membership"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        {{ vault_bin_dir }}/vault operator raft list-peers -format=json 2>&1
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: raft_member_check
+      changed_when: false
+      failed_when: false
+      when: vault_init_status.stdout == 'true'
+
+    - name: "Join Raft cluster on follower nodes"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        {{ vault_bin_dir }}/vault operator raft join \
+          -leader-ca-cert=/etc/vault/tls/vault.crt \
+          https://{{ hostvars[groups['vault'][0]]['ansible_host'] }}:8200
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      when:
+        - inventory_hostname != groups['vault'][0]
+        - vault_init_status.stdout == 'true'
+        - raft_member_check.rc != 0 or (raft_member_check.stdout is defined and ansible_host not in raft_member_check.stdout)
+      register: raft_join_result
+      changed_when: true
+      ignore_errors: true
+
+    - name: "Verify cluster formation"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        {{ vault_bin_dir }}/vault operator raft list-peers || echo "Vault not yet initialized"
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: raft_peers
+      changed_when: false
+      failed_when: false
+
+    - name: "Display Raft cluster members"
+      debug:
+        msg: "{{ raft_peers.stdout_lines }}"
+      when: raft_peers.stdout_lines is defined
+
+  tags:
+    - "vault"
+    - "vault-raft"

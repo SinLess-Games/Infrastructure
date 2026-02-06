@@ -1,0 +1,76 @@
+---
+# =============================================================================
+# Vault Deployment Playbook
+# =============================================================================
+# Purpose:
+#   - Deploy Vault VMs using Terraform module
+#   - Render Terraform configuration from group_vars/vault
+#   - Execute Terraform via Taskfile
+# =============================================================================
+
+- name: Deploy Vault cluster with Terraform
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  connection: local
+
+  vars_files:
+    - ../group_vars/vault/vault.yaml
+
+  roles:
+    - role: vault-deploy
+      tags: ["deploy"]
+
+- name: Configure Vault nodes
+  hosts: vault
+  gather_facts: true
+  become: true
+
+  vars_files:
+    - ../group_vars/vault/vault.yaml
+    - ../group_vars/all/packages.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/users.yaml
+
+  vars:
+    # Only install essential packages for Vault nodes
+    packages_enabled_groups:
+      - base
+      - cli
+      - net
+      - system
+
+  pre_tasks:
+    - name: Ensure DNS nameservers are configured
+      copy:
+        content: |
+          nameserver {{ vault_dns_primary | default('10.10.10.1') }}
+          nameserver {{ vault_dns_secondary | default('1.1.1.1') }}
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: '0644'
+      tags: ["dns"]
+
+    - name: Refresh APT cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+      register: apt_cache_result
+      retries: 3
+      delay: 5
+      until: apt_cache_result is succeeded
+      tags: ["packages"]
+
+  roles:
+    - role: packages
+      tags: ["packages"]
+
+    - role: shell-config
+      tags: ["shell"]
+  
+    - role: vault-configure
+      tags: ["configure"]
+
+
+

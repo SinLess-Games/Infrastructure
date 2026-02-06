@@ -10,7 +10,7 @@ apt_packages:
   # ──────────────────────────────────────────────────────────────────────────────
   base:
     - ca-certificates
-    - software-properties-common
+    # - software-properties-common  # Not available on Debian 13
     - apt-transport-https
     - gnupg
     - gnupg2
@@ -130,19 +130,19 @@ apt_packages:
     - lvm2
     - mdadm
     - hdparm
-    - nvme-cli
+    # - nvme-cli  # Not essential for Vault
     - cryptsetup
-    - exfatprogs
+    # - exfatprogs  # Not in Debian 13
     - ntfs-3g
-    - btrfs-progs
-    - zfsutils-linux     # (may require enabling zfs in repo)
+    # - btrfs-progs  # Not essential for Vault
+    # - zfsutils-linux  # Not in Debian 13 base repos
     - xfsprogs
     - nfs-common
     - cifs-utils
     # Power & sensors
-    - lm-sensors
-    - powertop
-    - tlp
+    # - lm-sensors  # Not essential for Vault
+    # - powertop  # Not essential for Vault
+    # - tlp  # Not essential for Vault
     # SSH / firewall / auth
     - openssh-server
     - sshpass

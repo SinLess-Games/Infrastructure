@@ -1,0 +1,5 @@
+#!/bin/bash
+# Notification script for FAULT state in Vault VRRP
+
+echo "[$(date)] - Vault node entered FAULT state" | logger -t vault-ha
+echo "[$(date)] - Vault node entered FAULT state" >> /var/log/vault/keepalived-notifications.log

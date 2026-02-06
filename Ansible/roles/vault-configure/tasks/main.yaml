@@ -1,0 +1,104 @@
+---
+# vault-configure role - Main task orchestrator
+# This file includes all sub-task files in the proper order
+
+- name: "Pre-configuration validation and setup"
+  include_tasks: pre-tasks.yaml
+  tags:
+    - "vault"
+    - "vault-configure"
+
+- name: "Configure system settings"
+  include_tasks: system-config.yaml
+  tags:
+    - "vault"
+    - "system"
+    - "configure"
+
+- name: "Setup Vault user and directories"
+  include_tasks: user-and-directories.yaml
+  tags:
+    - "vault"
+    - "vault-user"
+
+- name: "Install Vault binary"
+  include_tasks: install.yaml
+  tags:
+    - "vault"
+    - "vault-install"
+
+- name: "Configure TLS Certificates"
+  include_tasks: tls.yaml
+  tags:
+    - "vault"
+    - "vault-tls"
+    - "vault-certs"
+
+- name: "Build and distribute Vault CA bundle"
+  include_tasks: ca-bundle.yaml
+  tags:
+    - "vault"
+    - "vault-tls"
+    - "vault-ca-bundle"
+
+- name: "Configure Vault core settings"
+  include_tasks: configure.yaml
+  tags:
+    - "vault"
+    - "vault-configure"
+
+# HA/VIP first so clients have a stable address before starting Vault everywhere
+# (Also useful if your Vault config uses api_addr/cluster_addr pointing at the VIP/DNS)
+- name: "Setup Keepalived for Virtual IP"
+  include_tasks: keepalived.yaml
+  tags:
+    - "vault"
+    - "vault-ha"
+    - "vault-keepalived"
+
+- name: "Setup HAProxy load balancing"
+  include_tasks: haproxy.yaml
+  tags:
+    - "vault"
+    - "vault-ha"
+    - "vault-haproxy"
+
+- name: "Manage Vault systemd service"
+  include_tasks: service.yaml
+  tags:
+    - "vault"
+    - "vault-service"
+
+# Cluster membership should happen before init/unseal so you can form the raft peer set cleanly
+# and avoid initializing before peers are ready (unless your initialize.yaml is explicitly leader-only)
+- name: "Setup Raft cluster"
+  include_tasks: cluster.yaml
+  tags:
+    - "vault"
+    - "vault-raft"
+
+- name: "Initialize and unseal Vault"
+  include_tasks: initialize.yaml
+  tags:
+    - "vault"
+    - "vault-init"
+    - "vault-unseal"
+
+- name: "Unseal all follower nodes"
+  include_tasks: unseal-all.yaml
+  tags:
+    - "vault"
+    - "vault-unseal"
+
+- name: "Generate CA using Vault PKI"
+  include_tasks: vault-pki-ca.yaml
+  tags:
+    - "vault"
+    - "vault-pki"
+    - "vault-ca"
+
+- name: "Post-configuration summary"
+  include_tasks: post-tasks.yaml
+  tags:
+    - "vault"
+    - "always"

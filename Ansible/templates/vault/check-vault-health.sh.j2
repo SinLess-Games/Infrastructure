@@ -1,0 +1,14 @@
+#!/bin/bash
+# Health check script for Vault - used by Keepalived
+
+VAULT_ADDR="{{ vault_api_addr_protocol }}://127.0.0.1:{{ vault_api_addr_port }}"
+VAULT_SKIP_VERIFY="true"  # In production, use proper certificates
+
+# Check if Vault is responding to health endpoint
+STATUS=$(curl -sk --connect-timeout 2 "${VAULT_ADDR}/v1/sys/health" 2>/dev/null | jq -r '.initialized' 2>/dev/null)
+
+if [ "$STATUS" = "true" ]; then
+  exit 0  # Vault is healthy
+else
+  exit 1  # Vault is not healthy
+fi

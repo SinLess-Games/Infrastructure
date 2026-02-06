@@ -105,3 +105,13 @@ tasks:
           {{.ANSIBLE_DIR}}/playbooks/setup-proxmox-nodes.yaml \
           --tags permissions \
           --vault-password-file .vault-password {{.CLI_ARGS}}
+  
+  deploy-vault:
+    desc: "Deploy Vault cluster using Terraform via Ansible role"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-vault.yaml \
+          {{.CLI_ARGS}}

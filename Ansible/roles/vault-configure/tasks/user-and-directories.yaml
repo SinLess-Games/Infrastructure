@@ -1,0 +1,39 @@
+---
+# Create Vault user, group, and directories
+# Location: Ansible/roles/vault-configure/tasks/user-and-directories.yaml
+
+- name: "Setup Vault user and directories"
+  block:
+    - name: "Create Vault group"
+      group:
+        name: "{{ vault_group }}"
+        system: true
+        state: present
+
+    - name: "Create Vault user"
+      user:
+        name: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        home: "{{ vault_home_dir }}"
+        shell: "/usr/sbin/nologin"
+        system: true
+        state: present
+        createhome: true
+
+    - name: "Create Vault directories"
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: "0750"
+      loop:
+        - "{{ vault_home_dir }}"
+        - "{{ vault_home_dir }}/tls"
+        - "{{ vault_data_dir }}"
+        - "{{ vault_logs_dir }}"
+        - "{{ vault_plugin_directory }}"
+
+  tags:
+    - "vault"
+    - "vault-user"

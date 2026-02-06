@@ -1,0 +1,11 @@
+vault:
+  hosts:
+    vault-01:
+      ansible_host: "10.10.10.2"
+      ansible_user: "sinless777"
+    vault-02:
+      ansible_host: "10.10.10.3"
+      ansible_user: "sinless777"
+    vault-03:
+      ansible_host: "10.10.10.4"
+      ansible_user: "sinless777"

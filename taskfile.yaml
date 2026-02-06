@@ -8,6 +8,10 @@ includes:
   packer:
     taskfile: .taskfiles/Packer/Taskfile.yaml
     # optional: false  # fail if missing
+  terraform:
+    taskfile: .taskfiles/Terraform/Taskfile.yaml
+    aliases:
+      - tf
   pxe:
     taskfile: .taskfiles/PXE/Taskfile.yaml
     aliases:

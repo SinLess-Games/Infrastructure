@@ -1,0 +1,470 @@
+version: '3'
+
+vars:
+  TERRAFORM_DIR: "Terraform"
+  MODULES_DIR: "{{.TERRAFORM_DIR}}/modules"
+  VAULT_MODULE: "{{.MODULES_DIR}}/vault-cluster"
+  INFLUXDB_MODULE: "{{.MODULES_DIR}}/influxdb"
+  ENVIRONMENTS_DIR: "Environments"
+  TERRAFORM_LOG_FILE: "{{.TERRAFORM_DIR}}/terraform.log"
+
+tasks:
+
+  default:
+    desc: "Show available Terraform tasks"
+    cmds:
+      - task --list
+
+  # =============================================================================
+  # Terraform Initialization
+  # =============================================================================
+
+  init:
+    desc: "Initialize Terraform working directory (download providers, modules)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - echo "Initializing Terraform..."
+      - terraform init
+      - echo "✓ Terraform initialized"
+
+  init:upgrade:
+    desc: "Initialize Terraform and upgrade providers to latest versions"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - echo "Initializing Terraform with provider upgrades..."
+      - terraform init -upgrade
+      - echo "✓ Terraform initialized with upgraded providers"
+
+  # =============================================================================
+  # Validation and Formatting
+  # =============================================================================
+
+  fmt:
+    desc: "Format all Terraform files in the workspace"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - echo "Formatting Terraform files..."
+      - terraform fmt -recursive
+      - echo "✓ Terraform files formatted"
+
+  fmt:check:
+    desc: "Check if Terraform files are properly formatted"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform fmt -check -recursive
+
+  validate:
+    desc: "Validate Terraform configuration syntax"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - echo "Validating Terraform configuration..."
+      - terraform validate
+      - echo "✓ Terraform configuration is valid"
+
+  lint:
+    desc: "Run tflint on Terraform files (requires tflint installed)"
+    dir: "{{.TERRAFORM_DIR}}"
+    preconditions:
+      - sh: command -v tflint
+        msg: "tflint not found. Install: brew install tflint"
+    cmds:
+      - echo "Running tflint..."
+      - tflint --init
+      - tflint --recursive
+      - echo "✓ Linting complete"
+
+  # =============================================================================
+  # Planning and Deployment
+  # =============================================================================
+
+  plan:
+    desc: "Generate and show Terraform execution plan"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - echo "Generating Terraform plan..."
+      - terraform plan -out=tfplan {{.CLI_ARGS}}
+      - echo "✓ Plan saved to tfplan"
+
+  plan:destroy:
+    desc: "Generate plan for destroying all resources"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - echo "Generating destroy plan..."
+      - terraform plan -destroy -out=tfplan.destroy {{.CLI_ARGS}}
+      - echo "✓ Destroy plan saved to tfplan.destroy"
+
+  apply:
+    desc: "Apply Terraform changes (interactive, will prompt for confirmation)"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - echo "Applying Terraform configuration..."
+      - terraform apply {{.CLI_ARGS}}
+      - echo "✓ Terraform apply complete"
+
+  apply:auto:
+    desc: "Apply Terraform changes without confirmation (DANGEROUS - use with caution)"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - echo "Auto-applying Terraform configuration..."
+      - terraform apply -auto-approve {{.CLI_ARGS}}
+      - echo "✓ Terraform apply complete"
+
+  apply:plan:
+    desc: "Apply a saved Terraform plan"
+    dir: "{{.TERRAFORM_DIR}}"
+    preconditions:
+      - sh: test -f "{{.TERRAFORM_DIR}}/tfplan"
+        msg: "No saved plan found. Run 'task terraform:plan' first"
+    cmds:
+      - echo "Applying saved plan..."
+      - terraform apply tfplan
+      - echo "✓ Plan applied successfully"
+
+  destroy:
+    desc: "Destroy all Terraform-managed infrastructure (interactive)"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - echo "WARNING - This will destroy all infrastructure!"
+      - terraform destroy {{.CLI_ARGS}}
+
+  destroy:auto:
+    desc: "Destroy infrastructure without confirmation (EXTREMELY DANGEROUS)"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - echo "DANGER - Auto-destroying infrastructure without confirmation!"
+      - terraform destroy -auto-approve {{.CLI_ARGS}}
+
+  # =============================================================================
+  # State Management
+  # =============================================================================
+
+  state:list:
+    desc: "List all resources in Terraform state"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform state list
+
+  state:show:
+    desc: "Show details of a specific resource (usage: task terraform:state:show -- <resource>)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform state show {{.CLI_ARGS}}
+
+  state:pull:
+    desc: "Download and display the current Terraform state"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform state pull
+
+  state:refresh:
+    desc: "Refresh Terraform state to match real-world resources"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - echo "Refreshing Terraform state..."
+      - terraform refresh {{.CLI_ARGS}}
+      - echo "✓ State refreshed"
+
+  state:mv:
+    desc: "Move a resource in state (usage: task terraform:state:mv -- <source> <destination>)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform state mv {{.CLI_ARGS}}
+
+  state:rm:
+    desc: "Remove a resource from state (usage: task terraform:state:rm -- <resource>)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform state rm {{.CLI_ARGS}}
+
+  # =============================================================================
+  # Output and Inspection
+  # =============================================================================
+
+  output:
+    desc: "Show all Terraform outputs"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform output {{.CLI_ARGS}}
+
+  output:json:
+    desc: "Show outputs in JSON format"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform output -json
+
+  show:
+    desc: "Show the current state or saved plan in human-readable format"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform show {{.CLI_ARGS}}
+
+  show:json:
+    desc: "Show state or plan in JSON format"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform show -json {{.CLI_ARGS}}
+
+  graph:
+    desc: "Generate visual dependency graph (requires graphviz)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform graph | dot -Tsvg > graph.svg
+      - echo "✓ Graph saved to {{.TERRAFORM_DIR}}/graph.svg"
+
+  # =============================================================================
+  # Module-Specific Tasks - Vault Cluster
+  # =============================================================================
+
+  vault:validate:
+    desc: "Validate vault-cluster module configuration"
+    dir: "{{.VAULT_MODULE}}"
+    cmds:
+      - echo "Validating vault-cluster module..."
+      - terraform init
+      - terraform validate
+      - echo "✓ Module validation successful"
+
+  vault:fmt:
+    desc: "Format vault-cluster module files"
+    dir: "{{.VAULT_MODULE}}"
+    cmds:
+      - terraform fmt -recursive
+      - echo "✓ Module formatted"
+
+  vault:docs:
+    desc: "Generate/update documentation for vault-cluster module (requires terraform-docs)"
+    dir: "{{.VAULT_MODULE}}"
+    preconditions:
+      - sh: command -v terraform-docs
+        msg: "terraform-docs not found. Install: brew install terraform-docs"
+    cmds:
+      - echo "Generating module documentation..."
+      - terraform-docs markdown table --output-file README.md .
+      - echo "✓ Documentation updated in {{.VAULT_MODULE}}/README.md"
+
+  # =============================================================================
+  # Module-Specific Tasks - InfluxDB
+  # =============================================================================
+
+  influxdb:validate:
+    desc: "Validate influxdb module configuration"
+    dir: "{{.INFLUXDB_MODULE}}"
+    cmds:
+      - echo "Validating influxdb module..."
+      - terraform init
+      - terraform validate
+      - echo "✓ Module validation successful"
+
+  influxdb:fmt:
+    desc: "Format influxdb module files"
+    dir: "{{.INFLUXDB_MODULE}}"
+    cmds:
+      - terraform fmt -recursive
+      - echo "✓ Module formatted"
+
+  # =============================================================================
+  # Multi-Module Operations
+  # =============================================================================
+
+  modules:validate:
+    desc: "Validate all modules"
+    cmds:
+      - task: vault:validate
+      - task: influxdb:validate
+      - echo "✓ All modules validated successfully"
+
+  modules:fmt:
+    desc: "Format all module files"
+    cmds:
+      - task: vault:fmt
+      - task: influxdb:fmt
+      - echo "✓ All modules formatted"
+
+  # =============================================================================
+  # Workspace Management
+  # =============================================================================
+
+  workspace:list:
+    desc: "List all Terraform workspaces"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform workspace list
+
+  workspace:new:
+    desc: "Create a new workspace (usage: task terraform:workspace:new -- <name>)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform workspace new {{.CLI_ARGS}}
+
+  workspace:select:
+    desc: "Select a workspace (usage: task terraform:workspace:select -- <name>)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform workspace select {{.CLI_ARGS}}
+
+  workspace:show:
+    desc: "Show current workspace"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform workspace show
+
+  workspace:delete:
+    desc: "Delete a workspace (usage: task terraform:workspace:delete -- <name>)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform workspace delete {{.CLI_ARGS}}
+
+  # =============================================================================
+  # Import and Migration
+  # =============================================================================
+
+  import:
+    desc: "Import existing infrastructure (usage: task terraform:import -- <resource> <id>)"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - terraform import {{.CLI_ARGS}}
+
+  # =============================================================================
+  # Debugging and Troubleshooting
+  # =============================================================================
+
+  console:
+    desc: "Open interactive Terraform console for expression evaluation"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - terraform console
+
+  providers:
+    desc: "Show provider requirements and versions"
+    dir: "{{.TERRAFORM_DIR}}"
+    deps: [init]
+    cmds:
+      - terraform providers
+
+  providers:lock:
+    desc: "Update provider lock file for all platforms"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform providers lock -platform=linux_amd64 -platform=darwin_amd64 -platform=darwin_arm64
+
+  version:
+    desc: "Show Terraform version and provider versions"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - terraform version
+
+  # =============================================================================
+  # Cleanup
+  # =============================================================================
+
+  clean:
+    desc: "Remove Terraform generated files (.terraform, tfplan, etc.)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - echo "Cleaning Terraform artifacts..."
+      - rm -rf .terraform
+      - rm -f .terraform.lock.hcl
+      - rm -f tfplan tfplan.destroy
+      - rm -f terraform.tfstate terraform.tfstate.backup
+      - rm -f graph.svg
+      - rm -f "{{.TERRAFORM_LOG_FILE}}"
+      - echo "✓ Terraform directory cleaned"
+
+  clean:modules:
+    desc: "Clean all module directories"
+    cmds:
+      - echo "Cleaning module artifacts..."
+      - find {{.MODULES_DIR}} -type d -name ".terraform" -exec rm -rf {} + 2>/dev/null || true
+      - find {{.MODULES_DIR}} -name ".terraform.lock.hcl" -delete 2>/dev/null || true
+      - echo "✓ Module directories cleaned"
+
+  # =============================================================================
+  # Testing and CI/CD
+  # =============================================================================
+
+  test:
+    desc: "Run full validation suite (fmt, validate, lint)"
+    cmds:
+      - task: fmt:check
+      - task: validate
+      - task: modules:validate
+      - echo "✓ All tests passed"
+
+  ci:validate:
+    desc: "CI-friendly validation (no interactive prompts)"
+    cmds:
+      - task: init
+      - task: fmt:check
+      - task: validate
+      - task: modules:validate
+      - echo "✓ CI validation complete"
+
+  # =============================================================================
+  # Documentation
+  # =============================================================================
+
+  docs:
+    desc: "Show Terraform module documentation help"
+    cmds:
+      - echo "Terraform Module Documentation"
+      - echo "=============================="
+      - echo ""
+      - echo "Vault Cluster Module"
+      - echo "  Location {{.VAULT_MODULE}}"
+      - echo "  Docs {{.VAULT_MODULE}}/README.md"
+      - echo "  Examples {{.VAULT_MODULE}}/examples/"
+      - echo ""
+      - echo "InfluxDB Module"
+      - echo "  Location {{.INFLUXDB_MODULE}}"
+      - echo ""
+      - echo "To generate module docs run task terraform:vault:docs"
+
+  # =============================================================================
+  # Security Scanning
+  # =============================================================================
+
+  security:scan:
+    desc: "Scan Terraform code for security issues (requires tfsec)"
+    dir: "{{.TERRAFORM_DIR}}"
+    preconditions:
+      - sh: command -v tfsec
+        msg: "tfsec not found. Install: brew install tfsec"
+    cmds:
+      - echo "Running security scan..."
+      - tfsec . --format=default
+      - echo "✓ Security scan complete"
+
+  security:scan:json:
+    desc: "Security scan with JSON output"
+    dir: "{{.TERRAFORM_DIR}}"
+    preconditions:
+      - sh: command -v tfsec
+        msg: "tfsec not found"
+    cmds:
+      - tfsec . --format=json --out=security-scan.json
+      - echo "✓ Results saved to {{.TERRAFORM_DIR}}/security-scan.json"
+
+  # =============================================================================
+  # Cost Estimation
+  # =============================================================================
+
+  cost:estimate:
+    desc: "Estimate infrastructure costs (requires infracost)"
+    dir: "{{.TERRAFORM_DIR}}"
+    preconditions:
+      - sh: command -v infracost
+        msg: "infracost not found. Install: brew install infracost"
+    deps: [init]
+    cmds:
+      - echo "Generating cost estimate..."
+      - infracost breakdown --path .
+      - echo "✓ Cost estimate complete"

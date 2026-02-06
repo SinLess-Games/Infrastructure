@@ -1,0 +1,5 @@
+#!/bin/bash
+# Notification script for becoming BACKUP in Vault VRRP
+
+echo "[$(date)] - Vault node has become BACKUP" | logger -t vault-ha
+echo "[$(date)] - Vault node has become BACKUP" >> /var/log/vault/keepalived-notifications.log

@@ -1,0 +1,21 @@
+---
+# Post-configuration summary
+# Location: Ansible/roles/vault-configure/tasks/post-tasks.yaml
+
+- name: "Display completion message"
+  debug:
+    msg: |
+      Vault configuration complete!
+      
+      Vault API Address: https://{{ ansible_host | default(inventory_hostname) }}:8200
+      {% if vault_keepalived_enabled %}
+      Virtual IP (VIP): {{ vault_keepalived_virtual_ip }}:8200
+      {% endif %}
+      
+      Unseal Keys Location: {{ vault_unseal_keys_output_dir }}
+      Root Token Location: {{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}
+      
+      Tags: vault-install, vault-configure, vault-tls, vault-ha, vault-raft, vault-unseal
+  tags:
+    - "vault"
+    - "always"

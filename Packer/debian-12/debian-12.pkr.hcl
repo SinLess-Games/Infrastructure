@@ -110,6 +110,10 @@ source "proxmox-iso" "debian12" {
     format            = "raw"
   }
 
+  # Cloud-init drive
+  cloud_init              = true
+  cloud_init_storage_pool = var.proxmox_vm_storage
+
   # Network configuration
   network_adapters {
     model  = "virtio"

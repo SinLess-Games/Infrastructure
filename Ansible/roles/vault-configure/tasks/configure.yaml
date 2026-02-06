@@ -1,0 +1,28 @@
+---
+# Configure Vault core settings
+# Location: Ansible/roles/vault-configure/tasks/configure.yaml
+
+- name: "Configure Vault"
+  block:
+    - name: "Template Vault configuration"
+      template:
+        src: "{{ playbook_dir }}/../templates/vault/vault.hcl.j2"
+        dest: "{{ vault_home_dir }}/vault.hcl"
+        owner: "{{ vault_user }}"
+        group: "{{ vault_group }}"
+        mode: "0600"
+        backup: true
+      notify: "restart vault"
+
+    - name: "Create Vault systemd service"
+      template:
+        src: "{{ playbook_dir }}/../templates/vault/vault.service.j2"
+        dest: "/etc/systemd/system/vault.service"
+        owner: "root"
+        group: "root"
+        mode: "0644"
+      notify: "reload vault systemd"
+
+  tags:
+    - "vault"
+    - "vault-configure"

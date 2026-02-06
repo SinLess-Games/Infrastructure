@@ -1,0 +1,38 @@
+---
+vault_prod:
+  hosts:
+    vault-01:
+      ansible_host: 10.10.10.2
+      ansible_user: ansible
+      vault_node_id: vault-01
+      vault_node_index: 1
+      vault_cluster_name: vault-cluster
+      vault_api_addr: "https://10.10.10.2:8200"
+      vault_cluster_addr: "https://10.10.10.2:8201"
+      vault_raft_leader: true
+    vault-02:
+      ansible_host: 10.10.10.3
+      ansible_user: ansible
+      vault_node_id: vault-02
+      vault_node_index: 2
+      vault_cluster_name: vault-cluster
+      vault_api_addr: "https://10.10.10.3:8200"
+      vault_cluster_addr: "https://10.10.10.3:8201"
+      vault_raft_leader: false
+    vault-03:
+      ansible_host: 10.10.10.4
+      ansible_user: ansible
+      vault_node_id: vault-03
+      vault_node_index: 3
+      vault_cluster_name: vault-cluster
+      vault_api_addr: "https://10.10.10.4:8200"
+      vault_cluster_addr: "https://10.10.10.4:8201"
+      vault_raft_leader: false
+  vars:
+    vault_version: "1.15.4"
+    vault_port: 8200
+    vault_cluster_port: 8201
+    vault_storage_path: "/opt/vault/data"
+    vault_log_path: "/opt/vault/logs"
+    vault_tls_enabled: true
+    vault_environment: "prod"
