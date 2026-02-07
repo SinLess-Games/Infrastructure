@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# Vault Setup Role - Defaults
+# =============================================================================
+
+# Repository root (derived from playbook location)
+vault_repo_root: "{{ playbook_dir | dirname | dirname }}"
+
+# Terraform directory for Vault secrets backends
+vault_setup_terraform_dir: "{{ vault_repo_root }}/Terraform/modules/vault-secrets"
+
+# Enable/disable Vault setup
+vault_setup_enabled: true
+
+# Vault address for Terraform provider
+vault_setup_vault_addr: >-
+  https://{{ vault_keepalived_virtual_ip | default(hostvars[groups['vault'][0]].ansible_host) }}:8200
+
+# Root token file (produced during vault initialization)
+vault_setup_token_file: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
+
+# TLS verification options for Terraform provider
+vault_setup_skip_tls_verify: true
+vault_setup_ca_cert_file: ""
+
+# Optional overrides for secrets engines
+vault_setup_kv_mounts: {}
+vault_setup_engine_mounts: {}

@@ -34,6 +34,10 @@ export GPG_TTY="$(/usr/bin/tty 2>/dev/null || true)"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export HOMEBREW_NO_ENV_HINTS=1
 
+# -------- Vault Configuration ----------------------------------------
+export VAULT_ADDR="${VAULT_ADDR:-https://10.10.10.180:8200}"
+export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"
+
 # -------- Language & tooling homes (no managers executed here) --------
 export GOPATH="${GOPATH:-$HOME/go}"
 [[ -d "$GOPATH" ]] || mkdir -p "$GOPATH"

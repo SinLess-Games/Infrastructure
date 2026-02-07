@@ -4,6 +4,7 @@ vars:
   TERRAFORM_DIR: "Terraform"
   MODULES_DIR: "{{.TERRAFORM_DIR}}/modules"
   VAULT_MODULE: "{{.MODULES_DIR}}/vault-cluster"
+  VAULT_SECRETS_MODULE: "{{.MODULES_DIR}}/vault-secrets"
   INFLUXDB_MODULE: "{{.MODULES_DIR}}/influxdb"
   ENVIRONMENTS_DIR: "Environments"
   TERRAFORM_LOG_FILE: "{{.TERRAFORM_DIR}}/terraform.log"
@@ -248,6 +249,43 @@ tasks:
       - echo "Generating module documentation..."
       - terraform-docs markdown table --output-file README.md .
       - echo "✓ Documentation updated in {{.VAULT_MODULE}}/README.md"
+
+  # =============================================================================
+  # Module-Specific Tasks - Vault Secrets Backends
+  # =============================================================================
+
+  vault-secrets:init:
+    desc: "Initialize Terraform for Vault secrets backends"
+    dir: "{{.VAULT_SECRETS_MODULE}}"
+    cmds:
+      - echo "Initializing Vault secrets Terraform..."
+      - terraform init
+      - echo "✓ Vault secrets Terraform initialized"
+
+  vault-secrets:validate:
+    desc: "Validate Vault secrets Terraform configuration"
+    dir: "{{.VAULT_SECRETS_MODULE}}"
+    deps: [vault-secrets:init]
+    cmds:
+      - echo "Validating Vault secrets Terraform..."
+      - terraform validate
+      - echo "✓ Vault secrets Terraform validated"
+
+  vault-secrets:fmt:
+    desc: "Format Vault secrets Terraform files"
+    dir: "{{.VAULT_SECRETS_MODULE}}"
+    cmds:
+      - terraform fmt -recursive
+      - echo "✓ Vault secrets Terraform formatted"
+
+  vault-secrets:apply:auto:
+    desc: "Apply Vault secrets Terraform changes without confirmation"
+    dir: "{{.VAULT_SECRETS_MODULE}}"
+    deps: [vault-secrets:init]
+    cmds:
+      - echo "Applying Vault secrets Terraform..."
+      - terraform apply -auto-approve
+      - echo "✓ Vault secrets Terraform applied"
 
   # =============================================================================
   # Module-Specific Tasks - InfluxDB

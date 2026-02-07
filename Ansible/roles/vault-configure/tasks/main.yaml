@@ -97,6 +97,18 @@
     - "vault-pki"
     - "vault-ca"
 
+- name: "Flush handlers before final unseal"
+  meta: flush_handlers
+  tags:
+    - "vault"
+    - "vault-unseal"
+
+- name: "Ensure Vault is unsealed after configuration"
+  include_tasks: unseal-all.yaml
+  tags:
+    - "vault"
+    - "vault-unseal"
+
 - name: "Post-configuration summary"
   include_tasks: post-tasks.yaml
   tags:

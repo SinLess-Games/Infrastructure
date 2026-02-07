@@ -2,6 +2,39 @@
 # Generate CA and sign node certificates using Vault PKI
 # Location: Ansible/roles/vault-configure/tasks/vault-pki-ca.yaml
 
+- name: "Determine active Vault node"
+  block:
+    - name: "Probe Vault health on each node"
+      ansible.builtin.uri:
+        url: "https://{{ hostvars[item].ansible_host | default(item) }}:8200/v1/sys/health"
+        method: GET
+        validate_certs: false
+        status_code: [200, 429, 472, 473, 501, 503]
+        return_content: true
+      register: vault_health_checks
+      loop: "{{ groups['vault'] }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      failed_when: false
+
+    - name: "Set active node fact (prefer non-standby)"
+      ansible.builtin.set_fact:
+        vault_active_node: >-
+          {{ (vault_health_checks.results
+              | selectattr('json', 'defined')
+              | selectattr('json.initialized', 'equalto', true)
+              | selectattr('json.sealed', 'equalto', false)
+              | selectattr('json.standby', 'equalto', false)
+              | map(attribute='item')
+              | list
+              | first) | default(groups['vault'][0]) }}
+      delegate_to: localhost
+      delegate_facts: true
+      become: false
+      run_once: true
+  when: vault_initialize | bool
+
 - name: "Generate CA using Vault PKI on leader node"
   block:
     # Read root token if not already loaded
@@ -17,11 +50,22 @@
     - name: "Set root token fact from file"
       set_fact:
         vault_root_token_data: "{{ vault_root_token_file_check.content | b64decode | from_json }}"
+      delegate_to: localhost
+      delegate_facts: true
       run_once: true
       no_log: true
       when: 
         - vault_root_token_data is not defined
         - vault_root_token_file_check.content is defined
+
+    - name: "Copy root token fact to active node"
+      set_fact:
+        vault_root_token_data: "{{ hostvars['localhost'].vault_root_token_data }}"
+      run_once: true
+      no_log: true
+      when:
+        - vault_root_token_data is not defined
+        - hostvars['localhost'].vault_root_token_data is defined
 
     # Enable PKI engine on the leader (vault-01)
     - name: "Enable PKI engine"
@@ -55,6 +99,12 @@
       no_log: true
       changed_when: false
       failed_when: tune_result.rc != 0 and 'may have succeeded' not in tune_result.stdout
+      when: vault_root_token_data is defined
+
+    # Wait for leadership to stabilize after PKI mount
+    - name: "Wait for leadership stability"
+      pause:
+        seconds: 5
       when: vault_root_token_data is defined
 
     # Generate root CA
@@ -191,32 +241,62 @@
       changed_when: false
       when: vault_root_token_data is defined
 
+    - name: "Store CA certificate for distribution"
+      set_fact:
+        vault_ca_cert: "{{ ca_cert_data.stdout }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      when:
+        - vault_root_token_data is defined
+        - ca_cert_data is defined
+        - ca_cert_data.stdout is defined
+        - (ca_cert_data.stdout | length) > 0
+
     # Save CA cert to outputs directory
     - name: "Save CA certificate to outputs"
       copy:
-        content: "{{ ca_cert_data.stdout }}"
+        content: "{{ hostvars['localhost'].vault_ca_cert }}"
         dest: "{{ playbook_dir }}/../../.outputs/CA/ca.crt"
         mode: "0644"
       delegate_to: localhost
       become: false
       run_once: true
-      when: vault_root_token_data is defined
+      when:
+        - vault_root_token_data is defined
+        - hostvars['localhost'].vault_ca_cert is defined
 
     # Save CA cert to all nodes
+    - name: "Ensure CA certificate is available"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        {{ vault_bin_dir }}/vault read -field=certificate pki/cert/ca
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: ca_cert_data
+      run_once: true
+      changed_when: false
+      when:
+        - vault_root_token_data is defined
+        - ca_cert_data is not defined or ca_cert_data.stdout is not defined or (ca_cert_data.stdout | length == 0)
+
     - name: "Distribute CA certificate to all nodes"
       copy:
-        content: "{{ hostvars[groups['vault'][0]]['ca_cert_data']['stdout'] }}"
+        content: "{{ hostvars['localhost'].vault_ca_cert }}"
         dest: "/etc/vault/tls/ca.crt"
         owner: "{{ vault_user }}"
         group: "{{ vault_group }}"
         mode: "0644"
       when: 
         - vault_root_token_data is defined
-        - hostvars[groups['vault'][0]]['ca_cert_data'] is defined
+        - hostvars['localhost'].vault_ca_cert is defined
 
   when: 
     - vault_initialize | bool
-    - inventory_hostname == groups['vault'][0]  # Run only on leader
+    - inventory_hostname == (hostvars['localhost'].vault_active_node | default(groups['vault'][0]))  # Run only on active node
 
   tags:
     - "vault"
@@ -228,7 +308,7 @@
   block:
     - name: "Copy CA certificate from leader"
       copy:
-        content: "{{ hostvars[groups['vault'][0]]['ca_cert_data']['stdout'] }}"
+        content: "{{ hostvars['localhost'].vault_ca_cert }}"
         dest: "/etc/vault/tls/ca.crt"
         owner: "{{ vault_user }}"
         group: "{{ vault_group }}"
@@ -237,7 +317,7 @@
 
     - name: "Copy signed certificate from leader"
       copy:
-        content: "{{ hostvars[groups['vault'][0]]['vault_node_certificates'][inventory_hostname].certificate }}"
+        content: "{{ hostvars[hostvars['localhost'].vault_active_node | default(groups['vault'][0])]['vault_node_certificates'][inventory_hostname].certificate }}"
         dest: "{{ vault_tls_cert_file }}"
         owner: "{{ vault_user }}"
         group: "{{ vault_group }}"
@@ -246,7 +326,7 @@
 
     - name: "Copy private key from leader"
       copy:
-        content: "{{ hostvars[groups['vault'][0]]['vault_node_certificates'][inventory_hostname].private_key }}"
+        content: "{{ hostvars[hostvars['localhost'].vault_active_node | default(groups['vault'][0])]['vault_node_certificates'][inventory_hostname].private_key }}"
         dest: "{{ vault_tls_key_file }}"
         owner: "{{ vault_user }}"
         group: "{{ vault_group }}"
@@ -256,9 +336,9 @@
 
   when:
     - vault_initialize | bool
-    - inventory_hostname != groups['vault'][0]
-    - hostvars[groups['vault'][0]]['ca_cert_data'] is defined
-    - hostvars[groups['vault'][0]]['vault_node_certificates'] is defined
+    - inventory_hostname != (hostvars['localhost'].vault_active_node | default(groups['vault'][0]))
+    - hostvars['localhost'].vault_ca_cert is defined
+    - hostvars[hostvars['localhost'].vault_active_node | default(groups['vault'][0])]['vault_node_certificates'] is defined
   tags:
     - "vault"
     - "vault-pki"

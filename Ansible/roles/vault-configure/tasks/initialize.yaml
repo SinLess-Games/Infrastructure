@@ -67,21 +67,6 @@
               become: false
               run_once: true
 
-            - name: "Save root token securely"
-              copy:
-                content: |
-                  {
-                    "root_token": "{{ vault_unseal_data.root_token }}",
-                    "unseal_keys_b64": {{ vault_unseal_data.unseal_keys_b64 | to_json }},
-                    "unseal_keys_hex": {{ vault_unseal_data.unseal_keys_hex | to_json }}
-                  }
-                dest: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
-                mode: "0600"
-              delegate_to: localhost
-              become: false
-              run_once: true
-              no_log: true
-
             - name: "Display unseal key information"
               debug:
                 msg: |

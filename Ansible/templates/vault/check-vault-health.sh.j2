@@ -4,11 +4,14 @@
 VAULT_ADDR="{{ vault_api_addr_protocol }}://127.0.0.1:{{ vault_api_addr_port }}"
 VAULT_SKIP_VERIFY="true"  # In production, use proper certificates
 
-# Check if Vault is responding to health endpoint
-STATUS=$(curl -sk --connect-timeout 2 "${VAULT_ADDR}/v1/sys/health" 2>/dev/null | jq -r '.initialized' 2>/dev/null)
+# Check if Vault is active (initialized, unsealed, and not standby)
+HEALTH_JSON=$(curl -sk --connect-timeout 2 "${VAULT_ADDR}/v1/sys/health" 2>/dev/null)
+INITIALIZED=$(echo "${HEALTH_JSON}" | jq -r '.initialized' 2>/dev/null)
+SEALED=$(echo "${HEALTH_JSON}" | jq -r '.sealed' 2>/dev/null)
+STANDBY=$(echo "${HEALTH_JSON}" | jq -r '.standby' 2>/dev/null)
 
-if [ "$STATUS" = "true" ]; then
-  exit 0  # Vault is healthy
+if [ "${INITIALIZED}" = "true" ] && [ "${SEALED}" = "false" ] && [ "${STANDBY}" = "false" ]; then
+  exit 0  # Vault is active
 else
-  exit 1  # Vault is not healthy
+  exit 1  # Vault is not active
 fi

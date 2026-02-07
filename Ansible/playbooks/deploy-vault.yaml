@@ -71,6 +71,9 @@
   
     - role: vault-configure
       tags: ["configure"]
+    
+    - role: vault-setup
+      tags: ["setup"]
 
 
 
