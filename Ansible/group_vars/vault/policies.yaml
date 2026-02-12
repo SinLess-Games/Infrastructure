@@ -1,0 +1,184 @@
+# Vault user policies definition
+vault_user_policies:
+  # Ansible policy - can read/write to ansible secrets engine
+  ansible: |
+    # Read and write to ansible secrets engine (KV v2)
+    path "ansible/data/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "ansible/metadata/*" {
+      capabilities = ["read", "list"]
+    }
+    
+    # Read auth methods
+    path "sys/auth" {
+      capabilities = ["read", "list"]
+    }
+
+  # Terraform policy - can read/write to terraform secrets engine
+  terraform: |
+    # Read and write to terraform secrets engine
+    path "terraform/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    # Read and write terraform variables (KV v2)
+    path "terraform-vars/data/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "terraform-vars/metadata/*" {
+      capabilities = ["read", "list"]
+    }
+    
+    # Read AWS secrets engine for Terraform
+    path "aws/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    # Read GCP secrets engine for Terraform
+    path "gcp/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    # Read Azure secrets engine for Terraform
+    path "azure/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    # Read Linode secrets engine for Terraform
+    path "linode/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    # Read Cloudflare KV secrets (KV v2)
+    path "cloudflare/data/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "cloudflare/metadata/*" {
+      capabilities = ["read", "list"]
+    }
+    
+    # Read auth methods
+    path "sys/auth" {
+      capabilities = ["read", "list"]
+    }
+
+  # Admin policy - full access (already exists in Vault)
+  admin: |
+    # Admin access to everything
+    path "*" {
+      capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+    }
+
+  # Helix frontend policy
+  helix-frontend: |
+    path "helix/data/frontend/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "helix/metadata/frontend/*" {
+      capabilities = ["read", "list"]
+    }
+
+  # Helix auth service policy
+  helix-auth: |
+    path "helix/data/auth/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "helix/metadata/auth/*" {
+      capabilities = ["read", "list"]
+    }
+
+  # Helix third-party policy
+  helix-third-party: |
+    path "helix/data/third-party/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "helix/metadata/third-party/*" {
+      capabilities = ["read", "list"]
+    }
+
+  # SinLess Games application policy
+  sinlessgames-app: |
+    path "sinlessgames/data/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "sinlessgames/metadata/*" {
+      capabilities = ["read", "list"]
+    }
+
+  # Kubernetes dev secrets engine policy
+  kubernetes-dev: |
+    path "kubernetes-dev/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+  # Kubernetes test secrets engine policy
+  kubernetes-test: |
+    path "kubernetes-test/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+  # Kubernetes prod secrets engine policy
+  kubernetes-prod: |
+    path "kubernetes-prod/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+  # Cloudflare secrets policy
+  cloudflare: |
+    path "cloudflare/data/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "cloudflare/metadata/*" {
+      capabilities = ["read", "list"]
+    }
+
+  # AWS secrets engine policy
+  cloud-aws: |
+    path "aws/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+  # GCP secrets engine policy
+  cloud-gcp: |
+    path "gcp/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+  # Azure secrets engine policy
+  cloud-azure: |
+    path "azure/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+  # Linode secrets engine policy
+  cloud-linode: |
+    path "linode/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+  # PKI operations policy
+  pki-ops: |
+    path "pki/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+  # Transit operations policy
+  transit-ops: |
+    path "transit/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+  # SSH operations policy
+  ssh-ops: |
+    path "ssh/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }

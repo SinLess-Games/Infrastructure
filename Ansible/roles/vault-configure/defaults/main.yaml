@@ -16,7 +16,7 @@ vault_checksum_url: "https://releases.hashicorp.com/vault/{{ vault_version }}/va
 vault_verify_checksum: true
 
 # Listener Configuration
-vault_listener_address: "0.0.0.0:8200"
+vault_listener_address: "{{ ansible_host | default(inventory_hostname) }}:8200"
 vault_tls_disable: false
 vault_tls_cert_file: "/etc/vault/tls/vault.crt"
 vault_tls_key_file: "/etc/vault/tls/vault.key"
@@ -68,6 +68,7 @@ vault_keepalived_vrid: 51
 # HAProxy settings
 vault_haproxy_stats_enabled: true
 vault_haproxy_stats_port: 8404
+vault_haproxy_bind_address: "{{ vault_keepalived_virtual_ip if (vault_keepalived_enabled | bool) else '0.0.0.0' }}"
 
 # Unseal keys backup
 vault_unseal_keys_output_dir: "{{ playbook_dir }}/../../.outputs/vault"

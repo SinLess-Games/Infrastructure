@@ -62,13 +62,36 @@
 
 - name: "Verify Vault API address is reachable or use fallback"
   ansible.builtin.debug:
-    msg: "Using Vault address: {{ vault_setup_vault_addr }}"
+    msg: "Using Vault address: vault.local.sinlessgames.com ({{ hostvars[groups['vault'][0]].ansible_host }}:8200)"
   delegate_to: localhost
   become: false
   run_once: true
   when:
     - vault_setup_enabled | bool
     - vault_setup_vault_addr is defined
+
+- name: "Enable Vault auth methods"
+  ansible.builtin.shell: |
+    export VAULT_ADDR="{{ vault_setup_vault_addr }}"
+    export VAULT_SKIP_VERIFY="{{ vault_setup_skip_tls_verify | ternary('true', 'false') }}"
+    export VAULT_TOKEN="{{ vault_setup_root_token.root_token }}"
+
+    {{ vault_bin_path | default('/usr/local/bin/vault') }} auth enable -path="{{ item.path }}" "{{ item.type }}" 2>&1 || echo "Auth method already enabled"
+  environment:
+    VAULT_SKIP_VERIFY: "{{ vault_setup_skip_tls_verify | ternary('true', 'false') }}"
+  loop: "{{ vault_auth_methods | default([]) }}"
+  loop_control:
+    label: "{{ item.type }}@{{ item.path }}"
+  register: vault_auth_enable
+  changed_when: "'successfully enabled' in vault_auth_enable.stdout"
+  run_once: true
+  delegate_to: "{{ groups['vault'][0] }}"
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_vault_addr is defined
+    - vault_setup_root_token is defined
+    - vault_auth_methods is defined
+    - vault_auth_methods | length > 0
 
 - name: "Build Terraform environment (Vault setup)"
   ansible.builtin.set_fact:
@@ -111,6 +134,96 @@
     - vault_setup_enabled | bool
     - vault_setup_engine_mounts is defined
     - vault_setup_engine_mounts | length > 0
+
+- name: "Add AWS configs to Terraform environment (optional)"
+  ansible.builtin.set_fact:
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_aws_configs': vault_setup_aws_configs | to_json}) }}"
+  no_log: true
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_aws_configs is defined
+    - vault_setup_aws_configs | length > 0
+
+- name: "Add GCP configs to Terraform environment (optional)"
+  ansible.builtin.set_fact:
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_gcp_configs': vault_setup_gcp_configs | to_json}) }}"
+  no_log: true
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_gcp_configs is defined
+    - vault_setup_gcp_configs | length > 0
+
+- name: "Add Azure configs to Terraform environment (optional)"
+  ansible.builtin.set_fact:
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_azure_configs': vault_setup_azure_configs | to_json}) }}"
+  no_log: true
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_azure_configs is defined
+    - vault_setup_azure_configs | length > 0
+
+- name: "Add Linode configs to Terraform environment (optional)"
+  ansible.builtin.set_fact:
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_linode_configs': vault_setup_linode_configs | to_json}) }}"
+  no_log: true
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_linode_configs is defined
+    - vault_setup_linode_configs | length > 0
+
+- name: "Add Kubernetes configs to Terraform environment (optional)"
+  ansible.builtin.set_fact:
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_kubernetes_configs': vault_setup_kubernetes_configs | to_json}) }}"
+  no_log: true
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_kubernetes_configs is defined
+    - vault_setup_kubernetes_configs | length > 0
+
+- name: "Add SSH configs to Terraform environment (optional)"
+  ansible.builtin.set_fact:
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_ssh_configs': vault_setup_ssh_configs | to_json}) }}"
+  no_log: true
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_ssh_configs is defined
+    - vault_setup_ssh_configs | length > 0
+
+- name: "Add PKI configs to Terraform environment (optional)"
+  ansible.builtin.set_fact:
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_pki_configs': vault_setup_pki_configs | to_json}) }}"
+  no_log: true
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_pki_configs is defined
+    - vault_setup_pki_configs | length > 0
+
+- name: "Add Transit configs to Terraform environment (optional)"
+  ansible.builtin.set_fact:
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_transit_configs': vault_setup_transit_configs | to_json}) }}"
+  no_log: true
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_transit_configs is defined
+    - vault_setup_transit_configs | length > 0
+
+- name: "Add Terraform configs to Terraform environment (optional)"
+  ansible.builtin.set_fact:
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_terraform_configs': vault_setup_terraform_configs | to_json}) }}"
+  no_log: true
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_terraform_configs is defined
+    - vault_setup_terraform_configs | length > 0
 
 - name: "Initialize Terraform (Vault secrets backends)"
   ansible.builtin.command:

@@ -69,14 +69,6 @@
     - "vault"
     - "vault-service"
 
-# Cluster membership should happen before init/unseal so you can form the raft peer set cleanly
-# and avoid initializing before peers are ready (unless your initialize.yaml is explicitly leader-only)
-- name: "Setup Raft cluster"
-  include_tasks: cluster.yaml
-  tags:
-    - "vault"
-    - "vault-raft"
-
 - name: "Initialize and unseal Vault"
   include_tasks: initialize.yaml
   tags:
@@ -84,7 +76,21 @@
     - "vault-init"
     - "vault-unseal"
 
-- name: "Unseal all follower nodes"
+- name: "Ensure leader is unsealed before cluster join"
+  include_tasks: unseal-all.yaml
+  when: inventory_hostname == groups['vault'][0]
+  tags:
+    - "vault"
+    - "vault-unseal"
+
+# Join followers after the leader is initialized and unsealed
+- name: "Setup Raft cluster"
+  include_tasks: cluster.yaml
+  tags:
+    - "vault"
+    - "vault-raft"
+
+- name: "Unseal all follower nodes after cluster join"
   include_tasks: unseal-all.yaml
   tags:
     - "vault"
@@ -103,7 +109,7 @@
     - "vault"
     - "vault-unseal"
 
-- name: "Ensure Vault is unsealed after configuration"
+- name: "Final unseal after all configuration"
   include_tasks: unseal-all.yaml
   tags:
     - "vault"

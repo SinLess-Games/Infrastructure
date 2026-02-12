@@ -18,20 +18,8 @@ storage "raft" {
   {% for join in vault_raft_retry_join %}
   retry_join {
     leader_api_addr = "{{ join.leader_api_addr }}"
-    {% if join.leader_ca_cert is defined %}
-    leader_ca_cert  = "{{ join.leader_ca_cert }}"
-    {% endif %}
-    {% if join.leader_client_cert_file is defined %}
-    leader_client_cert_file = "{{ join.leader_client_cert_file }}"
-    {% endif %}
-    {% if join.leader_client_key_file is defined %}
-    leader_client_key_file = "{{ join.leader_client_key_file }}"
-    {% endif %}
-    {% if join.leader_tls_servername is defined %}
-    leader_tls_servername = "{{ join.leader_tls_servername }}"
-    {% endif %}
-    {% if join.leader_tls_skip_verify is defined %}
-    leader_tls_skip_verify = {{ join.leader_tls_skip_verify | bool | lower }}
+    {% if join.leader_ca_cert_file is defined %}
+    leader_ca_cert_file = "{{ join.leader_ca_cert_file }}"
     {% endif %}
     {% if join.auto_join is defined %}
     auto_join        = "{{ join.auto_join }}"
@@ -47,6 +35,7 @@ storage "raft" {
 # ---------------------------------------------------------------------
 listener "tcp" {
   address          = "{{ vault_listener_address | default('0.0.0.0:8200') }}"
+  cluster_address  = "{{ vault_cluster_addr_ip | default(ansible_host | default(inventory_hostname)) }}:{{ vault_cluster_addr_port | default(8201) }}"
   tls_disable      = {{ vault_tls_disable | default(false) | bool | lower }}
 
   {% if not vault_tls_disable %}

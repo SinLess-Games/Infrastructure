@@ -8,8 +8,8 @@
 # After sourcing, you can use the vault CLI without specifying --address
 # =============================================================================
 
-# Vault API address (VIP)
-export VAULT_ADDR="${VAULT_ADDR:-https://10.10.10.180:8200}"
+# Vault API address (VIP with DNS name, standard HTTPS port)
+export VAULT_ADDR="${VAULT_ADDR:-https://vault.local.sinlessgames.com}"
 
 # Skip TLS verification (for self-signed certs)
 export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"

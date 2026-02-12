@@ -1,14 +1,12 @@
----
 # HAProxy configuration for Vault load balancing
 global
-  log stdout local0
-  log stdout local1 notice
+  log /dev/log local0
+  log /dev/log local1 notice
   chroot /var/lib/haproxy
   stats socket /run/haproxy/admin.sock mode 660 level admin
   stats timeout 30s
   user haproxy
   group haproxy
-  daemon
 
 defaults
   log     global
@@ -26,24 +24,32 @@ listen stats
   stats refresh 30s
   stats show-legends
 
-# Vault API load balancer (TLS passthrough)
-listen vault-api
-  bind 0.0.0.0:8200
+# Vault API load balancer on standard HTTPS port (TLS passthrough)
+listen vault-api-443
+  bind {{ vault_haproxy_bind_address }}:443
   mode tcp
   balance roundrobin
-  option ssl-hello-chk
   default-server inter 10s fall 3 rise 2
 {% for node in vault_cluster_nodes %}
-  server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }} check ssl verify none
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }}
+{% endfor %}
+
+# Vault API load balancer on legacy port (TLS passthrough)
+listen vault-api-8200
+  bind {{ vault_haproxy_bind_address }}:{{ vault_api_addr_port }}
+  mode tcp
+  balance roundrobin
+  default-server inter 10s fall 3 rise 2
+{% for node in vault_cluster_nodes %}
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }}
 {% endfor %}
 
 # Vault cluster communication (internal only - TLS passthrough)
 listen vault-cluster
-  bind 0.0.0.0:8201
+  bind {{ vault_haproxy_bind_address }}:{{ vault_cluster_addr_port }}
   mode tcp
   balance roundrobin
-  option ssl-hello-chk
   default-server inter 10s fall 3 rise 2
 {% for node in vault_cluster_nodes %}
-  server {{ node.name }} {{ node.ip_address }}:{{ vault_cluster_addr_port }} check ssl verify none
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_cluster_addr_port }}
 {% endfor %}

@@ -1,9 +1,8 @@
 terraform {
   required_version = ">= 1.4"
 
-  backend "vault" {
-    address = "https://10.10.10.180:8200"
-    path    = "terraform/terraform.tfstate"
+  backend "local" {
+    path = "terraform.tfstate"
   }
 
   required_providers {

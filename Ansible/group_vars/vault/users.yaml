@@ -1,0 +1,78 @@
+---
+# Vault user definitions
+vault_users:
+  - name: ansible
+    description: "Ansible automation user"
+    policies:
+      - ansible
+  
+  - name: terraform
+    description: "Terraform automation user"
+    policies:
+      - terraform
+  
+  - name: sinless777
+    description: "Primary operator (Admin)"
+    policies:
+      - admin
+      - default
+
+  - name: helix-frontend
+    description: "Helix frontend application"
+    policies:
+      - helix-frontend
+
+  - name: helix-auth
+    description: "Helix auth service"
+    policies:
+      - helix-auth
+
+  - name: helix-third-party
+    description: "Helix third-party integrations"
+    policies:
+      - helix-third-party
+
+  - name: sinlessgames-app
+    description: "SinLess Games application"
+    policies:
+      - sinlessgames-app
+
+  - name: k8s-dev
+    description: "Kubernetes dev workload"
+    policies:
+      - kubernetes-dev
+
+  - name: k8s-test
+    description: "Kubernetes test workload"
+    policies:
+      - kubernetes-test
+
+  - name: k8s-prod
+    description: "Kubernetes prod workload"
+    policies:
+      - kubernetes-prod
+
+  - name: cloud-ops
+    description: "Cloud operations automation"
+    policies:
+      - cloud-aws
+      - cloud-gcp
+      - cloud-azure
+      - cloud-linode
+      - cloudflare
+
+  - name: pki-ops
+    description: "PKI operations automation"
+    policies:
+      - pki-ops
+
+  - name: transit-ops
+    description: "Transit operations automation"
+    policies:
+      - transit-ops
+
+  - name: ssh-ops
+    description: "SSH operations automation"
+    policies:
+      - ssh-ops
+

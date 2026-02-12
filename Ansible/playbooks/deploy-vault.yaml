@@ -15,7 +15,7 @@
   connection: local
 
   vars_files:
-    - ../group_vars/vault/vault.yaml
+    - ../group_vars/vault/vault-vms.yaml
 
   roles:
     - role: vault-deploy
@@ -27,7 +27,11 @@
   become: true
 
   vars_files:
-    - ../group_vars/vault/vault.yaml
+    - ../group_vars/vault/vault-vms.yaml
+    - ../group_vars/vault/users.yaml
+    - ../group_vars/vault/policies.yaml
+    - ../group_vars/vault/main.yaml
+    - ../group_vars/vault/secrets-engines.yaml
     - ../group_vars/all/packages.yaml
     - ../group_vars/all/zsh.yaml
     - ../group_vars/all/users.yaml
@@ -74,6 +78,9 @@
     
     - role: vault-setup
       tags: ["setup"]
+
+    - role: vault-users
+      tags: ["users"]
 
 
 

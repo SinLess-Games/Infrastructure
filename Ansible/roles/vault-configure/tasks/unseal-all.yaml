@@ -34,47 +34,148 @@
         - vault_keys_file is defined
         - vault_keys_file.content is defined
 
+    # Wait until Vault reports initialized before unsealing
+    - name: "Wait for Vault to be initialized"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        {{ vault_bin_dir }}/vault status -format=json 2>/dev/null | jq -r '.initialized'
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: vault_initialized_check
+      retries: 10
+      delay: 3
+      until: vault_initialized_check.stdout | trim == 'true'
+      changed_when: false
+      failed_when: false
+
+    - name: "Display unseal skip reason when not initialized"
+      debug:
+        msg: "{{ inventory_hostname }}: skipping unseal/verify because Vault is not initialized yet."
+      when: vault_initialized_check.stdout | trim != 'true'
+
     # Unseal all sealed nodes
     - name: "Unseal Vault on sealed nodes"
       shell: |
         export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
         export VAULT_SKIP_VERIFY="true"
+        export VAULT_CLIENT_TIMEOUT=60
+        
+        echo "Starting unseal process on {{ inventory_hostname }}"
+        echo "Vault address: $VAULT_ADDR"
         
         {% for key in vault_unseal_keys.unseal_keys_b64[:vault_key_threshold] %}
-        {{ vault_bin_dir }}/vault operator unseal "{{ key }}" 2>&1
+        echo "Applying unseal key..."
+        timeout 30 {{ vault_bin_dir }}/vault operator unseal "{{ key }}" 2>&1 || true
+        sleep 2
         {% endfor %}
       environment:
         VAULT_SKIP_VERIFY: "true"
+        VAULT_CLIENT_TIMEOUT: "60"
       register: unseal_output
-      changed_when: '"Sealed" in unseal_output.stdout'
+      changed_when: true
+      timeout: 120
       when: 
-        - vault_sealed_status.stdout == 'true'
+        - vault_sealed_status.stdout | trim == 'true'
         - vault_unseal_keys is defined
-      no_log: true
+        - vault_initialized_check is defined
+        - vault_initialized_check.stdout | trim == 'true'
 
-    # Wait for unsealing to complete
-    - name: "Wait for Vault to unseal"
-      pause:
-        seconds: 2
-      when: vault_sealed_status.stdout == 'true'
+    - name: "Show unseal command output"
+      debug:
+        msg: "Unseal output for {{ inventory_hostname }}:\n{{ unseal_output.stdout | default('no output') }}"
+      when:
+        - unseal_output is defined
 
-    # Verify all nodes are now unsealed
-    - name: "Verify Vault is unsealed"
+    - name: "Check sealed status after unseal attempt"
       shell: |
         export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
         export VAULT_SKIP_VERIFY="true"
         {{ vault_bin_dir }}/vault status -format=json | jq -r '.sealed'
       environment:
         VAULT_SKIP_VERIFY: "true"
-      register: vault_sealed_check
-      retries: 3
-      delay: 5
-      until: vault_sealed_check.stdout == 'false'
+      register: vault_sealed_after_b64
       changed_when: false
+      when:
+        - vault_sealed_status.stdout | trim == 'true'
+
+    - name: "Retry unseal with all 5 keys individually if still sealed"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_CLIENT_TIMEOUT=60
+        
+        # Try all 5 keys one by one to accumulate progress
+        {% for key in vault_unseal_keys.unseal_keys_b64 %}
+        echo "Attempting unseal key..."
+        timeout 30 {{ vault_bin_dir }}/vault operator unseal "{{ key }}" 2>&1 || true
+        sleep 3
+        {% endfor %}
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+        VAULT_CLIENT_TIMEOUT: "60"
+      register: unseal_hex_output
+      changed_when: true
+      failed_when: false
+      timeout: 180
+      when:
+        - vault_sealed_after_b64 is defined
+        - vault_sealed_after_b64.stdout | default('') | trim == 'true'
+        - vault_unseal_keys is defined
+      no_log: true
+
+    - name: "Show Vault status when still sealed"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        {{ vault_bin_dir }}/vault status -format=json | jq '{initialized, sealed, progress, t, n}'
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: vault_status_debug
+      changed_when: false
+      when:
+        - vault_sealed_after_b64 is defined
+        - vault_sealed_after_b64.stdout | default('') | trim == 'true'
+
+    - name: "Display sealed node status"
+      debug:
+        msg: "{{ inventory_hostname }} status: {{ vault_status_debug.stdout | default('no status') }}"
+      when:
+        - vault_status_debug is defined
+        - vault_status_debug.stdout is defined
+
+    # Wait for unsealing to complete
+    - name: "Wait for Vault to unseal"
+      pause:
+        seconds: 2
+      when:
+        - vault_sealed_status.stdout == 'true'
+        - vault_initialized_check.stdout | trim == 'true'
+
+    # Verify all nodes are now unsealed
+    - name: "Verify Vault is unsealed"
+      shell: |
+        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_CLIENT_TIMEOUT=60
+        timeout 45 {{ vault_bin_dir }}/vault status -format=json 2>/dev/null | jq -r '.sealed' || echo "timeout"
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+        VAULT_CLIENT_TIMEOUT: "60"
+      register: vault_sealed_check
+      retries: 5
+      delay: 10
+      until: vault_sealed_check.stdout | trim == 'false'
+      changed_when: false
+      timeout: 60
+      when: vault_initialized_check.stdout | trim == 'true'
 
     - name: "Display unseal status"
       debug:
-        msg: "{{ inventory_hostname }}: Sealed={{ vault_sealed_check.stdout }}"
+        msg: "{{ inventory_hostname }}: Sealed={{ vault_sealed_check.stdout | default('unknown') }}"
+      when:
+        - vault_sealed_check is defined
+        - vault_sealed_check.stdout is defined
 
   tags:
     - "vault"

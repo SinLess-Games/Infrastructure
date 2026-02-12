@@ -66,6 +66,11 @@ technitium_domain_records:
         type: "A"
         value: "10.10.10.14"
         ttl: 300
+      # Vault API (HA VIP)
+      - name: "vault"
+        type: "A"
+        value: "10.10.10.180"
+        ttl: 300
 
   # ---------------------------------------------------------------------------
   # Zone: local.sinlessgamesllc.com

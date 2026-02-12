@@ -68,6 +68,14 @@
     TF_VAR_proxmox_api_token_secret: "{{ vault_proxmox_api_token_secret }}"
     TF_VAR_proxmox_tls_insecure: "{{ vault_proxmox_tls_insecure | ternary('true', 'false') }}"
 
+- name: Check if Vault VMs already exist
+  ansible.builtin.command:
+    cmd: "ssh-keyscan -H {{ item }} 2>/dev/null"
+  loop: "{{ vault_ip_addresses }}"
+  register: vault_vm_check
+  failed_when: false
+  changed_when: false
+
 - name: Apply Terraform configuration (Taskfile)
   ansible.builtin.command:
     cmd: "task terraform:apply:auto"
@@ -78,6 +86,14 @@
     TF_VAR_proxmox_api_token_id: "{{ vault_proxmox_api_token_id }}"
     TF_VAR_proxmox_api_token_secret: "{{ vault_proxmox_api_token_secret }}"
     TF_VAR_proxmox_tls_insecure: "{{ vault_proxmox_tls_insecure | ternary('true', 'false') }}"
+    TF_VAR_force_create: "{{ (vault_vm_check.results | selectattr('rc', 'equalto', 0) | list | length == 0) | ternary('false', 'true') }}"
+  register: terraform_result
+  ignore_errors: true
+
+- name: Skip terraform if VMs already exist
+  ansible.builtin.meta: noop
+  when: terraform_result is failed and 'already in use' in (terraform_result.stderr | default(''))
+
 - name: Wait for Vault VMs to be accessible
   ansible.builtin.pause:
     seconds: 30

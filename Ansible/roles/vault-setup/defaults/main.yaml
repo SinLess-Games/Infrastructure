@@ -26,3 +26,12 @@ vault_setup_ca_cert_file: ""
 # Optional overrides for secrets engines
 vault_setup_kv_mounts: {}
 vault_setup_engine_mounts: {}
+vault_setup_aws_configs: {}
+vault_setup_gcp_configs: {}
+vault_setup_azure_configs: {}
+vault_setup_linode_configs: {}
+vault_setup_kubernetes_configs: {}
+vault_setup_ssh_configs: {}
+vault_setup_pki_configs: {}
+vault_setup_transit_configs: {}
+vault_setup_terraform_configs: {}

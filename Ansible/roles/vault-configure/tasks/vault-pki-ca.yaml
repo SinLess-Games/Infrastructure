@@ -18,20 +18,31 @@
       run_once: true
       failed_when: false
 
+    - name: "Debug: Show health check results"
+      ansible.builtin.debug:
+        msg: "Node {{ item.item }}: initialized={{ item.json.initialized | default('N/A') }}, sealed={{ item.json.sealed | default('N/A') }}, standby={{ item.json.standby | default('N/A') }}"
+      loop: "{{ vault_health_checks.results }}"
+      run_once: true
+      when: item.json is defined
+
     - name: "Set active node fact (prefer non-standby)"
       ansible.builtin.set_fact:
         vault_active_node: >-
-          {{ (vault_health_checks.results
-              | selectattr('json', 'defined')
-              | selectattr('json.initialized', 'equalto', true)
-              | selectattr('json.sealed', 'equalto', false)
-              | selectattr('json.standby', 'equalto', false)
-              | map(attribute='item')
-              | list
-              | first) | default(groups['vault'][0]) }}
+          {% set active_nodes = [] -%}
+          {% for result in vault_health_checks.results -%}
+          {%- if result.json is defined and result.json.initialized and not result.json.sealed and not result.json.standby -%}
+          {{- active_nodes.append(result.item) or "" -}}
+          {%- endif -%}
+          {%- endfor -%}
+          {{- active_nodes[0] if active_nodes else groups['vault'][0] -}}
       delegate_to: localhost
       delegate_facts: true
       become: false
+      run_once: true
+
+    - name: "Debug: Display selected active node"
+      ansible.builtin.debug:
+        msg: "Selected active Vault node: {{ hostvars['localhost'].vault_active_node }} (IP: {{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }})"
       run_once: true
   when: vault_initialize | bool
 
@@ -67,10 +78,10 @@
         - vault_root_token_data is not defined
         - hostvars['localhost'].vault_root_token_data is defined
 
-    # Enable PKI engine on the leader (vault-01)
+    # Enable PKI engine on the active node
     - name: "Enable PKI engine"
       shell: |
-        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_ADDR="https://{{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }}:8200"
         export VAULT_SKIP_VERIFY="true"
         export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
         
@@ -81,13 +92,16 @@
       changed_when: "'already enabled' not in pki_enable.stderr"
       failed_when: pki_enable.rc != 0 and 'already enabled' not in pki_enable.stderr
       run_once: true
+      delegate_to: "{{ hostvars['localhost'].vault_active_node }}"
       no_log: true
-      when: vault_root_token_data is defined
+      when:
+        - vault_root_token_data is defined
+        - hostvars['localhost'].vault_active_node is defined
 
     # Tune PKI engine for longer TTL
     - name: "Tune PKI engine"
       shell: |
-        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_ADDR="https://{{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }}:8200"
         export VAULT_SKIP_VERIFY="true"
         export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
         
@@ -96,10 +110,13 @@
         VAULT_SKIP_VERIFY: "true"
       register: tune_result
       run_once: true
+      delegate_to: "{{ hostvars['localhost'].vault_active_node }}"
       no_log: true
       changed_when: false
       failed_when: tune_result.rc != 0 and 'may have succeeded' not in tune_result.stdout
-      when: vault_root_token_data is defined
+      when:
+        - vault_root_token_data is defined
+        - hostvars['localhost'].vault_active_node is defined
 
     # Wait for leadership to stabilize after PKI mount
     - name: "Wait for leadership stability"
@@ -107,14 +124,36 @@
         seconds: 5
       when: vault_root_token_data is defined
 
-    # Generate root CA
-    - name: "Generate root CA certificate"
+    # Check if CA already exists
+    - name: "Check if root CA already exists"
       shell: |
-        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_ADDR="https://{{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }}:8200"
         export VAULT_SKIP_VERIFY="true"
         export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
         
-        {{ vault_bin_dir }}/vault write -format=json pki/issuers/generate/root/internal \
+        {{ vault_bin_dir }}/vault read -field=certificate pki/cert/ca 2>/dev/null && echo "EXISTS" || echo "NOT_FOUND"
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: ca_exists_check
+      run_once: true
+      delegate_to: "{{ hostvars['localhost'].vault_active_node }}"
+      changed_when: false
+      failed_when: false
+      when:
+        - vault_root_token_data is defined
+        - hostvars['localhost'].vault_active_node is defined
+        - vault_active_node
+      failed_when: false
+      when: vault_root_token_data is defined
+
+    # Generate root CA
+    - name: "Generate root CA certificate"
+      shell: |
+        export VAULT_ADDR="https://{{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }}:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        {{ vault_bin_dir }}/vault write -format=json pki/root/generate/internal \
           common_name="Vault Root CA" \
           ttl=87600h \
           organization="SinLess Games" \
@@ -123,30 +162,38 @@
         VAULT_SKIP_VERIFY: "true"
       register: ca_generation
       run_once: true
+      delegate_to: "{{ hostvars['localhost'].vault_active_node }}"
       changed_when: '"certificate" in ca_generation.stdout'
-      when: vault_root_token_data is defined
+      when:
+        - vault_root_token_data is defined
+        - hostvars['localhost'].vault_active_node is defined
+        - ca_exists_check.stdout is not defined or "NOT_FOUND" in ca_exists_check.stdout
 
     # Configure CA and CRL URLs
     - name: "Configure CA URLs"
       shell: |
-        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_ADDR="https://{{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }}:8200"
         export VAULT_SKIP_VERIFY="true"
         export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
         
         {{ vault_bin_dir }}/vault write pki/config/urls \
-          issuing_certificates="https://10.1.0.50:8200/v1/pki/ca" \
-          crl_distribution_points="https://10.1.0.50:8200/v1/pki/crl"
+          issuing_certificates="https://{{ vault_keepalived_virtual_ip }}:8200/v1/pki/ca" \
+          crl_distribution_points="https://{{ vault_keepalived_virtual_ip }}:8200/v1/pki/crl"
       environment:
         VAULT_SKIP_VERIFY: "true"
       run_once: true
+      delegate_to: "{{ hostvars['localhost'].vault_active_node }}"
       no_log: true
       changed_when: false
-      when: vault_root_token_data is defined
+      when:
+        - vault_root_token_data is defined
+        - hostvars['localhost'].vault_active_node is defined
+        - hostvars['localhost'].vault_active_node is defined
 
     # Create role for node certificates
     - name: "Create PKI role for Vault nodes"
       shell: |
-        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_ADDR="https://{{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }}:8200"
         export VAULT_SKIP_VERIFY="true"
         export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
         
@@ -160,29 +207,35 @@
       environment:
         VAULT_SKIP_VERIFY: "true"
       run_once: true
+      delegate_to: "{{ hostvars['localhost'].vault_active_node }}"
       no_log: true
       changed_when: false
-      when: vault_root_token_data is defined
+      when:
+        - vault_root_token_data is defined
+        - hostvars['localhost'].vault_active_node is defined
 
     # Issue certificates for ALL nodes from leader
     - name: "Issue certificates for each Vault node"
       shell: |
-        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_ADDR="https://{{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }}:8200"
         export VAULT_SKIP_VERIFY="true"
         export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
         
         {{ vault_bin_dir }}/vault write -format=json pki/issue/vault-nodes \
           common_name="{{ item }}" \
-          alt_names="localhost,vault.local,{{ item }},{{ hostvars[item]['ansible_host'] | default(item) }}" \
-          ip_sans="127.0.0.1,{{ hostvars[item]['ansible_host'] | default(item) }}" \
+          alt_names="localhost,vault.local,{{ vault_cluster_hostname | default('vault.local') }},{{ item }},{{ item }}.{{ vault_domain | default('local') }},{{ hostvars[item]['ansible_host'] | default(item) }}" \
+          ip_sans="127.0.0.1,{{ vault_keepalived_virtual_ip | default('10.10.10.180') }},{{ hostvars[item]['ansible_host'] | default(item) }}" \
           ttl=8760h
       environment:
         VAULT_SKIP_VERIFY: "true"
       register: node_certs_result
       loop: "{{ groups['vault'] }}"
+      delegate_to: "{{ hostvars['localhost'].vault_active_node }}"
       no_log: true
       changed_when: true
-      when: vault_root_token_data is defined
+      when:
+        - vault_root_token_data is defined
+        - hostvars['localhost'].vault_active_node is defined
 
     # Store certificates for distribution
     - name: "Set fact for node certificates"
@@ -229,7 +282,7 @@
 
     - name: "Fetch CA certificate from Vault"
       shell: |
-        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_ADDR="https://{{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }}:8200"
         export VAULT_SKIP_VERIFY="true"
         export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
         
@@ -238,8 +291,11 @@
         VAULT_SKIP_VERIFY: "true"
       register: ca_cert_data
       run_once: true
+      delegate_to: "{{ hostvars['localhost'].vault_active_node }}"
       changed_when: false
-      when: vault_root_token_data is defined
+      when:
+        - vault_root_token_data is defined
+        - hostvars['localhost'].vault_active_node is defined
 
     - name: "Store CA certificate for distribution"
       set_fact:
@@ -269,7 +325,7 @@
     # Save CA cert to all nodes
     - name: "Ensure CA certificate is available"
       shell: |
-        export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+        export VAULT_ADDR="https://{{ hostvars[hostvars['localhost'].vault_active_node].ansible_host }}:8200"
         export VAULT_SKIP_VERIFY="true"
         export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
         
@@ -278,6 +334,7 @@
         VAULT_SKIP_VERIFY: "true"
       register: ca_cert_data
       run_once: true
+      delegate_to: "{{ hostvars['localhost'].vault_active_node }}"
       changed_when: false
       when:
         - vault_root_token_data is defined

@@ -10,6 +10,15 @@
         state: present
       when: vault_keepalived_enabled | bool
 
+    - name: "Allow non-local bind for VIP"
+      sysctl:
+        name: net.ipv4.ip_nonlocal_bind
+        value: "1"
+        state: present
+        sysctl_set: true
+        reload: true
+      when: vault_keepalived_enabled | bool
+
     - name: "Create Vault health check script"
       template:
         src: "{{ playbook_dir }}/../templates/vault/check-vault-health.sh.j2"

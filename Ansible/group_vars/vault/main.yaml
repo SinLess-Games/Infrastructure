@@ -8,6 +8,42 @@ vault_data_dir: "/opt/vault/data"
 vault_log_dir: "/var/log/vault"
 vault_bin_path: "/usr/local/bin/vault"
 
+# Enable/disable user management
+vault_users_enabled: true
+
+# Output directory for generated tokens
+vault_users_output_dir: "{{ playbook_dir }}/../../.outputs/vault"
+
+# Secrets engine configuration (Terraform vault-setup role)
+vault_setup_kv_mounts: "{{ vault_kv_mounts }}"
+vault_setup_engine_mounts: "{{ vault_engine_mounts }}"
+vault_setup_aws_configs: "{{ vault_aws_configs }}"
+vault_setup_gcp_configs: "{{ vault_gcp_configs }}"
+vault_setup_azure_configs: "{{ vault_azure_configs }}"
+vault_setup_linode_configs: "{{ vault_linode_configs }}"
+vault_setup_kubernetes_configs: "{{ vault_kubernetes_configs }}"
+vault_setup_ssh_configs: "{{ vault_ssh_configs }}"
+vault_setup_pki_configs: "{{ vault_pki_configs }}"
+vault_setup_transit_configs: "{{ vault_transit_configs }}"
+vault_setup_terraform_configs: "{{ vault_terraform_configs }}"
+
+# Auth methods to enable (configurable)
+vault_auth_methods:
+  - type: "userpass"
+    path: "userpass"
+  - type: "ldap"
+    path: "ldap"
+  - type: "totp"
+    path: "totp"
+  - type: "approle"
+    path: "approle"
+  - type: "oidc"
+    path: "oidc"
+  - type: "jwt"
+    path: "jwt"
+  - type: "kubernetes"
+    path: "kubernetes"
+
 # Vault Cluster Configuration
 vault_cluster_name: "sinless-vault"
 vault_cluster_nodes: []  # Override in environment-specific files
@@ -18,28 +54,15 @@ vault_tls_enabled: true
 vault_tls_cert_file: "/etc/vault/tls/vault.crt"
 vault_tls_key_file: "/etc/vault/tls/vault.key"
 vault_tls_ca_cert_file: "/etc/vault/tls/ca.crt"
+vault_tls_ca_key_file: "/etc/vault/tls/ca.key"
+vault_ca_bundle_file: "/etc/vault/tls/ca-bundle.pem"
 vault_tls_min_version: "tls12"
 
 # Raft Storage Configuration
 vault_raft_enabled: true
 vault_raft_retry_join_enabled: true
 vault_raft_autopilot_enabled: true
-vault_raft_retry_join:
-  - leader_api_addr: "https://10.10.10.2:8200"
-    leader_ca_cert: "/etc/vault/tls/ca.crt"
-    leader_client_cert_file: "/etc/vault/tls/vault.crt"
-    leader_client_key_file: "/etc/vault/tls/vault.key"
-    leader_tls_servername: "vault-01"
-  - leader_api_addr: "https://10.10.10.3:8200"
-    leader_ca_cert: "/etc/vault/tls/ca.crt"
-    leader_client_cert_file: "/etc/vault/tls/vault.crt"
-    leader_client_key_file: "/etc/vault/tls/vault.key"
-    leader_tls_servername: "vault-02"
-  - leader_api_addr: "https://10.10.10.4:8200"
-    leader_ca_cert: "/etc/vault/tls/ca.crt"
-    leader_client_cert_file: "/etc/vault/tls/vault.crt"
-    leader_client_key_file: "/etc/vault/tls/vault.key"
-    leader_tls_servername: "vault-03"
+# NOTE: retry_join is configured per-host in cluster.yaml task to avoid self-join issues
 
 # HAProxy & Keepalived (Load Balancing)
 vault_ha_enabled: true
@@ -53,6 +76,12 @@ vault_keepalived_interface: "eth0"  # Override per environment
 vault_api_addr_protocol: "https"
 vault_api_addr_port: 8200
 vault_cluster_addr_port: 8201
+vault_listener_address: "{{ ansible_host | default(inventory_hostname) }}:{{ vault_api_addr_port }}"
+vault_cluster_addr_ip: "{{ ansible_host | default(inventory_hostname) }}"
+
+# Domain Configuration
+vault_domain: "local.sinlessgames.com"
+vault_cluster_hostname: "vault.{{ vault_domain }}"
 
 # Vault Unseal Configuration
 vault_unseal_keys_output_dir: "{{ playbook_dir }}/../../.outputs/vault"

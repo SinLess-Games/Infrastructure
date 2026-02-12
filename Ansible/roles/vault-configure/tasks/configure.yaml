@@ -4,6 +4,10 @@
 
 - name: "Configure Vault"
   block:
+    - name: "Show Vault listener address"
+      debug:
+        msg: "vault_listener_address={{ vault_listener_address }}"
+
     - name: "Template Vault configuration"
       template:
         src: "{{ playbook_dir }}/../templates/vault/vault.hcl.j2"
@@ -22,6 +26,56 @@
         group: "root"
         mode: "0644"
       notify: "reload vault systemd"
+
+    - name: "Show rendered Vault listener"
+      command: "grep -n 'address' {{ vault_home_dir }}/vault.hcl"
+      register: vault_listener_line
+      changed_when: false
+
+    - name: "Check current Vault listener bindings"
+      command: "ss -lntp 'sport = :{{ vault_api_addr_port }}'"
+      register: vault_listener_check
+      changed_when: false
+      failed_when: false
+
+    - name: "Restart Vault if bound to 0.0.0.0"
+      systemd:
+        name: vault
+        state: restarted
+        daemon_reload: true
+      when:
+        - vault_listener_check.stdout is search('0.0.0.0:' ~ vault_api_addr_port)
+        - vault_listener_address is not search('0.0.0.0')
+
+    - name: "Pause for Vault restart"
+      pause:
+        seconds: 2
+      when:
+        - vault_listener_check.stdout is search('0.0.0.0:' ~ vault_api_addr_port)
+        - vault_listener_address is not search('0.0.0.0')
+
+    - name: "Re-check Vault listener bindings"
+      command: "ss -lntp 'sport = :{{ vault_api_addr_port }}'"
+      register: vault_listener_check_after
+      changed_when: false
+      failed_when: false
+      when:
+        - vault_listener_check.stdout is search('0.0.0.0:' ~ vault_api_addr_port)
+        - vault_listener_address is not search('0.0.0.0')
+
+    - name: "Fail if Vault still bound to 0.0.0.0"
+      fail:
+        msg: |
+          Vault is still bound to 0.0.0.0:{{ vault_api_addr_port }} after restart.
+          Current listeners:
+          {{ vault_listener_check_after.stdout | default('') }}
+      when:
+        - vault_listener_check.stdout is search('0.0.0.0:' ~ vault_api_addr_port)
+        - vault_listener_address is not search('0.0.0.0')
+        - vault_listener_check_after.stdout is search('0.0.0.0:' ~ vault_api_addr_port)
+
+    - name: "Apply Vault service changes"
+      meta: flush_handlers
 
   tags:
     - "vault"

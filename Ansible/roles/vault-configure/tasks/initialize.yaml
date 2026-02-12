@@ -15,12 +15,24 @@
       changed_when: false
       failed_when: false
 
+      when: inventory_hostname == groups["vault"][0]
     - name: "Initialize Vault cluster"
       block:
         - name: "Check if init.json already exists"
           stat:
             path: "{{ vault_home_dir }}/init.json"
           register: init_file_stat
+
+        - name: "Check if Vault is already initialized"
+          shell: |
+            export VAULT_ADDR="https://{{ ansible_host | default(inventory_hostname) }}:8200"
+            export VAULT_SKIP_VERIFY="true"
+            {{ vault_bin_dir }}/vault status -format=json 2>/dev/null | jq -r '.initialized'
+          environment:
+            VAULT_SKIP_VERIFY: "true"
+          register: vault_current_init_state
+          changed_when: false
+          failed_when: false
 
         - name: "Initialize Vault"
           shell: |
@@ -31,7 +43,18 @@
               -key-threshold={{ vault_key_threshold }} \
               -format=json > {{ vault_home_dir }}/init.json
           changed_when: true
-          when: not init_file_stat.stat.exists
+          when: (not init_file_stat.stat.exists) or (vault_current_init_state.stdout | trim != 'true')
+          register: vault_init_result
+          notify: "restart vault"
+
+        - name: "Flush handlers to restart Vault after initialization"
+          meta: flush_handlers
+          when: vault_init_result is changed
+
+        - name: "Wait for Vault to be ready after initialization"
+          pause:
+            seconds: 3
+          when: vault_init_result is changed
 
         - name: "Read initialization response"
           slurp:
@@ -90,7 +113,7 @@
 # UNSEAL VAULT
 # ========================================================================
 
-- name: "Unseal Vault"
+- name: "Unseal Vault (leader only)"
   block:
     - name: "Check if Vault is sealed"
       shell: |
@@ -130,6 +153,7 @@
 
       when: vault_sealed_status.stdout == 'true'
 
+  when: inventory_hostname == groups['vault'][0]
   tags:
     - "vault"
     - "vault-unseal"

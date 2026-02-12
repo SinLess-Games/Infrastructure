@@ -2,10 +2,10 @@
 # Build CA bundle from all Vault node certificates
 # Location: Ansible/roles/vault-configure/tasks/ca-bundle.yaml
 
-- name: "Fetch certificate from each Vault node"
+- name: "Fetch CA certificate from each Vault node"
   fetch:
-    src: "{{ vault_tls_cert_file }}"
-    dest: "/tmp/vault-certs/{{ inventory_hostname }}.crt"
+    src: "{{ vault_tls_ca_cert_file | default('/etc/vault/tls/ca.crt') }}"
+    dest: "/tmp/vault-certs/{{ inventory_hostname }}-ca.crt"
     flat: yes
   tags:
     - "vault"
