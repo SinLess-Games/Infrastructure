@@ -7,10 +7,6 @@ terraform {
       version = "5.7.0"
     }
   }
-
-  backend "local" {
-    path = "../../terraform.tfstate.d/vault-secrets/terraform.tfstate"
-  }
 }
 
 provider "vault" {

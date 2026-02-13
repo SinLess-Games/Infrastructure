@@ -96,7 +96,7 @@ variable "disk_size" {
 variable "storage" {
   description = "Proxmox storage ID for VM disks (Ceph pool or local storage)"
   type        = string
-  default     = "vm-fast"
+  default     = "VM_Disks"
 }
 
 # ---------------------------------------------------------------------

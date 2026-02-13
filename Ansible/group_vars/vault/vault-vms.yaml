@@ -72,7 +72,7 @@ vault_cluster_nodes:
 # =============================================================================
 
 vault_clone_template: "debian-13-template"
-vault_storage: "Vault"
+vault_storage: "VM_Disks"
 
 # =============================================================================
 # Resource Allocation
