@@ -1,0 +1,39 @@
+---
+# =============================================================================
+# DNS Resolver Role – DNS Testing Tasks
+# =============================================================================
+
+- name: Test DNS resolution for each domain
+  ansible.builtin.command:
+    cmd: "getent hosts {{ item }}"
+  loop: "{{ dns_test_domains }}"
+  register: dns__resolution_tests
+  failed_when: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Set DNS resolution status fact
+  ansible.builtin.set_fact:
+    dns__resolution_working: >-
+      {{ dns__resolution_tests.results
+         | selectattr('rc', 'equalto', 0)
+         | list
+         | length == dns_test_domains | length }}
+
+- name: Display DNS test results
+  ansible.builtin.debug:
+    msg:
+      - "DNS Resolution Working: {{ dns__resolution_working }}"
+      - "Successful Tests: {{ dns__resolution_tests.results | selectattr('rc', 'equalto', 0) | list | length }}/{{ dns_test_domains | length }}"
+      - "Failed Domains: {{ dns__resolution_tests.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}"
+
+- name: Check current DNS configuration in /etc/resolv.conf
+  ansible.builtin.slurp:
+    src: /etc/resolv.conf
+  register: dns__current_resolv_conf
+  failed_when: false
+
+- name: Display current /etc/resolv.conf
+  ansible.builtin.debug:
+    msg: "{{ dns__current_resolv_conf.content | b64decode | split('\n') }}"
+  when: dns__current_resolv_conf is succeeded

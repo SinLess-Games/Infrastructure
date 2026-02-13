@@ -1,0 +1,55 @@
+---
+# =============================================================================
+# DNS Resolver Role – Main Tasks
+# =============================================================================
+#
+# Purpose: Test DNS resolution and fix configuration if broken
+#
+# Workflow:
+#   1. Test current DNS resolution
+#   2. Detect DNS resolver system in use
+#   3. If DNS broken: backup config and fix
+#   4. Verify DNS is working
+#
+# =============================================================================
+
+- name: Include validation tasks
+  ansible.builtin.import_tasks: validate.yaml
+  tags:
+    - dns
+    - dns-check
+
+- name: Include DNS testing tasks
+  ansible.builtin.import_tasks: test-dns.yaml
+  tags:
+    - dns
+    - dns-check
+
+- name: Include detection tasks
+  ansible.builtin.import_tasks: detect-resolver.yaml
+  tags:
+    - dns
+    - dns-check
+
+- name: Include backup tasks
+  ansible.builtin.import_tasks: backup.yaml
+  when: >
+    (not dns__resolution_working or dns_force_reconfigure)
+    and dns_backup_config
+  tags:
+    - dns
+    - dns-fix
+
+- name: Include DNS fix tasks
+  ansible.builtin.import_tasks: fix-dns.yaml
+  when: not dns__resolution_working or dns_force_reconfigure
+  tags:
+    - dns
+    - dns-fix
+
+- name: Include verification tasks
+  ansible.builtin.import_tasks: verify.yaml
+  when: not dns__resolution_working or dns_force_reconfigure
+  tags:
+    - dns
+    - dns-verify

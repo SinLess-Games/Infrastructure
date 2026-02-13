@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# DNS Resolver Role – DNS Fix Tasks
+# =============================================================================
+
+- name: Fix DNS with systemd-resolved
+  ansible.builtin.import_tasks: fix-systemd-resolved.yaml
+  when:
+    - dns__using_systemd_resolved
+    - dns_configure_systemd_resolved
+
+- name: Fix DNS with NetworkManager
+  ansible.builtin.import_tasks: fix-networkmanager.yaml
+  when:
+    - dns__using_networkmanager
+    - not dns__using_systemd_resolved
+
+- name: Fix DNS with static /etc/resolv.conf
+  ansible.builtin.import_tasks: fix-static-resolv.yaml
+  when:
+    - not dns__using_systemd_resolved or not dns_configure_systemd_resolved
+    - not dns__using_networkmanager
+
+- name: Ensure DNS services are restarted
+  ansible.builtin.meta: flush_handlers

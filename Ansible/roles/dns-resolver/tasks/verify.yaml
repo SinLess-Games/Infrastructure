@@ -1,0 +1,49 @@
+---
+# =============================================================================
+# DNS Resolver Role – Verification Tasks
+# =============================================================================
+
+- name: Wait for DNS services to stabilize
+  ansible.builtin.pause:
+    seconds: 3
+
+- name: Re-test DNS resolution after fix
+  ansible.builtin.command:
+    cmd: "getent hosts {{ item }}"
+  loop: "{{ dns_test_domains }}"
+  register: dns__verification_tests
+  retries: "{{ dns_test_retries }}"
+  delay: 2
+  until: dns__verification_tests.rc == 0
+  failed_when: false
+  changed_when: false
+
+- name: Set DNS verification status
+  ansible.builtin.set_fact:
+    dns__verification_passed: >-
+      {{ dns__verification_tests.results
+         | selectattr('rc', 'equalto', 0)
+         | list
+         | length == dns_test_domains | length }}
+
+- name: Display verification results
+  ansible.builtin.debug:
+    msg:
+      - "DNS Verification: {{ 'PASSED' if dns__verification_passed else 'FAILED' }}"
+      - "Successful Tests: {{ dns__verification_tests.results | selectattr('rc', 'equalto', 0) | list | length }}/{{ dns_test_domains | length }}"
+      - "Failed Domains: {{ dns__verification_tests.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}"
+
+- name: Display final /etc/resolv.conf
+  ansible.builtin.command:
+    cmd: cat /etc/resolv.conf
+  register: dns__final_resolv_conf
+  changed_when: false
+
+- name: Show final DNS configuration
+  ansible.builtin.debug:
+    msg: "{{ dns__final_resolv_conf.stdout_lines }}"
+
+- name: Fail if DNS verification did not pass
+  ansible.builtin.fail:
+    msg: "DNS resolution is still not working after attempted fix. Manual intervention required."
+  when: not dns__verification_passed

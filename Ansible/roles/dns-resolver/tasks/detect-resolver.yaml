@@ -1,0 +1,50 @@
+---
+# =============================================================================
+# DNS Resolver Role – Resolver Detection Tasks
+# =============================================================================
+
+- name: Check if systemd-resolved is active
+  ansible.builtin.systemd:
+    name: systemd-resolved
+  register: dns__systemd_resolved_status
+  failed_when: false
+
+- name: Check if NetworkManager is active
+  ansible.builtin.systemd:
+    name: NetworkManager
+  register: dns__networkmanager_status
+  failed_when: false
+
+- name: Check if resolvconf is installed
+  ansible.builtin.stat:
+    path: /sbin/resolvconf
+  register: dns__resolvconf_installed
+
+- name: Check if /etc/resolv.conf is a symlink
+  ansible.builtin.stat:
+    path: /etc/resolv.conf
+  register: dns__resolv_conf_stat
+
+- name: Set resolver type facts
+  ansible.builtin.set_fact:
+    dns__using_systemd_resolved: >-
+      {{ dns__systemd_resolved_status is succeeded
+         and dns__systemd_resolved_status.status is defined
+         and dns__systemd_resolved_status.status.ActiveState == 'active' }}
+    dns__using_networkmanager: >-
+      {{ dns__networkmanager_status is succeeded
+         and dns__networkmanager_status.status is defined
+         and dns__networkmanager_status.status.ActiveState == 'active' }}
+    dns__using_resolvconf: >-
+      {{ dns__resolvconf_installed.stat.exists }}
+    dns__resolv_is_symlink: >-
+      {{ dns__resolv_conf_stat.stat.islnk | default(false) }}
+
+- name: Display detected resolver configuration
+  ansible.builtin.debug:
+    msg:
+      - "Using systemd-resolved: {{ dns__using_systemd_resolved }}"
+      - "Using NetworkManager: {{ dns__using_networkmanager }}"
+      - "Using resolvconf: {{ dns__using_resolvconf }}"
+      - "/etc/resolv.conf is symlink: {{ dns__resolv_is_symlink }}"
+      - "Symlink target: {{ dns__resolv_conf_stat.stat.lnk_source | default('N/A') }}"

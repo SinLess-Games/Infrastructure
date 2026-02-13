@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# DNS Resolver Role – Backup Tasks
+# =============================================================================
+
+- name: Create backup directory
+  ansible.builtin.file:
+    path: "{{ dns_backup_dir }}"
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+
+- name: Generate backup timestamp
+  ansible.builtin.set_fact:
+    dns__backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+
+- name: Backup /etc/resolv.conf
+  ansible.builtin.copy:
+    src: /etc/resolv.conf
+    dest: "{{ dns_backup_dir }}/resolv.conf.{{ dns__backup_timestamp }}"
+    remote_src: true
+    mode: '0644'
+  when: dns__resolv_conf_stat.stat.exists
+  register: dns__backup_resolv
+
+- name: Backup systemd-resolved configuration
+  ansible.builtin.copy:
+    src: /etc/systemd/resolved.conf
+    dest: "{{ dns_backup_dir }}/resolved.conf.{{ dns__backup_timestamp }}"
+    remote_src: true
+    mode: '0644'
+  when:
+    - dns__using_systemd_resolved
+    - dns_configure_systemd_resolved
+  failed_when: false
+  register: dns__backup_resolved
+
+- name: Backup NetworkManager configuration
+  ansible.builtin.copy:
+    src: /etc/NetworkManager/NetworkManager.conf
+    dest: "{{ dns_backup_dir }}/NetworkManager.conf.{{ dns__backup_timestamp }}"
+    remote_src: true
+    mode: '0644'
+  when: dns__using_networkmanager
+  failed_when: false
+  register: dns__backup_nm
+
+- name: Display backup information
+  ansible.builtin.debug:
+    msg:
+      - "DNS configuration backed up to {{ dns_backup_dir }}"
+      - "Timestamp: {{ dns__backup_timestamp }}"
+      - "Backed up files:"
+      - "  - resolv.conf: {{ dns__backup_resolv.changed | default(false) }}"
+      - "  - resolved.conf: {{ dns__backup_resolved.changed | default(false) }}"
+      - "  - NetworkManager.conf: {{ dns__backup_nm.changed | default(false) }}"

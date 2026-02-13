@@ -1,0 +1,39 @@
+---
+# =============================================================================
+# DNS Resolver Role – Fix NetworkManager
+# =============================================================================
+
+- name: Configure NetworkManager DNS mode
+  ansible.builtin.lineinfile:
+    path: /etc/NetworkManager/NetworkManager.conf
+    regexp: '^dns='
+    line: "dns={{ dns_networkmanager_mode }}"
+    insertafter: '^\[main\]'
+    create: true
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart-networkmanager
+
+- name: Get active NetworkManager connections
+  ansible.builtin.command:
+    cmd: nmcli -t -f NAME connection show --active
+  register: dns__nm_connections
+  changed_when: false
+
+- name: Configure DNS servers for each NetworkManager connection
+  ansible.builtin.command:
+    cmd: >
+      nmcli connection modify "{{ item }}"
+      ipv4.dns "{{ dns_servers | join(' ') }}"
+      ipv4.dns-search "{{ dns_search_domains | join(' ') }}"
+      ipv4.ignore-auto-dns yes
+  loop: "{{ dns__nm_connections.stdout_lines }}"
+  when: dns__nm_connections.stdout_lines | length > 0
+  notify: reload-networkmanager-connections
+
+- name: Display NetworkManager fix status
+  ansible.builtin.debug:
+    msg:
+      - "Configured NetworkManager with DNS mode: {{ dns_networkmanager_mode }}"
+      - "Updated connections: {{ dns__nm_connections.stdout_lines }}"

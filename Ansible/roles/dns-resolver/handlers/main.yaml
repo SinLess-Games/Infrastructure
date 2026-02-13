@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# DNS Resolver Role – Handlers
+# =============================================================================
+
+- name: restart-systemd-resolved
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted
+  when: dns_restart_services
+
+- name: restart-networkmanager
+  ansible.builtin.systemd:
+    name: NetworkManager
+    state: restarted
+  when: dns_restart_services
+
+- name: reload-networkmanager-connections
+  ansible.builtin.command:
+    cmd: nmcli connection reload
+  changed_when: true
+  when: dns_restart_services

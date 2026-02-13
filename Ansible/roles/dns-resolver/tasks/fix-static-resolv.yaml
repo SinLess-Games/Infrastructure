@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# DNS Resolver Role – Fix Static /etc/resolv.conf
+# =============================================================================
+
+- name: Remove symlink if /etc/resolv.conf is a symlink
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: dns__resolv_is_symlink
+
+- name: Create static /etc/resolv.conf
+  ansible.builtin.template:
+    src: resolv.conf.j2
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Protect /etc/resolv.conf from being overwritten
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    attributes: +i
+  failed_when: false
+
+- name: Display static resolv.conf fix status
+  ansible.builtin.debug:
+    msg: "Created static /etc/resolv.conf with DNS servers: {{ dns_servers }}"

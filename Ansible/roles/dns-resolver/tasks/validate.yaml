@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# DNS Resolver Role – Validation Tasks
+# =============================================================================
+
+- name: Validate dns_servers is defined
+  ansible.builtin.assert:
+    that:
+      - dns_servers is defined
+      - dns_servers | length > 0
+    fail_msg: "dns_servers must be defined and contain at least one DNS server"
+    success_msg: "DNS servers configuration is valid"
+
+- name: Validate dns_test_domains is defined
+  ansible.builtin.assert:
+    that:
+      - dns_test_domains is defined
+      - dns_test_domains | length > 0
+    fail_msg: "dns_test_domains must be defined and contain at least one test domain"
+    success_msg: "DNS test domains configuration is valid"
+
+- name: Display DNS configuration
+  ansible.builtin.debug:
+    msg:
+      - "DNS Servers: {{ dns_servers }}"
+      - "Test Domains: {{ dns_test_domains }}"
+      - "Search Domains: {{ dns_search_domains }}"
+      - "Force Reconfigure: {{ dns_force_reconfigure }}"

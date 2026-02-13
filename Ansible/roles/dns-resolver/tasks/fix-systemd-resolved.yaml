@@ -1,0 +1,37 @@
+---
+# =============================================================================
+# DNS Resolver Role – Fix systemd-resolved
+# =============================================================================
+
+- name: Configure systemd-resolved
+  ansible.builtin.template:
+    src: resolved.conf.j2
+    dest: /etc/systemd/resolved.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart-systemd-resolved
+
+- name: Ensure systemd-resolved is enabled and started
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: started
+    enabled: true
+
+- name: Remove existing /etc/resolv.conf if not a symlink
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: not dns__resolv_is_symlink
+
+- name: Create symlink to systemd-resolved stub resolver
+  ansible.builtin.file:
+    src: /run/systemd/resolve/stub-resolv.conf
+    dest: /etc/resolv.conf
+    state: link
+    force: true
+  when: not dns__resolv_is_symlink
+
+- name: Display systemd-resolved fix status
+  ansible.builtin.debug:
+    msg: "Configured systemd-resolved with DNS servers: {{ dns_servers }}"

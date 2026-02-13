@@ -1,0 +1,55 @@
+---
+# =============================================================================
+# DNS Resolver Role – Default Variables
+# =============================================================================
+#
+# Purpose: Check DNS resolution on VMs and automatically fix configuration issues
+#
+# =============================================================================
+
+# DNS servers to use (in order of preference)
+dns_servers:
+  - 10.10.10.12  # dns-pi
+  - 10.10.10.13  # dns-01
+  - 10.10.10.9   # dns-02
+  - 10.10.10.20  # dns-03
+  - 1.1.1.1      # Cloudflare (fallback)
+  - 1.0.0.1      # Cloudflare (fallback)
+  - 8.8.8.8      # Google (fallback)
+  - 9.9.9.9      # Quad9 (fallback)
+
+# DNS test targets (will try to resolve these)
+dns_test_domains:
+  - google.com
+  - cloudflare.com
+  - sinlessgames.com
+
+# Search domains
+dns_search_domains:
+  - sinlessgames.com
+  - local
+
+# Maximum number of DNS test retries
+dns_test_retries: 3
+
+# Timeout for DNS tests (seconds)
+dns_test_timeout: 5
+
+# Whether to backup existing DNS configuration
+dns_backup_config: true
+
+# Backup directory for DNS configs
+dns_backup_dir: /root/dns-backups
+
+# Whether to restart network services if DNS is fixed
+dns_restart_services: true
+
+# Force reconfiguration even if DNS appears to be working
+dns_force_reconfigure: false
+
+# Configure systemd-resolved (if present)
+dns_configure_systemd_resolved: true
+
+# NetworkManager DNS mode (if applicable)
+# Options: default, dnsmasq, unbound, systemd-resolved, none
+dns_networkmanager_mode: systemd-resolved
