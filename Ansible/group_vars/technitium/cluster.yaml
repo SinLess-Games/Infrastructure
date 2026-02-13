@@ -1,0 +1,12 @@
+---
+# =============================================================================
+# Technitium DNS - Cluster Configuration
+# =============================================================================
+
+technitium_cluster_enabled: true
+technitium_cluster_domain: "local.sinlessgames.com"
+
+# Primary node is the existing Raspberry Pi DNS server
+technitium_cluster_primary_host: "dns-pi"
+technitium_cluster_primary_ip: "10.10.10.12"
+technitium_cluster_primary_url: "http://{{ technitium_cluster_primary_ip }}:5380/"

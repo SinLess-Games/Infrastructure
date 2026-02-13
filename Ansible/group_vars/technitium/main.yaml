@@ -1,8 +1,8 @@
-technitium_api_url: "http://10.10.10.12:5380"
+technitium_api_url: "http://{{ ansible_host }}:5380"
 
 technitium_forwarders:
   - "1.1.1.1"
-  - "1.0.0.1"
+  - "8.8.8.8"
   - "9.9.9.9"
 
 technitium_enable_blocking: true

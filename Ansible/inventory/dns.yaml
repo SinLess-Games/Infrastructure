@@ -3,3 +3,12 @@ dns:
     dns-pi:
       ansible_host: 10.10.10.12
       ansible_user: sinless777
+    dns-01:
+      ansible_host: 10.10.10.13
+      ansible_user: sinless777
+    dns-02:
+      ansible_host: 10.10.10.9
+      ansible_user: sinless777
+    dns-03:
+      ansible_host: 10.10.10.20
+      ansible_user: sinless777

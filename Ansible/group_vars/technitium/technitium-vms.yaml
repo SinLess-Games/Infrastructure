@@ -1,0 +1,81 @@
+---
+# =============================================================================
+# Technitium Deployment Variables
+# =============================================================================
+
+# Terraform module configuration
+technitium_module_source: "./modules/technitium-cluster"
+
+# Proxmox API access for Terraform
+technitium_proxmox_api_url: "https://10.10.10.15:8006/api2/json"
+technitium_proxmox_tls_insecure: true
+technitium_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
+
+# Cluster identity
+technitium_cluster_name: "technitium-cluster"
+technitium_environment: "prod"
+
+# Proxmox placement (HA distribution)
+technitium_target_nodes:
+  - pve-01
+  - pve-04
+  - pve-05
+
+# VM naming and IDs
+technitium_node_count: 3
+technitium_node_name_prefix: "dns"
+technitium_vm_id_start: 203
+
+# Network configuration (VLAN 1 - 10.10.10.0/24)
+technitium_vlan_id: 0
+technitium_network_bridge: "vmbr0"
+technitium_gateway: "10.10.10.1"
+technitium_cidr_subnet: "/24"
+technitium_nameservers: "1.1.1.1 8.8.8.8"
+
+technitium_ip_addresses:
+  - "10.10.10.13"
+  - "10.10.10.9"
+  - "10.10.10.20"
+
+# Proxmox template and storage
+technitium_clone_template: "debian-13-template"
+technitium_storage: "VM_Disks"
+
+# Resource allocation
+technitium_cpu_cores: 2
+technitium_cpu_sockets: 1
+technitium_memory_mb: 4096
+technitium_disk_size: "40G"
+
+# Access configuration
+technitium_default_user: "sinless777"
+technitium_ansible_user: "ansible"
+
+# SSH keys for VM access
+technitium_ssh_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA7g0acAC3ORT/DUzu3ftMtRW6MlVWuWZ7qqd4tNHLcY automation@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKDoqYKB+akwuGHSAJWn6EeXR70zIg9oZXuP60Al1mOS breakglass@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEMakhAavnUU1qkhadP1tNtmwG7tsu49siUyMIEcKKn9 root@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ0Ch6BKvYa5V+7su2oXhf8jRBgBdRKvoqd0UKVtt1mS sinless777@sinlessgames"
+
+# HA and backup
+technitium_ha_enabled: true
+technitium_ha_group: "dns-ha"
+
+technitium_backup_enabled: true
+technitium_backup_schedule: "0 3 * * *"
+
+# VM lifecycle options
+technitium_onboot: true
+technitium_agent_enabled: true
+technitium_protection: true
+technitium_startup_order: 20
+
+# Tags and metadata
+technitium_tags:
+  - "technitium"
+  - "dns"
+  - "ha"
+
+technitium_description: "Technitium DNS cluster node (Terraform-managed)"

@@ -20,6 +20,21 @@ technitium_reverse_zones:
         hostname: "pi-dns.local.sinlessgames.com"
         ttl: 300
 
+      # dns-01 -> 10.10.10.13
+      - ip_last_octet: 13
+        hostname: "dns-01.local.sinlessgames.com"
+        ttl: 300
+
+      # dns-02 -> 10.10.10.9
+      - ip_last_octet: 9
+        hostname: "dns-02.local.sinlessgames.com"
+        ttl: 300
+
+      # dns-03 -> 10.10.10.20
+      - ip_last_octet: 20
+        hostname: "dns-03.local.sinlessgames.com"
+        ttl: 300
+
       # dev-01 -> 10.10.10.10 (same as pxe)
       - ip_last_octet: 10
         hostname: "dev-01.local.sinlessgames.com"
