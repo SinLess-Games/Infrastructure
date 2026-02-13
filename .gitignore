@@ -10,5 +10,8 @@ Ansible/group_vars/proxmox/vault-certs.yaml
 Terraform/.terraform
 Terraform/terraform.tfstate
 .gitignore
+
 Terraform/.terraform.lock.hcl
 Terraform/terraform.tfstate.backup
+Terraform/technitium-cluster.tf
+Terraform/vault-cluster.tf
