@@ -10,3 +10,6 @@ technitium_cluster_domain: "local.sinlessgames.com"
 technitium_cluster_primary_host: "dns-pi"
 technitium_cluster_primary_ip: "10.10.10.12"
 technitium_cluster_primary_url: "http://{{ technitium_cluster_primary_ip }}:5380/"
+
+# Use a public resolver-friendly hostname for join since Technitium resolves via DNS.
+technitium_cluster_primary_join_host: "{{ technitium_cluster_primary_ip | replace('.', '-') }}.nip.io"

@@ -1,13 +1,16 @@
 ---
 # =============================================================================
-# Playbook: Setup Technitium DNS Server
+# Playbook: Deploy and Configure Technitium DNS Cluster
 #
-# This playbook applies the entire technitium role to hosts in the
-# 'technitium' inventory group.
+# This playbook:
+#   1. Deploys Technitium VMs using Terraform (localhost)
+#   2. Configures Technitium DNS servers and cluster (dns hosts)
 #
 # It assumes:
 #   - Inventory defines the technitium host(s)
 #   - Group vars contain:
+#       * VM deployment parameters
+#       * Cluster configuration
 #       * API URL and token
 #       * Forwarders
 #       * Block lists
@@ -18,6 +21,18 @@
 # Example:
 #   ansible-playbook -i inventory/hosts.yaml playbooks/setup-technitium.yaml
 # =============================================================================
+
+- name: "Deploy Technitium DNS VMs via Terraform"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/technitium/technitium-vms.yaml
+
+  roles:
+    - role: technitium-deploy
+      tags: ["deploy", "terraform"]
 
 - name: "Configure Technitium DNS Appliance"
   hosts: dns
@@ -33,6 +48,7 @@
     ansible_connection_timeout: 30
   
   vars_files:
+    - ../group_vars/technitium/cluster.yaml
     - ../group_vars/technitium/main.yaml
     - ../group_vars/technitium/domains.yaml
     - ../group_vars/technitium/domain-records.yaml
@@ -41,4 +57,8 @@
     - ../group_vars/technitium/firewall.yaml
 
   roles:
+    - role: dns-resolver
+      tags: ["configure", "dns"]
+
     - role: technitium
+      tags: ["configure", "cluster"]

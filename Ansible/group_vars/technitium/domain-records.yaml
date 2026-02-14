@@ -23,11 +23,6 @@ technitium_domain_records:
   # ---------------------------------------------------------------------------
   local.sinlessgames.com:
     records:
-      # Cluster primary node (dns-pi)
-      - name: "dns-pi"
-        type: "A"
-        value: "10.10.10.12"
-        ttl: 300
       # PXE boot host (shared IP with dev-01)
       - name: "pxe"
         type: "A"
@@ -38,12 +33,8 @@ technitium_domain_records:
         type: "A"
         value: "10.10.10.10"
         ttl: 300
-      # Pi DNS server
+      # DNS servers (cluster nodes)
       - name: "pi-dns"
-        type: "A"
-        value: "10.10.10.12"
-        ttl: 300
-      - name: "dns"
         type: "A"
         value: "10.10.10.12"
         ttl: 300
@@ -59,18 +50,7 @@ technitium_domain_records:
         type: "A"
         value: "10.10.10.20"
         ttl: 300
-      - name: "dns"
-        type: "A"
-        value: "10.10.10.13"
-        ttl: 300
-      - name: "dns"
-        type: "A"
-        value: "10.10.10.9"
-        ttl: 300
-      - name: "dns"
-        type: "A"
-        value: "10.10.10.20"
-        ttl: 300
+      # Proxmox VE cluster nodes
       - name: "pve-01"
         type: "A"
         value: "10.10.10.15"

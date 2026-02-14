@@ -1,0 +1,27 @@
+---
+# =============================================================================
+# Technitium DNS Cluster Join — Prepare Host Resolution
+# =============================================================================
+# Ensures cluster nodes can resolve each other's FQDNs via /etc/hosts
+# This is necessary because Docker containers don't use Technitium DNS yet
+# during the bootstrap phase.
+# =============================================================================
+
+- name: Technitium Cluster Join | Add primary node to /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ technitium_cluster_primary_ip }} {{ technitium_cluster_primary_host }} {{ technitium_cluster_primary_host }}.{{ technitium_cluster_domain }}"
+    state: present
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Add all DNS nodes to /etc/hosts on each node
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ hostvars[item].ansible_host }} {{ item }} {{ item }}.{{ technitium_cluster_domain }}"
+    state: present
+  loop: "{{ groups.get('dns', []) }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - hostvars[item].ansible_host is defined

@@ -19,7 +19,7 @@ technitium_allow_recursion_cidrs:
 technitium_api_timeout: 90    # seconds to wait before fail
 technitium_api_delay: 5       # seconds between polls
 
-technitium_admin_password: '"!it;%E}3d5_B73'
+technitium_admin_password: "'&V8^THcBGSZu+8"
 
 # Add these mappings so the role sees what it expects
 technitium_dns_zones: "{{ technitium_domains }}"

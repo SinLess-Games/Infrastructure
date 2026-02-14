@@ -37,7 +37,7 @@
   run_once: true
 
 # -----------------------------------------------------------------------------
-# Create NON-EXPIRING API token (recommended for automation)
+# Create NON-EXPIRING API token (preferred). Fallback to login session token.
 # -----------------------------------------------------------------------------
 - name: Technitium | Create API token (non-expiring)
   ansible.builtin.uri:
@@ -46,28 +46,49 @@
     body_format: form-urlencoded
     body:
       user: "{{ technitium_admin_user | default('admin') }}"
-      pass: "{{ technitium_admin_password }}"
+      pass: "{{ technitium_actual_password }}"
       tokenName: "{{ technitium_api_token_name | default('ansible') }}"
-    status_code: 200
+    status_code: [200, 400]
     return_content: true
   register: _technitium_create_token
   no_log: true
 
-- name: Technitium | Assert token creation succeeded
+- name: Technitium | Login to obtain session token (fallback)
+  ansible.builtin.uri:
+    url: "{{ _technitium_api_base }}/api/user/login"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      user: "{{ technitium_admin_user | default('admin') }}"
+      pass: "{{ technitium_actual_password }}"
+    status_code: [200, 400]
+    return_content: true
+  register: _technitium_login
+  no_log: true
+  when: >-
+    _technitium_create_token.json is not defined
+    or _technitium_create_token.json.status is not defined
+    or _technitium_create_token.json.status != "ok"
+
+- name: Technitium | Set API token from createToken or login
+  ansible.builtin.set_fact:
+    technitium_api_token: >-
+      {{
+        (_technitium_create_token.json.token
+         if (_technitium_create_token.json is defined
+             and _technitium_create_token.json.status == "ok")
+         else _technitium_login.json.token)
+      }}
+
+- name: Technitium | Assert API token is available
   ansible.builtin.assert:
     that:
-      - _technitium_create_token.json is defined
-      - _technitium_create_token.json.status == "ok"
-      - _technitium_create_token.json.token is defined
-      - (_technitium_create_token.json.token | string | length) > 0
+      - technitium_api_token is defined
+      - (technitium_api_token | string | length) > 0
     fail_msg: >-
-      Technitium createToken failed:
+      Failed to acquire Technitium API token. createToken error:
       {{ _technitium_create_token.json.errorMessage
          | default(_technitium_create_token.content | default('unknown error')) }}
-
-- name: Technitium | Extract API token
-  ansible.builtin.set_fact:
-    technitium_api_token: "{{ _technitium_create_token.json.token }}"
 
 - name: Debug technitium Extract
   ansible.builtin.debug:
@@ -92,8 +113,72 @@
 
 
 # -----------------------------------------------------------------------------
+
+# Acquire a fresh token right before using it (token session may expire)
+- name: Technitium | Acquire fresh token for settings configuration
+  ansible.builtin.uri:
+    url: "{{ _technitium_api_base }}/api/user/createToken"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      user: "{{ technitium_admin_user | default('admin') }}"
+      pass: "{{ technitium_actual_password }}"
+      tokenName: "{{ technitium_api_token_name | default('ansible-settings') }}"
+    status_code: [200, 400]
+    return_content: true
+  register: _technitium_fresh_token
+  no_log: true
+
+- name: Technitium | Login for fresh session token (fallback for settings)
+  ansible.builtin.uri:
+    url: "{{ _technitium_api_base }}/api/user/login"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      user: "{{ technitium_admin_user | default('admin') }}"
+      pass: "{{ technitium_actual_password }}"
+    status_code: [200, 400]
+    return_content: true
+  register: _technitium_fresh_login
+  no_log: true
+  when: >
+    _technitium_fresh_token.json is not defined
+    or _technitium_fresh_token.json.status is not defined
+    or _technitium_fresh_token.json.status != "ok"
+
+- name: Technitium | Set fresh API token for settings
+  ansible.builtin.set_fact:
+    _technitium_settings_token: >
+      {{
+        (_technitium_fresh_token.json.token
+         if (_technitium_fresh_token.json is defined
+             and _technitium_fresh_token.json.status == "ok"
+             and _technitium_fresh_token.json.token is defined)
+         else (_technitium_fresh_login.json.token
+              if (_technitium_fresh_login.json is defined
+                  and _technitium_fresh_login.json.status == "ok"
+                  and _technitium_fresh_login.json.token is defined)
+              else technitium_api_token | default("") ))
+      }}
+  no_log: true
+
+- name: Technitium | Assert fresh token obtained for settings
+  ansible.builtin.assert:
+    that:
+      - _technitium_settings_token is defined
+      - _technitium_settings_token | length > 0
+    fail_msg: >-
+      Failed to obtain valid API token for settings configuration.
+      Fresh token: {{ _technitium_fresh_token.json | default('undefined') }}
+      Fresh login: {{ _technitium_fresh_login.json | default('undefined') }}
+
 # Server/DNS settings (FORM-URLENCODED; token as a normal parameter)
+# Add a delay before using the token to ensure API has processed it
 # -----------------------------------------------------------------------------
+- name: Technitium | Wait before applying settings (token initialization)
+  ansible.builtin.pause:
+    seconds: 3
+
 - name: Technitium | Configure server settings
   ansible.builtin.uri:
     url: "{{ _technitium_api_base }}/api/settings/set"

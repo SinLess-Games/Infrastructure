@@ -1,0 +1,85 @@
+---
+# =============================================================================
+# Technitium DNS — Cluster Initialization and Join
+# =============================================================================
+
+- name: Technitium | Cluster | Assert primary host is in inventory
+  ansible.builtin.assert:
+    that:
+      - technitium_cluster_primary_host is defined
+      - technitium_cluster_primary_host in groups['dns']
+    fail_msg: "technitium_cluster_primary_host must be in the dns inventory group"
+  when: technitium_cluster_enabled | default(false) | bool
+
+# -----------------------------------------------------------------------------
+# PRIMARY NODE: READ CLUSTER STATE
+# -----------------------------------------------------------------------------
+- name: Technitium | Cluster | Read primary cluster state
+  ansible.builtin.uri:
+    url: "http://{{ technitium_cluster_primary_ip }}:5380/api/admin/cluster/state?token={{ hostvars[technitium_cluster_primary_host].technitium_api_token }}"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: _technitium_cluster_state
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ technitium_cluster_primary_host }}"
+  when: technitium_cluster_enabled | default(false) | bool
+
+# -----------------------------------------------------------------------------
+# PRIMARY NODE: Initialize Cluster
+# -----------------------------------------------------------------------------
+- name: Technitium | Cluster | Initialize cluster on primary node
+  ansible.builtin.uri:
+    url: "http://{{ technitium_cluster_primary_ip }}:5380/api/admin/cluster/init"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ hostvars[technitium_cluster_primary_host].technitium_api_token }}"
+      clusterDomain: "{{ technitium_cluster_domain }}"
+      primaryNodeIpAddresses: "{{ technitium_cluster_primary_ip }}"
+    status_code: [200, 400]
+    return_content: true
+  register: _technitium_cluster_init
+  failed_when: >-
+    _technitium_cluster_init.json is defined
+    and _technitium_cluster_init.json.status is defined
+    and _technitium_cluster_init.json.status != 'ok'
+    and 'already' not in (_technitium_cluster_init.json.errorMessage | default('') | lower)
+  run_once: true
+  delegate_to: "{{ technitium_cluster_primary_host }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _technitium_cluster_state.json is defined
+    - not (_technitium_cluster_state.json.response.clusterInitialized | default(false))
+
+- name: Technitium | Cluster | Display cluster init result
+  ansible.builtin.debug:
+    msg: "Cluster init: {{ _technitium_cluster_init.json.status | default('skipped') }} - {{ _technitium_cluster_init.json.errorMessage | default('ok') }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _technitium_cluster_init is defined
+
+- name: Technitium | Cluster | Wait 10 seconds for cluster to stabilize
+  ansible.builtin.pause:
+    seconds: 10
+  run_once: true
+  when: technitium_cluster_enabled | default(false) | bool
+
+# -----------------------------------------------------------------------------
+# PREPARE HOSTS: Ensure all nodes can resolve each other
+# -----------------------------------------------------------------------------
+- import_tasks: cluster-prepare-hosts.yaml
+  when: technitium_cluster_enabled | default(false) | bool
+
+# -----------------------------------------------------------------------------
+# ENSURE ZONES: Create cluster domain zone with A records for all nodes
+# -----------------------------------------------------------------------------
+- import_tasks: cluster-ensure-zones.yaml
+  when: technitium_cluster_enabled | default(false) | bool
+
+# -----------------------------------------------------------------------------
+# JOIN SECONDARY NODES: Join all secondary nodes to primary cluster
+# -----------------------------------------------------------------------------
+- import_tasks: cluster-join-secondary.yaml
+  when: technitium_cluster_enabled | default(false) | bool

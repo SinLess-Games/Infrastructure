@@ -23,7 +23,7 @@
     host: "{{ _technitium_api_host }}"
     port: "{{ _technitium_api_port }}"
     delay: 2
-    timeout: 90
+    timeout: 180
     state: started
 
 - name: Technitium | Confirm API endpoint reachable
@@ -34,12 +34,11 @@
       - 200
       - 401
   register: _technitium_api_check
-  retries: 5
-  delay: 3
+  retries: 10
+  delay: 5
   until: _technitium_api_check.status in [200, 401]
 
-- name: Technitium | API ready
-  ansible.builtin.debug:
-    msg: >-
-      Technitium API is reachable at
-      http://{{ _technitium_api_host }}:{{ _technitium_api_port }}
+- name: Technitium | Wait 5 seconds for container full initialization
+  ansible.builtin.pause:
+    seconds: 5
+

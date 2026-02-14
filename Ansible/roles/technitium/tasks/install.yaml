@@ -46,6 +46,16 @@
   ansible.builtin.set_fact:
     _technitium_env: "{{ {'TZ': technitium_timezone} | combine(technitium_env, recursive=True) }}"
 
+- name: Install | Build extra_hosts mapping for cluster
+  ansible.builtin.set_fact:
+    _technitium_extra_hosts: >-
+      {{ _technitium_extra_hosts | default({}) | combine({
+        item: hostvars[item].ansible_host,
+        item ~ '.' ~ (technitium_cluster_domain | default('local.sinlessgames.com')): hostvars[item].ansible_host
+      }) }}
+  loop: "{{ groups.get('dns', []) }}"
+  when: hostvars[item].ansible_host is defined
+
 # -----------------------------------------------------------------------------
 # OS detection (Jinja-safe)
 # -----------------------------------------------------------------------------
@@ -148,6 +158,10 @@
   register: _technitium_container_info
   failed_when: false
 
+- name: Install | Set Technitium container existence flag
+  ansible.builtin.set_fact:
+    _technitium_container_exists: "{{ _technitium_container_info.exists | default(false) | bool }}"
+
 # -----------------------------------------------------------------------------
 # Port 53 conflict handling
 # -----------------------------------------------------------------------------
@@ -194,17 +208,65 @@
     state: directory
     mode: "0755"
 
+- name: Install | Stop existing Technitium container for cluster reconfigure
+  community.docker.docker_container:
+    name: "{{ technitium_container_name }}"
+    state: stopped
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _technitium_container_exists | bool
+
+- name: Install | Remove existing Technitium container for cluster reconfigure
+  community.docker.docker_container:
+    name: "{{ technitium_container_name }}"
+    state: absent
+    force_kill: true
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _technitium_container_exists | bool
+
+- name: Install | Detect listeners on port 53 (cluster reconfigure)
+  ansible.builtin.shell: >-
+    (ss -H -ltnup "( sport = :53 )"; ss -H -lunp "( sport = :53 )")
+    | sed -n "s/.*pid=\([0-9]*\),.*/\1/p" | sort -u
+  register: _port53_pids
+  changed_when: false
+  when: technitium_cluster_enabled | default(false) | bool
+
+- name: Install | Kill listeners on port 53 (cluster reconfigure)
+  ansible.builtin.shell: "printf '%s\n' {{ _port53_pids.stdout_lines | join(' ') }} | xargs -r kill -9"
+  register: _port53_kill
+  changed_when: _port53_kill.stdout != ""
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _port53_pids.stdout_lines | length > 0
+
+- name: Install | Wait for port 53 to be free (cluster reconfigure)
+  ansible.builtin.shell: 'ss -H -ltnup "( sport = :53 )" || true'
+  register: _port53_free_check
+  changed_when: false
+  retries: 5
+  delay: 2
+  until: _port53_free_check.stdout | length == 0
+  when: technitium_cluster_enabled | default(false) | bool
+
 - name: Install | Run Technitium DNS container
   community.docker.docker_container:
     name: "{{ technitium_container_name }}"
     image: "{{ technitium_image }}:{{ technitium_image_tag }}"
-    pull: true
+    pull: "{{ not (technitium_cluster_enabled | default(false) | bool) }}"
     state: started
+    recreate: "{{ technitium_cluster_enabled | default(false) | bool }}"
     restart_policy: "{{ technitium_restart_policy }}"
-    published_ports:
-      - "{{ technitium_bind_ip }}:{{ technitium_http_port }}:5380/tcp"
-      - "{{ technitium_bind_ip }}:{{ technitium_dns_port }}:53/udp"
-      - "{{ technitium_bind_ip }}:{{ technitium_dns_port }}:53/tcp"
+    hostname: "{{ inventory_hostname }}"
+    ports:
+      - "{{ technitium_http_port }}:5380/tcp"
+      - "{{ technitium_dns_port }}:53/tcp"
+      - "{{ technitium_dns_port }}:53/udp"
+      - "53443:53443/tcp"
     volumes:
-      - "{{ technitium_data_dir }}:/etc/dns"
+      - "{{ technitium_data_dir }}:/etc/technitium"
     env: "{{ _technitium_env }}"
+    etc_hosts: "{{ _technitium_extra_hosts | default({}) }}"
+    capabilities:
+      - NET_BIND_SERVICE

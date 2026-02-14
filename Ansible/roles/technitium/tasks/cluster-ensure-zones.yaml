@@ -1,0 +1,159 @@
+---
+# =============================================================================
+# Technitium DNS Cluster Join — Ensure Zones Exist
+# =============================================================================
+# Ensures the cluster domain zone exists on primary with A records for all nodes.
+# This allows secondary nodes to resolve the primary FQDN from Technitium before
+# the cluster join completes.
+# =============================================================================
+
+- name: Technitium Cluster Join | Wait for primary API
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: 5380
+    delay: 2
+    timeout: 120
+    state: started
+  run_once: true
+  delegate_to: "{{ technitium_cluster_primary_host }}"
+  when: technitium_cluster_enabled | default(false) | bool
+
+- name: Technitium Cluster Join | Read primary token file (if present)
+  ansible.builtin.slurp:
+    src: "{{ technitium_output_dir }}/{{ technitium_cluster_primary_host }}.api-token"
+  register: _primary_token_file
+  failed_when: false
+  run_once: true
+  delegate_to: localhost
+  when: technitium_cluster_enabled | default(false) | bool
+
+- name: Technitium Cluster Join | Set primary API token from file
+  ansible.builtin.set_fact:
+    _primary_api_token: "{{ _primary_token_file.content | b64decode | trim }}"
+  run_once: true
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _primary_token_file is defined
+    - _primary_token_file.content is defined
+    - (_primary_token_file.content | length) > 0
+
+- name: Technitium Cluster Join | Get primary password from hostvars
+  ansible.builtin.set_fact:
+    _primary_password: "{{ hostvars[technitium_cluster_primary_host].technitium_actual_password }}"
+  run_once: true
+  when: technitium_cluster_enabled | default(false) | bool
+
+- name: Technitium Cluster Join | Create API token on primary for zone changes
+  ansible.builtin.uri:
+    url: "http://{{ technitium_cluster_primary_ip }}:5380/api/user/createToken"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      user: "{{ technitium_admin_user | default('admin') }}"
+      pass: "{{ _primary_password | default('admin') }}"
+      tokenName: "ansible-cluster-join"
+    status_code: [200, 400]
+    return_content: true
+  register: _primary_token_create
+  run_once: true
+  delegate_to: "{{ technitium_cluster_primary_host }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _primary_api_token is not defined or _primary_api_token | length == 0
+
+- name: Technitium Cluster Join | Retry primary token creation with unique name
+  ansible.builtin.uri:
+    url: "http://{{ technitium_cluster_primary_ip }}:5380/api/user/createToken"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      user: "{{ technitium_admin_user | default('admin') }}"
+      pass: "{{ _primary_password | default('admin') }}"
+      tokenName: "ansible-cluster-join-{{ lookup('pipe', 'date +%s') }}"
+    status_code: [200, 400]
+    return_content: true
+  register: _primary_token_create_retry
+  run_once: true
+  delegate_to: "{{ technitium_cluster_primary_host }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _primary_api_token is not defined or _primary_api_token | length == 0
+    - _primary_token_create.json is defined
+    - _primary_token_create.json.status is defined
+    - _primary_token_create.json.status != 'ok'
+
+- name: Technitium Cluster Join | Set primary API token
+  ansible.builtin.set_fact:
+    _primary_api_token: >-
+      {{ (_primary_token_create.json.token
+          if _primary_token_create.json is defined
+          and _primary_token_create.json.status == 'ok'
+          else
+          _primary_token_create_retry.json.token
+          if _primary_token_create_retry.json is defined
+          and _primary_token_create_retry.json.status == 'ok'
+          else '') }}
+  run_once: true
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _primary_api_token is not defined or _primary_api_token | length == 0
+
+- name: Technitium Cluster Join | Assert primary API token available
+  ansible.builtin.assert:
+    that:
+      - _primary_api_token | length > 0
+    fail_msg: >-
+      Failed to create API token on primary node for cluster join.
+      Status: {{ _primary_token_create.json.status | default('unknown') }}
+      Error: {{ _primary_token_create.json.errorMessage | default('unknown') }}
+  run_once: true
+  when: technitium_cluster_enabled | default(false) | bool
+
+- name: Technitium Cluster Join | Create cluster domain zone on primary
+  ansible.builtin.uri:
+    url: "http://{{ technitium_cluster_primary_ip }}:5380/api/zones/create"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ _primary_api_token }}"
+      zone: "{{ technitium_cluster_domain }}"
+      type: "Primary"
+    status_code: [200, 400]
+    return_content: true
+  register: _zone_create
+  failed_when: >-
+    _zone_create.json.status is defined
+    and _zone_create.json.status != 'ok'
+    and 'already' not in (_zone_create.json.errorMessage | default('') | lower)
+  run_once: true
+  delegate_to: "{{ technitium_cluster_primary_host }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _primary_api_token | length > 0
+
+- name: Technitium Cluster Join | Create A records for all cluster nodes in zone
+  ansible.builtin.uri:
+    url: "http://{{ technitium_cluster_primary_ip }}:5380/api/records/add"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ _primary_api_token }}"
+      zone: "{{ technitium_cluster_domain }}"
+      name: "{{ item }}"
+      type: "A"
+      ttl: "300"
+      ipAddress: "{{ hostvars[item].ansible_host }}"
+    status_code: [200, 400]
+    return_content: true
+  register: _record_create
+  failed_when: >-
+    _record_create.json.status is defined
+    and _record_create.json.status != 'ok'
+    and 'already' not in (_record_create.json.errorMessage | default('') | lower)
+  loop: "{{ groups.get('dns', []) }}"
+  run_once: true
+  delegate_to: "{{ technitium_cluster_primary_host }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - _primary_api_token | length > 0
+    - hostvars[item].ansible_host is defined

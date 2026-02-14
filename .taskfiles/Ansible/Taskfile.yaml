@@ -92,7 +92,7 @@ tasks:
     cmds:
       - |
         set -e
-        {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/setup-technitium.yaml"
+        {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/setup-technitium.yaml" {{.CLI_ARGS}}
 
   check-fix-dns:
     desc: "Check and fix DNS resolution on VMs"

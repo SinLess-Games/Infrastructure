@@ -1,0 +1,160 @@
+---
+# =============================================================================
+# Technitium DNS Cluster Join — Join Secondary Nodes
+# =============================================================================
+# Joins secondary nodes to the primary Technitium cluster.
+# Uses resolved FQDN with retries to handle timing issues.
+# =============================================================================
+
+- name: Technitium Cluster Join | Wait for zone propagation (10 seconds)
+  ansible.builtin.pause:
+    seconds: 10
+  run_once: true
+  when: technitium_cluster_enabled | default(false) | bool
+
+- name: Technitium Cluster Join | Get primary password from hostvars
+  ansible.builtin.set_fact:
+    _primary_password: "{{ hostvars[technitium_cluster_primary_host].technitium_actual_password }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Check for Technitium container on secondary
+  community.docker.docker_container_info:
+    name: "{{ technitium_container_name | default('technitium') }}"
+  register: _secondary_container_info
+  failed_when: false
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Set container existence flag
+  ansible.builtin.set_fact:
+    _secondary_container_exists: "{{ _secondary_container_info.exists | default(false) | bool }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Assert Technitium container exists on secondary
+  ansible.builtin.assert:
+    that:
+      - _secondary_container_exists | bool
+    fail_msg: "Technitium container not found on {{ inventory_hostname }}. Run full setup before cluster join."
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Ensure Technitium container running on secondary
+  ansible.builtin.command: "docker start {{ technitium_container_name | default('technitium') }}"
+  changed_when: false
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+    - _secondary_container_exists | bool
+
+- name: Technitium Cluster Join | Wait for secondary API
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: 5380
+    delay: 2
+    timeout: 60
+    state: started
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Create API token on secondary
+  ansible.builtin.uri:
+    url: "{{ technitium_api_url }}/api/user/createToken"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      user: "{{ technitium_admin_user | default('admin') }}"
+      pass: "{{ technitium_actual_password }}"
+      tokenName: "ansible-cluster-join"
+    status_code: [200, 400]
+    return_content: true
+  register: _secondary_token_create
+  failed_when: false
+  no_log: true
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Set secondary API token
+  ansible.builtin.set_fact:
+    _secondary_api_token: >-
+      {{ (_secondary_token_create.json.token
+          if _secondary_token_create.json is defined
+          and _secondary_token_create.json.status == 'ok'
+          else '') }}
+  no_log: true
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Assert secondary API token available
+  ansible.builtin.assert:
+    that:
+      - _secondary_api_token | length > 0
+    fail_msg: >-
+      Failed to create API token on secondary node for cluster join.
+      Status: {{ _secondary_token_create.json.status | default('unknown') }}
+      Error: {{ _secondary_token_create.json.errorMessage | default('unknown') }}
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Delete cluster domain zone on secondary (if exists)
+  ansible.builtin.uri:
+    url: "{{ technitium_api_url }}/api/zones/delete"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ _secondary_api_token }}"
+      zone: "{{ technitium_cluster_domain }}"
+    status_code: [200, 400]
+    return_content: true
+  register: _zone_delete
+  failed_when: false
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Join secondary node to cluster
+  ansible.builtin.uri:
+    url: "{{ technitium_api_url }}/api/admin/cluster/initJoin"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      token: "{{ _secondary_api_token }}"
+      secondaryNodeIpAddresses: "{{ ansible_host }}"
+      primaryNodeUrl: "http://{{ technitium_cluster_primary_join_host | default(technitium_cluster_primary_host ~ '.' ~ technitium_cluster_domain) }}:5380/"
+      primaryNodeIpAddresses: "{{ technitium_cluster_primary_ip }}"
+      primaryNodeUsername: "{{ technitium_admin_user | default('admin') }}"
+      primaryNodePassword: "{{ _primary_password }}"
+      ignoreCertificateErrors: "true"
+    status_code: [200, 400]
+    return_content: true
+  register: _cluster_join
+  retries: 5
+  delay: 3
+  until: >-
+    _cluster_join.json is defined
+    and _cluster_join.json.status is defined
+  failed_when: >-
+    _cluster_join.json is defined
+    and _cluster_join.json.status is defined
+    and _cluster_join.json.status != 'ok'
+    and 'already' not in (_cluster_join.json.errorMessage | default('') | lower)
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+
+- name: Technitium Cluster Join | Display join result
+  ansible.builtin.debug:
+    msg: "Cluster join {{ inventory_hostname }}: {{ _cluster_join.json.status | default('unknown') }} - {{ _cluster_join.json.errorMessage | default('ok') }}"
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - inventory_hostname != technitium_cluster_primary_host
+    - _cluster_join is defined

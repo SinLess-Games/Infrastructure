@@ -80,6 +80,12 @@
   delay: 5
   until: _ufw_install is succeeded
 
+- name: OS | Allow SSH before enabling UFW
+  community.general.ufw:
+    rule: allow
+    name: OpenSSH
+  ignore_errors: true
+
 - name: OS | Set UFW default policies (deny incoming, allow outgoing)
   community.general.ufw:
     state: enabled
