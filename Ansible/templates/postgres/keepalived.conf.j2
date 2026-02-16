@@ -1,0 +1,42 @@
+# Keepalived configuration for {{ inventory_hostname }}
+# Managed by Ansible - DO NOT EDIT MANUALLY
+
+global_defs {
+    router_id {{ inventory_hostname }}
+    enable_script_security
+    script_user root
+}
+
+vrrp_script check_haproxy {
+    script "/usr/local/bin/check-haproxy.sh"
+    interval 2
+    weight 2
+    fall 2
+    rise 2
+}
+
+vrrp_instance VI_{{ postgres_keepalived_vrid }} {
+    state {% if inventory_hostname == postgres_nodes[0].name %}MASTER{% else %}BACKUP{% endif %}
+
+    interface {{ postgres_vip_iface }}
+    virtual_router_id {{ postgres_keepalived_vrid }}
+    priority {{ postgres_nodes | selectattr('name', 'equalto', inventory_hostname) | map(attribute='keepalived_priority') | first }}
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        auth_pass {{ postgres_keepalived_auth_pass }}
+    }
+
+    virtual_ipaddress {
+        {{ postgres_vip_ip }}/{{ postgres_vip_cidr }} dev {{ postgres_vip_iface }}
+    }
+
+    track_script {
+        check_haproxy
+    }
+
+    notify_master "/usr/bin/logger -t keepalived 'Transitioned to MASTER state on {{ inventory_hostname }}'"
+    notify_backup "/usr/bin/logger -t keepalived 'Transitioned to BACKUP state on {{ inventory_hostname }}'"
+    notify_fault "/usr/bin/logger -t keepalived 'Transitioned to FAULT state on {{ inventory_hostname }}'"
+}

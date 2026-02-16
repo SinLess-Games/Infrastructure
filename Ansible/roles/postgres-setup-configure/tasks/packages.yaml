@@ -1,0 +1,49 @@
+---
+# =============================================================================
+# Package Installation
+# =============================================================================
+
+- name: Wait for gateway to be reachable
+  ansible.builtin.command: "ping -c1 -W1 {{ postgres_gateway }}"
+  register: postgres_gateway_ping
+  retries: 12
+  delay: 5
+  until: postgres_gateway_ping.rc == 0
+  changed_when: false
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+    update_cache_retries: 5
+    update_cache_retry_max_delay: 30
+  register: postgres_apt_update
+  ignore_errors: true
+
+- name: Capture apt update output when it fails
+  ansible.builtin.command: "apt-get update"
+  register: postgres_apt_update_debug
+  changed_when: false
+  when: postgres_apt_update is failed
+
+- name: Fail with apt update error details
+  ansible.builtin.fail:
+    msg: "Apt update failed on {{ inventory_hostname }}: {{ postgres_apt_update_debug.stderr | default(postgres_apt_update.msg | default('unknown error')) }}"
+  when: postgres_apt_update is failed
+
+- name: Install required Postgres packages
+  ansible.builtin.apt:
+    name: "{{ postgres_packages_required }}"
+    state: present
+
+- name: Install optional Postgres packages
+  ansible.builtin.apt:
+    name: "{{ postgres_packages_optional }}"
+    state: present
+  register: postgres_optional_install
+  failed_when: false
+
+- name: Warn if optional packages failed to install
+  ansible.builtin.debug:
+    msg: "Optional packages failed to install on {{ inventory_hostname }}: {{ postgres_optional_install.stderr | default('unknown error') }}"
+  when: postgres_optional_install is failed

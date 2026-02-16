@@ -1,0 +1,51 @@
+---
+# =============================================================================
+# Postgres Setup + Configure Role - Handlers
+# =============================================================================
+
+- name: Restart pganalyze collector service
+  ansible.builtin.service:
+    name: "{{ postgres_pganalyze_service_name }}"
+    state: restarted
+  when: postgres_pganalyze_install_method != "container"
+
+- name: Restart pganalyze collector container
+  community.docker.docker_container:
+    name: "{{ postgres_pganalyze_container_name }}"
+    state: started
+    restart: true
+  when: postgres_pganalyze_install_method == "container"
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart etcd
+  ansible.builtin.service:
+    name: etcd
+    state: restarted
+
+- name: Reload postgresql
+  ansible.builtin.service:
+    name: postgresql
+    state: reloaded
+
+- name: Restart patroni
+  ansible.builtin.service:
+    name: patroni
+    state: restarted
+
+- name: Restart haproxy
+  ansible.builtin.service:
+    name: haproxy
+    state: restarted
+
+- name: Restart keepalived
+  ansible.builtin.service:
+    name: keepalived
+    state: restarted
+
+- name: Restart pgbouncer
+  ansible.builtin.service:
+    name: pgbouncer
+    state: restarted

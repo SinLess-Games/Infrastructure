@@ -35,6 +35,7 @@
     - ../group_vars/all/packages.yaml
     - ../group_vars/all/zsh.yaml
     - ../group_vars/all/users.yaml
+    - ../group_vars/vault/vault-secrets.yaml
 
   vars:
     # Only install essential packages for Vault nodes
@@ -78,6 +79,9 @@
     
     - role: vault-setup
       tags: ["setup"]
+
+    - role: vault-secrets
+      tags: ["secrets"]
 
     - role: vault-users
       tags: ["users"]

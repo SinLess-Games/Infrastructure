@@ -12,16 +12,19 @@
     - name: Load PostgreSQL shared variables
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/postgres/main.yaml"
+      tags: ["always"]
 
     - name: Check if PostgreSQL environment override exists
       ansible.builtin.stat:
         path: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
       register: postgres_env_vars_file
+      tags: ["always"]
 
     - name: Load PostgreSQL environment override variables
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
       when: postgres_env_vars_file.stat.exists
+      tags: ["always"]
 
     - name: Build runtime postgres inventory group
       ansible.builtin.add_host:
@@ -45,21 +48,30 @@
     - name: Load PostgreSQL shared variables
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/postgres/main.yaml"
+      tags: ["always"]
+    
+    - name: Ensure DNS resolver configuration
+      ansible.builtin.include_role:
+        name: dns-resolver
+      tags: ["dns"]
 
     - name: Check if PostgreSQL environment override exists
       ansible.builtin.stat:
         path: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
       register: postgres_env_vars_file
+      tags: ["always"]
 
     - name: Load PostgreSQL environment override variables
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
       when: postgres_env_vars_file.stat.exists
+      tags: ["always"]
 
     - name: Wait for SSH on postgres nodes
       ansible.builtin.wait_for_connection:
         timeout: 300
         delay: 5
+      tags: ["always"]
 
   roles:
     - role: postgres-setup-configure

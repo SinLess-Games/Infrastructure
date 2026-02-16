@@ -48,6 +48,10 @@ collections:
   - name: community.docker
     version: "3.13.1"
 
+  # PostgreSQL automation
+  - name: community.postgresql
+    version: "3.6.0"
+
   # ---------------------------------------------------------------------------
   # Kubernetes
   # ---------------------------------------------------------------------------

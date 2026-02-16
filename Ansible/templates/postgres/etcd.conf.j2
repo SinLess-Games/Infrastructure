@@ -1,0 +1,14 @@
+# etcd configuration for {{ postgres_cluster_name }}
+# Managed by Ansible - DO NOT EDIT MANUALLY
+
+{% set node = postgres_nodes | selectattr('name', 'equalto', inventory_hostname) | first %}
+ETCD_NAME="{{ inventory_hostname }}"
+ETCD_DATA_DIR="/var/lib/etcd/{{ postgres_cluster_name }}"
+ETCD_LISTEN_PEER_URLS="http://{{ node.ip }}:{{ postgres_etcd_peer_port }}"
+ETCD_LISTEN_CLIENT_URLS="http://{{ node.ip }}:{{ postgres_etcd_client_port }},http://127.0.0.1:{{ postgres_etcd_client_port }}"
+ETCD_INITIAL_ADVERTISE_PEER_URLS="http://{{ node.ip }}:{{ postgres_etcd_peer_port }}"
+ETCD_ADVERTISE_CLIENT_URLS="http://{{ node.ip }}:{{ postgres_etcd_client_port }}"
+ETCD_INITIAL_CLUSTER="{% for n in postgres_nodes %}{{ n.name }}=http://{{ n.ip }}:{{ postgres_etcd_peer_port }}{% if not loop.last %},{% endif %}{% endfor %}"
+ETCD_INITIAL_CLUSTER_STATE="{{ postgres_etcd_cluster_state | default('new') }}"
+ETCD_INITIAL_CLUSTER_TOKEN="{{ postgres_cluster_name }}-etcd"
+ETCD_ENABLE_V2="true"

@@ -3,59 +3,76 @@
 # PostgreSQL HA Cluster - Shared Defaults
 # =============================================================================
 
-# Deployment profile (override with -e postgres_environment=prod)
 postgres_environment: "dev"
 
 # Terraform/Proxmox integration
 postgres_module_source: "./modules/postgres"
 postgres_proxmox_api_url: "https://10.10.10.15:8006/api2/json"
-postgres_proxmox_tlTerraform/main.auto.tfvarss_insecure: true
+postgres_proxmox_tls_insecure: true
 postgres_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
 
-# VM template and topology
+# Vault secrets (KV v2)
+postgres_vault_kv_path: "ansible/postgres"
+postgres_vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('https://vault.local.sinlessgames.com', true) }}"
+postgres_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
+postgres_vault_skip_verify: "{{ lookup('env', 'VAULT_SKIP_VERIFY') | default('true', true) }}"
+postgres_vault_token_file: "{{ playbook_dir }}/../../.outputs/vault/unseal-keys.json"
+postgres_vault_required_keys:
+  - "superuser_password"
+  - "replication_password"
+  - "pgbouncer_password"
+  - "pgbackrest_repo_password"
+  - "pganalyze_api_key"
+  - "pgadmin_password"
+  - "keepalived_password"
+
+# Cluster metadata
 postgres_cluster_name: "postgres-ha"
-postgres_vm_template_name: "debian-13-template"
-postgres_vm_count: 3
+postgres_node_name_prefix: "postgres"
+postgres_node_count: "{{ postgres_nodes | length }}"
+postgres_vm_id_start: 206
+
+# Proxmox placement
 postgres_target_nodes:
   - "pve-01"
   - "pve-04"
   - "pve-05"
+postgres_clone_template: "debian-13-template"
 
 # VM sizing
-postgres_vm_cpu: 4
-postgres_vm_memory_mb: 8192
-postgres_vm_disk_gb: 80
-postgres_vm_storage: "VM_Disks"
+postgres_cpu_cores: 4
+postgres_cpu_sockets: 1
+postgres_memory_mb: 8192
+postgres_disk_size: "80G"
+postgres_storage: "VM_Disks"
 
 # Networking
-postgres_network_bridge: "vmbr0"
-postgres_vlan_id: 20
-postgres_network_cidr: "/24"
-postgres_network_subnet: "10.10.20.0/24"
-postgres_gateway: "10.10.20.1"
-postgres_dns_servers:
-  - "10.10.10.13"
-  - "1.1.1.1"
-postgres_vip_ip: "10.10.20.50"
+postgres_network_bridge: "vmbr40"
+postgres_vlan_id: 40
+postgres_cidr_subnet: "/24"
+postgres_network_subnet: "10.10.40.0/24"
+postgres_gateway: "10.10.40.1"
+postgres_nameservers: "10.10.40.1 1.1.1.1"
+postgres_vip_ip: "10.10.40.50"
 postgres_vip_cidr: 24
-postgres_vip_iface: "eth0"
+postgres_vip_iface: "{{ ansible_default_ipv4.interface | default('eth0') }}"
 postgres_vip_dns_name_suggestion: "postgres-vip.infra.local"
 
 # Cluster nodes (source of truth for names + static cloud-init IPs)
 postgres_nodes:
   - name: "postgres-01"
-    ip: "10.10.20.21"
-    vmid: 221
+    ip: "10.10.40.2"
+    vmid: 206
     target_node: "pve-01"
     keepalived_priority: 140
   - name: "postgres-02"
-    ip: "10.10.20.22"
-    vmid: 222
+    ip: "10.10.40.3"
+    vmid: 207
     target_node: "pve-04"
     keepalived_priority: 130
   - name: "postgres-03"
-    ip: "10.10.20.23"
-    vmid: 223
+    ip: "10.10.40.4"
+    vmid: 208
     target_node: "pve-05"
     keepalived_priority: 120
 
@@ -85,14 +102,14 @@ patroni:
   restapi_port: 8008
   superuser:
     username: "postgres"
-    password: "CHANGEME_SUPERUSER_PASSWORD" # Move to Vault before production use.
+    password: "{{ postgres_superuser_password | default('') }}"
   replication:
     username: "replicator"
-    password: "CHANGEME_REPLICATION_PASSWORD" # Move to Vault before production use.
+    password: "{{ postgres_replication_password | default('') }}"
 
 # Keepalived
 postgres_keepalived_vrid: 62
-postgres_keepalived_auth_pass: "ChangeMeVrrp" # Move to Vault before production use.
+postgres_keepalived_auth_pass: "{{ postgres_keepalived_password | default('') }}"
 
 # Firewall/hardening
 postgres_firewall_enabled: true
@@ -109,6 +126,18 @@ postgres_backups:
   stanza: "postgres-ha"
   repository: "TODO: configure backup repository and credentials in Vault"
 
+# HA and backup (Proxmox)
+postgres_ha_enabled: true
+postgres_ha_group: "postgres-ha"
+postgres_backup_enabled: true
+postgres_backup_schedule: "0 4 * * *"
+
+# VM options
+postgres_start_at_node_boot: true
+postgres_agent_enabled: true
+postgres_protection: true
+postgres_startup_order: 25
+
 # Terraform module metadata
 postgres_tags:
   - "postgres"
@@ -120,4 +149,48 @@ postgres_description: "PostgreSQL HA cluster node (Terraform-managed)"
 postgres_database_names:
   - authentik
   - grafana
-  - 
+  - grafana_oncall
+  - harbor
+  - netbox
+  - backstage
+  - boundary
+  - defectdojo
+
+# Package installation
+postgres_packages_required:
+  - "postgresql"
+  - "postgresql-contrib"
+  - "python3-psycopg2"
+  - "python3-etcd"
+  - "python3-etcd3"
+  - "patroni"
+  - "pgbouncer"
+  - "pgbackrest"
+  - "etcd-server"
+  - "etcd-client"
+  - "haproxy"
+  - "keepalived"
+  - "curl"
+
+postgres_packages_optional:
+  - "prometheus-postgres-exporter"
+  - "prometheus-pgbouncer-exporter"
+  - "prometheus-patroni-exporter"
+  - "pgadmin4"
+
+postgres_pganalyze_enabled: true
+postgres_pganalyze_install_method: "container"
+postgres_pganalyze_container_image: "quay.io/pganalyze/collector:stable"
+postgres_pganalyze_container_name: "pganalyze-collector"
+postgres_pganalyze_container_packages:
+  - "docker.io"
+  - "python3-docker"
+postgres_patroni_exporter_enabled: true
+
+# pganalyze configuration
+postgres_pganalyze_config_path: "/etc/pganalyze-collector.conf"
+postgres_pganalyze_service_name: "pganalyze-collector"
+
+# Database provisioning
+postgres_db_provisioning_enabled: true
+postgres_primary_host: "{{ postgres_nodes[0].name }}"

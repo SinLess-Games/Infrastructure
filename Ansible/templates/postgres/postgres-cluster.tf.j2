@@ -1,0 +1,57 @@
+// =====================================================================
+// Postgres Cluster Terraform Configuration (Managed by Ansible)
+// =====================================================================
+// Source: Ansible/templates/postgres/postgres-cluster.tf.j2
+// DO NOT EDIT MANUALLY
+// =====================================================================
+
+module "postgres_cluster" {
+  source = "{{ postgres_module_source }}"
+
+  # Cluster configuration
+  cluster_name     = "{{ postgres_cluster_name }}"
+  environment      = "{{ postgres_environment }}"
+  node_count       = {{ postgres_node_count }}
+  node_name_prefix = "{{ postgres_node_name_prefix }}"
+  vm_id_start      = {{ postgres_vm_id_start }}
+
+  # Proxmox placement (HA distribution)
+  target_nodes   = {{ postgres_target_nodes | to_json }}
+  clone_template = "{{ postgres_clone_template }}"
+
+  # Network configuration
+  ip_addresses   = {{ postgres_nodes | map(attribute='ip') | list | to_json }}
+  gateway        = "{{ postgres_gateway }}"
+  cidr_subnet    = "{{ postgres_cidr_subnet }}"
+  vlan_id        = {{ postgres_vlan_id }}
+  network_bridge = "{{ postgres_network_bridge }}"
+  nameservers    = "{{ postgres_nameservers }}"
+
+  # Resource allocation
+  cpu_cores   = {{ postgres_cpu_cores }}
+  cpu_sockets = {{ postgres_cpu_sockets }}
+  memory_mb   = {{ postgres_memory_mb }}
+  disk_size   = "{{ postgres_disk_size }}"
+  storage     = "{{ postgres_storage }}"
+
+  # Access configuration
+  default_user = "{{ postgres_default_user }}"
+  ansible_user = "{{ postgres_ansible_user }}"
+  ssh_keys     = {{ postgres_ssh_keys | to_json }}
+
+  # HA and backup
+  ha_enabled      = {{ postgres_ha_enabled | ternary('true', 'false') }}
+  ha_group        = "{{ postgres_ha_group }}"
+  backup_enabled  = {{ postgres_backup_enabled | ternary('true', 'false') }}
+  backup_schedule = "{{ postgres_backup_schedule }}"
+
+  # VM options
+  start_at_node_boot = {{ postgres_start_at_node_boot | ternary('true', 'false') }}
+  agent_enabled      = {{ postgres_agent_enabled | ternary('true', 'false') }}
+  protection    = {{ postgres_protection | ternary('true', 'false') }}
+  startup_order = {{ postgres_startup_order }}
+
+  # Tags and metadata
+  tags        = {{ postgres_tags | to_json }}
+  description = "{{ postgres_description }}"
+}
