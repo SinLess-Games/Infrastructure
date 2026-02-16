@@ -87,7 +87,7 @@ vault_disk_size: "100G"
 # Vault Configuration
 # =============================================================================
 
-vault_version: "1.15.4"
+vault_version: "1.21.3"
 vault_port: 8200
 vault_cluster_port: 8201
 vault_storage_path: "/opt/vault/data"
@@ -135,7 +135,7 @@ vault_backup_schedule: "0 2 * * *"
 # VM Lifecycle Options
 # =============================================================================
 
-vault_onboot: true
+vault_start_at_node_boot: true
 vault_agent_enabled: true
 vault_protection: true
 vault_startup_order: 10

@@ -67,7 +67,7 @@ technitium_backup_enabled: true
 technitium_backup_schedule: "0 3 * * *"
 
 # VM lifecycle options
-technitium_onboot: true
+technitium_start_at_node_boot: true
 technitium_agent_enabled: true
 technitium_protection: true
 technitium_startup_order: 20

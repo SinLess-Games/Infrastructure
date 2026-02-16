@@ -5,6 +5,7 @@ vars:
   MODULES_DIR: "{{.TERRAFORM_DIR}}/modules"
   VAULT_MODULE: "{{.MODULES_DIR}}/vault-cluster"
   VAULT_SECRETS_MODULE: "{{.MODULES_DIR}}/vault-secrets"
+  VAULT_SECRETS_WORKDIR: "{{.VAULT_SECRETS_MODULE}}"
   INFLUXDB_MODULE: "{{.MODULES_DIR}}/influxdb"
   ENVIRONMENTS_DIR: "Environments"
   TERRAFORM_LOG_FILE: "{{.TERRAFORM_DIR}}/terraform.log"
@@ -35,6 +36,22 @@ tasks:
       - echo "Initializing Terraform with provider upgrades..."
       - terraform init -upgrade
       - echo "✓ Terraform initialized with upgraded providers"
+    
+  init:reconfigure:
+    desc: "Reconfigure Terraform backend and providers (useful for changing backend settings)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - echo "Reconfiguring Terraform..."
+      - terraform init -reconfigure
+      - echo "✓ Terraform reconfigured"
+  
+  migrate:
+    desc: "Migrate Terraform state to match current configuration (use with caution)"
+    dir: "{{.TERRAFORM_DIR}}"
+    cmds:
+      - echo "Migrating Terraform state..."
+      - terraform init -migrate-state
+      - echo "✓ Terraform state migration complete"
 
   # =============================================================================
   # Validation and Formatting
@@ -256,7 +273,7 @@ tasks:
 
   vault-secrets:init:
     desc: "Initialize Terraform for Vault secrets backends"
-    dir: "{{.VAULT_SECRETS_MODULE}}"
+    dir: "{{.VAULT_SECRETS_WORKDIR}}"
     cmds:
       - echo "Initializing Vault secrets Terraform..."
       - terraform init
@@ -264,23 +281,32 @@ tasks:
 
   vault-secrets:validate:
     desc: "Validate Vault secrets Terraform configuration"
-    dir: "{{.VAULT_SECRETS_MODULE}}"
+    dir: "{{.VAULT_SECRETS_WORKDIR}}"
     deps: [vault-secrets:init]
     cmds:
       - echo "Validating Vault secrets Terraform..."
       - terraform validate
       - echo "✓ Vault secrets Terraform validated"
 
+  vault-secrets:refresh:
+    desc: "Refresh Vault secrets Terraform state"
+    dir: "{{.VAULT_SECRETS_WORKDIR}}"
+    deps: [vault-secrets:init]
+    cmds:
+      - echo "Refreshing Vault secrets Terraform state..."
+      - terraform refresh
+      - echo "✓ Vault secrets Terraform refreshed"
+
   vault-secrets:fmt:
     desc: "Format Vault secrets Terraform files"
-    dir: "{{.VAULT_SECRETS_MODULE}}"
+    dir: "{{.VAULT_SECRETS_WORKDIR}}"
     cmds:
       - terraform fmt -recursive
       - echo "✓ Vault secrets Terraform formatted"
 
   vault-secrets:apply:auto:
     desc: "Apply Vault secrets Terraform changes without confirmation"
-    dir: "{{.VAULT_SECRETS_MODULE}}"
+    dir: "{{.VAULT_SECRETS_WORKDIR}}"
     deps: [vault-secrets:init]
     cmds:
       - echo "Applying Vault secrets Terraform..."

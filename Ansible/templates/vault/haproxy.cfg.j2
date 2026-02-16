@@ -7,6 +7,7 @@ global
   stats timeout 30s
   user haproxy
   group haproxy
+  lua-load /etc/haproxy/terraform-vault-auth.lua
 
 defaults
   log     global
@@ -15,6 +16,16 @@ defaults
   timeout connect 5000ms
   timeout client  50000ms
   timeout server  50000ms
+
+# HTTP defaults for Terraform backend
+defaults http-defaults
+  mode    http
+  option  httplog
+  timeout connect 5000ms
+  timeout client  50000ms
+  timeout server  50000ms
+  timeout http-request 10s
+  timeout http-keep-alive 10s
 
 # Stats page (optional)
 listen stats
@@ -53,3 +64,41 @@ listen vault-cluster
 {% for node in vault_cluster_nodes %}
   server {{ node.name }} {{ node.ip_address }}:{{ vault_cluster_addr_port }}
 {% endfor %}
+
+# =============================================================================
+# Terraform HTTP State Backend Integration
+# =============================================================================
+# This frontend/backend translates Terraform HTTP backend requests to Vault KV API  
+# Port 8180 for HTTP state operations (separate from main Vault API)
+
+frontend terraform-state-http
+  bind {{ vault_haproxy_bind_address }}:8180 ssl crt /etc/haproxy/vault-combined.pem
+  mode http
+  option httplog
+  option forwardfor
+  
+  # Extract basic auth password (Vault token) and convert to X-Vault-Token header
+  http-request lua.terraform_vault_auth
+  
+  # Use the terraform-state-backend
+  default_backend vault-kv-api
+
+backend vault-kv-api
+  mode http
+  balance roundrobin
+  option httpchk GET /v1/sys/health
+  http-check expect status 200
+  
+  # Unwrap Vault KV v1 response to extract Terraform state
+  http-response lua.unwrap_vault_response
+  
+  # SSL/TLS settings for backend connection to Vault
+{% if vault_cluster_nodes is defined and vault_cluster_nodes | length > 0 %}
+{% for node in vault_cluster_nodes %}
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }} check ssl verify none
+{% endfor %}
+{% else %}
+{% for host in groups['vault'] %}
+  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_api_addr_port }} check ssl verify none
+{% endfor %}
+{% endif %}

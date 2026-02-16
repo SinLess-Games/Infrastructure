@@ -129,6 +129,18 @@ tasks:
           {{.ANSIBLE_DIR}}/playbooks/deploy-vault.yaml \
           {{.CLI_ARGS}}
 
+  uninstall-vault:
+    desc: "Uninstall Vault from all nodes (removes binaries, config, and data)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/uninstall-vault.yaml \
+          {{.CLI_ARGS}}
+
   deploy-technitium:
     desc: "Deploy Technitium DNS cluster using Terraform via Ansible role"
     deps: [init]
@@ -139,4 +151,16 @@ tasks:
         {{.VENV_DIR}}/bin/ansible-playbook \
           -i {{.ANSIBLE_DIR}}/inventory \
           {{.ANSIBLE_DIR}}/playbooks/deploy-technitium.yaml \
+          {{.CLI_ARGS}}
+
+  deploy-postgres:
+    desc: "Deploy PostgreSQL HA cluster using Terraform via Ansible role"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-postgres.yaml \
           {{.CLI_ARGS}}

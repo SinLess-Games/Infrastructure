@@ -29,7 +29,7 @@ vault_prod:
       vault_cluster_addr: "https://10.10.10.4:8201"
       vault_raft_leader: false
   vars:
-    vault_version: "1.15.4"
+    vault_version: "1.21.3"
     vault_port: 8200
     vault_cluster_port: 8201
     vault_storage_path: "/opt/vault/data"

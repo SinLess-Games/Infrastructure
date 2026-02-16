@@ -4,7 +4,7 @@
 # =============================================================================
 # Purpose:
 #   - Enable Vault secrets backends via Terraform
-#   - Uses Terraform/modules/vault-secrets as the working directory
+#   - Stages Terraform/modules/vault-secrets into a temporary working directory
 # =============================================================================
 
 - name: "Check for Vault root token file"
@@ -225,35 +225,97 @@
     - vault_setup_terraform_configs is defined
     - vault_setup_terraform_configs | length > 0
 
-- name: "Initialize Terraform (Vault secrets backends)"
-  ansible.builtin.command:
-    cmd: "task terraform:vault-secrets:init"
-    chdir: "{{ vault_repo_root }}"
-  environment: "{{ vault_setup_tf_env }}"
+- name: "Create temporary Terraform workdir (Vault secrets)"
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: "-vault-secrets"
+  register: vault_setup_tf_workdir
   delegate_to: localhost
   become: false
   run_once: true
   when: vault_setup_enabled | bool
 
+- name: "Stage Vault secrets Terraform module"
+  ansible.builtin.copy:
+    src: "{{ vault_setup_terraform_dir }}/"
+    dest: "{{ vault_setup_tf_workdir.path }}/"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_tf_workdir.path is defined
+
+- name: "Clear stale Terraform state (before init)"
+  ansible.builtin.file:
+    path: "{{ vault_setup_tf_workdir.path }}/{{ item }}"
+    state: absent
+  loop:
+    - ".terraform"
+    - "terraform.tfstate"
+    - "terraform.tfstate.backup"
+    - ".terraform.lock.hcl"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_tf_workdir.path is defined
+
+- name: "Initialize Terraform (Vault secrets backends)"
+  ansible.builtin.command:
+    cmd: "task terraform:vault-secrets:init VAULT_SECRETS_WORKDIR={{ vault_setup_tf_workdir.path }}"
+    chdir: "{{ vault_repo_root }}"
+  environment: "{{ vault_setup_tf_env }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_tf_workdir.path is defined
+
+- name: "Refresh Terraform state (sync with Vault)"
+  ansible.builtin.command:
+    cmd: "task terraform:vault-secrets:refresh VAULT_SECRETS_WORKDIR={{ vault_setup_tf_workdir.path }}"
+    chdir: "{{ vault_repo_root }}"
+  environment: "{{ vault_setup_tf_env }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: vault_setup_tf_refresh_result
+  failed_when: false
+  changed_when: false
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_tf_workdir.path is defined
+
 - name: "Apply Terraform (Vault secrets backends)"
   ansible.builtin.command:
-    cmd: "task terraform:vault-secrets:apply:auto"
+    cmd: "task terraform:vault-secrets:apply:auto VAULT_SECRETS_WORKDIR={{ vault_setup_tf_workdir.path }}"
     chdir: "{{ vault_repo_root }}"
   environment: "{{ vault_setup_tf_env }}"
   delegate_to: localhost
   become: false
   run_once: true
   register: vault_setup_tf_apply_result
+  failed_when: 
+    - vault_setup_tf_apply_result.rc != 0
+    - "'path is already in use' not in vault_setup_tf_apply_result.stderr"
   retries: 3
   delay: 10
-  until: vault_setup_tf_apply_result.rc == 0
-  when: vault_setup_enabled | bool
-  when: vault_setup_enabled | bool
+  until:
+    - vault_setup_tf_apply_result.rc == 0 or 'path is already in use' in vault_setup_tf_apply_result.stderr
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_tf_workdir.path is defined
 
 - name: "Cleanup Terraform working directory"
   ansible.builtin.file:
-    path: "/tmp/vault-terraform-setup"
+    path: "{{ vault_setup_tf_workdir.path }}"
     state: absent
-  delegate_to: "{{ groups['vault'][0] }}"
+  delegate_to: localhost
+  become: false
   run_once: true
-  when: vault_setup_enabled | bool
+  when:
+    - vault_setup_enabled | bool
+    - vault_setup_tf_workdir.path is defined

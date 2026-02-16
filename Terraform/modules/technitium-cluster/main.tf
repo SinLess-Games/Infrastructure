@@ -28,9 +28,9 @@ resource "proxmox_vm_qemu" "technitium_node" {
   target_node = var.target_nodes[count.index % length(var.target_nodes)]
   description = "${var.description} (Node ${count.index + 1}/${var.node_count}) on ${var.target_nodes[count.index % length(var.target_nodes)]}"
 
-  onboot     = var.onboot
-  protection = var.protection
-  startup    = "order=${var.startup_order}"
+  start_at_node_boot = var.start_at_node_boot
+  protection         = var.protection
+  startup            = "order=${var.startup_order}"
 
   clone      = var.clone_template
   full_clone = true

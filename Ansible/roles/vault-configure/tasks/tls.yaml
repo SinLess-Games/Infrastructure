@@ -147,7 +147,9 @@
         subject_alt_name:
           - "DNS:{{ inventory_hostname }}"
           - "DNS:vault.local"
+          - "DNS:{{ vault_cluster_hostname }}"
           - "IP:{{ ansible_host | default(inventory_hostname) }}"
+          - "IP:{{ vault_keepalived_virtual_ip }}"
         owner: "{{ vault_user }}"
         group: "{{ vault_group }}"
       when: vault_cert_needs_regen | default(true)

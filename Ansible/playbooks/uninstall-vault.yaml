@@ -1,0 +1,175 @@
+---
+# =============================================================================
+# Vault Uninstallation Playbook
+# =============================================================================
+# Purpose:
+#   - Stop Vault service on all nodes
+#   - Remove Vault binary and binaries
+#   - Remove Vault configuration directories
+#   - Remove Vault data/storage directories
+#   - Remove Vault systemd service files
+#   - Clean up residual files and directories
+# =============================================================================
+
+- name: Uninstall Vault from all nodes
+  hosts: vault
+  become: true
+  gather_facts: true
+
+  vars:
+    vault_home: "/etc/vault"
+    vault_data_dir: "/opt/vault/data"
+    vault_log_dir: "/var/log/vault"
+    vault_bin_path: "/usr/local/bin/vault"
+    vault_systemd_file: "/etc/systemd/system/vault.service"
+
+  pre_tasks:
+    - name: "Display uninstall information"
+      debug:
+        msg: |
+          Uninstalling Vault from {{ inventory_hostname }} ({{ ansible_host }})
+          
+          This will:
+          - Stop the vault service
+          - Remove vault binary at {{ vault_bin_path }}
+          - Remove vault config at {{ vault_home }}
+          - Remove vault data at {{ vault_data_dir }}
+          - Remove vault logs at {{ vault_log_dir }}
+          - Remove systemd service file
+          - Clean up residual files
+
+  tasks:
+    - name: "Stop Vault service"
+      systemd:
+        name: vault
+        state: stopped
+        enabled: no
+      ignore_errors: true
+      register: vault_stop_result
+
+    - name: "Wait for Vault process to stop"
+      wait_for:
+        port: 8200
+        state: absent
+        timeout: 30
+      ignore_errors: true
+
+    - name: "Remove Vault systemd service file"
+      file:
+        path: "{{ vault_systemd_file }}"
+        state: absent
+
+    - name: "Remove Vault service from systemd"
+      file:
+        path: "{{ vault_systemd_file }}.d"
+        state: absent
+
+    - name: "Reload systemd daemon"
+      systemd:
+        daemon_reload: yes
+
+    - name: "Remove Vault binary"
+      file:
+        path: "{{ vault_bin_path }}"
+        state: absent
+
+    - name: "Remove Vault configuration directory"
+      file:
+        path: "{{ vault_home }}"
+        state: absent
+
+    - name: "Remove Vault data directory"
+      file:
+        path: "{{ vault_data_dir }}"
+        state: absent
+
+    - name: "Remove Vault logs directory"
+      file:
+        path: "{{ vault_log_dir }}"
+        state: absent
+
+    - name: "Remove Vault user"
+      user:
+        name: vault
+        state: absent
+        remove: yes
+      ignore_errors: true
+
+    - name: "Remove Vault group"
+      group:
+        name: vault
+        state: absent
+      ignore_errors: true
+
+    - name: "Remove HAProxy configuration for Vault (if present)"
+      file:
+        path: "/etc/haproxy/vault-combined.pem"
+        state: absent
+      ignore_errors: true
+
+    - name: "Remove HAProxy Lua scripts for Vault (if present)"
+      file:
+        path: "/etc/haproxy/terraform-vault-auth.lua"
+        state: absent
+      ignore_errors: true
+
+    - name: "Remove Keepalived configuration (if present)"
+      file:
+        path: "/etc/keepalived/keepalived.conf"
+        state: absent
+      ignore_errors: true
+
+    - name: "Stop HAProxy if running"
+      systemd:
+        name: haproxy
+        state: stopped
+      ignore_errors: true
+
+    - name: "Stop Keepalived if running"
+      systemd:
+        name: keepalived
+        state: stopped
+      ignore_errors: true
+
+    - name: "Find and remove any remaining Vault-related files"
+      find:
+        paths:
+          - /opt
+          - /etc
+          - /var/log
+        patterns:
+          - "*vault*"
+        file_type: directory
+      register: vault_residual_dirs
+      ignore_errors: true
+
+    - name: "Display residual directories found"
+      debug:
+        msg: "Found residual directories: {{ vault_residual_dirs.files | map(attribute='path') | list }}"
+      when: vault_residual_dirs.files | length > 0
+
+    - name: "Remove residual Vault directories"
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ vault_residual_dirs.files }}"
+      when: vault_residual_dirs.files | length > 0
+      ignore_errors: true
+
+  post_tasks:
+    - name: "Verify Vault is uninstalled"
+      stat:
+        path: "{{ vault_bin_path }}"
+      register: vault_bin_check
+
+    - name: "Display uninstall completion"
+      debug:
+        msg: |
+          Vault uninstallation complete on {{ inventory_hostname }}!
+          
+          Vault binary present: {{ vault_bin_check.stat.exists }}
+          Vault home directory: {{ vault_home }}
+          Vault data directory: {{ vault_data_dir }}
+          Vault logs directory: {{ vault_log_dir }}
+          
+          All Vault services, binaries, and configuration have been removed.

@@ -1,0 +1,66 @@
+---
+# =============================================================================
+# PostgreSQL Deployment and Configuration Playbook
+# =============================================================================
+
+- name: Deploy PostgreSQL VMs via Terraform
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  pre_tasks:
+    - name: Load PostgreSQL shared variables
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/postgres/main.yaml"
+
+    - name: Check if PostgreSQL environment override exists
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
+      register: postgres_env_vars_file
+
+    - name: Load PostgreSQL environment override variables
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
+      when: postgres_env_vars_file.stat.exists
+
+    - name: Build runtime postgres inventory group
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: postgres
+        ansible_host: "{{ item.ip }}"
+        ansible_user: "{{ postgres_ansible_user }}"
+      loop: "{{ postgres_nodes }}"
+      tags: ["always"]
+
+  roles:
+    - role: postgres-deploy
+      tags: ["deploy", "terraform"]
+
+- name: Configure PostgreSQL HA stack on postgres nodes
+  hosts: postgres
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Load PostgreSQL shared variables
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/postgres/main.yaml"
+
+    - name: Check if PostgreSQL environment override exists
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
+      register: postgres_env_vars_file
+
+    - name: Load PostgreSQL environment override variables
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
+      when: postgres_env_vars_file.stat.exists
+
+    - name: Wait for SSH on postgres nodes
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+        delay: 5
+
+  roles:
+    - role: postgres-setup-configure
+      tags: ["configure", "ha"]

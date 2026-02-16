@@ -22,6 +22,25 @@
         - { path: "/run/haproxy", owner: "haproxy", group: "haproxy", mode: "0755" }
       when: vault_haproxy_enabled | bool
 
+    - name: "Deploy Terraform Vault authentication Lua script"
+      template:
+        src: "{{ playbook_dir }}/../templates/vault/terraform-vault-auth.lua.j2"
+        dest: "/etc/haproxy/terraform-vault-auth.lua"
+        owner: "root"
+        group: "root"
+        mode: "0644"
+      when: vault_haproxy_enabled | bool
+
+    - name: "Create combined PEM file for HAProxy SSL"
+      shell: |
+        cat {{ vault_tls_cert_file }} {{ vault_tls_key_file }} > /etc/haproxy/vault-combined.pem
+        chmod 600 /etc/haproxy/vault-combined.pem
+        chown haproxy:haproxy /etc/haproxy/vault-combined.pem
+      args:
+        creates: /etc/haproxy/vault-combined.pem
+      when: vault_haproxy_enabled | bool
+      notify: "restart haproxy"
+
     - name: "Template HAProxy configuration"
       template:
         src: "{{ playbook_dir }}/../templates/vault/haproxy.cfg.j2"

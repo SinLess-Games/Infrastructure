@@ -128,7 +128,7 @@ module "vault_cluster_staging" {
   storage     = "vm-fast"
 
   # Vault configuration
-  vault_version      = "1.15.4"
+  vault_version      = "1.21.3"
   vault_port         = 8200
   vault_cluster_port = 8201
   vault_storage_path = "/opt/vault/data"
@@ -156,8 +156,8 @@ module "vault_cluster_staging" {
   backup_schedule = "0 3 * * *" # 3 AM daily
 
   # VM options
-  onboot        = true
-  protection    = true
+  start_at_node_boot = true
+  protection         = true
   startup_order = 10
   agent_enabled = true
 
@@ -255,7 +255,7 @@ module "vault_prod" {
 | `storage` | Proxmox storage pool | `string` | `"vm-fast"` |
 | `vlan_id` | VLAN ID | `number` | `20` |
 | `network_bridge` | Network bridge | `string` | `"vmbr0"` |
-| `vault_version` | Vault version | `string` | `"1.15.4"` |
+| `vault_version` | Vault version | `string` | `"1.21.3"` |
 | `vault_port` | Vault API port | `number` | `8200` |
 | `vault_cluster_port` | Vault cluster port | `number` | `8201` |
 | `vault_tls_enabled` | Enable TLS | `bool` | `true` |

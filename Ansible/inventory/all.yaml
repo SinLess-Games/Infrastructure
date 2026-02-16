@@ -11,3 +11,5 @@ all:
     dev:
     proxmox:
     dns:
+    vault:
+    postgres:

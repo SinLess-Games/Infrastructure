@@ -5,36 +5,6 @@
 // DO NOT EDIT MANUALLY
 // =====================================================================
 
-variable "proxmox_api_url" {
-  type        = string
-  description = "Proxmox API URL"
-}
-
-variable "proxmox_api_token_id" {
-  type        = string
-  description = "Proxmox API token ID"
-  sensitive   = true
-}
-
-variable "proxmox_api_token_secret" {
-  type        = string
-  description = "Proxmox API token secret"
-  sensitive   = true
-}
-
-variable "proxmox_tls_insecure" {
-  type        = bool
-  description = "Allow insecure TLS for Proxmox API"
-  default     = true
-}
-
-provider "proxmox" {
-  pm_api_url          = var.proxmox_api_url
-  pm_api_token_id     = var.proxmox_api_token_id
-  pm_api_token_secret = var.proxmox_api_token_secret
-  pm_tls_insecure     = var.proxmox_tls_insecure
-}
-
 module "vault_cluster" {
   source = "{{ vault_module_source }}"
 
@@ -89,8 +59,8 @@ module "vault_cluster" {
   backup_schedule = "{{ vault_backup_schedule }}"
 
   # VM options
-  onboot        = {{ vault_onboot | ternary('true', 'false') }}
-  agent_enabled = {{ vault_agent_enabled | ternary('true', 'false') }}
+  start_at_node_boot = {{ vault_start_at_node_boot | ternary('true', 'false') }}
+  agent_enabled      = {{ vault_agent_enabled | ternary('true', 'false') }}
   protection    = {{ vault_protection | ternary('true', 'false') }}
   startup_order = {{ vault_startup_order }}
 

@@ -22,7 +22,7 @@ All variables are defined in `Ansible/group_vars/vault/`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `vault_version` | `1.16.0` | Vault binary version to install |
+| `vault_version` | `1.21.3` | Vault binary version to install |
 | `vault_user` | `vault` | System user running Vault |
 | `vault_group` | `vault` | System group for Vault |
 | `vault_home_dir` | `/etc/vault` | Vault configuration directory |

@@ -1,0 +1,128 @@
+-- Terraform Vault Authentication Handler for HAProxy
+-- This Lua script converts HTTP Basic Auth to Vault X-Vault-Token header
+-- and unwraps Vault KV v1 responses for Terraform state
+-- Location: Ansible/templates/vault/terraform-vault-auth.lua.j2
+
+-- Base64 decode function (HAProxy doesn't provide core.base64)
+local function base64_decode(data)
+  local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  data = string.gsub(data, '[^'..b..'=]', '')
+  return (data:gsub('.', function(x)
+    if (x == '=') then return '' end
+    local r,f='',(b:find(x)-1)
+    for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
+    return r;
+  end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
+    if (#x ~= 8) then return '' end
+    local c=0
+    for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
+    return string.char(c)
+  end))
+end
+
+-- Authentication handler - converts Basic Auth to X-Vault-Token
+core.register_action("terraform_vault_auth", {"http-req"}, function(txn)
+  -- Get the Authorization header
+  local auth_header = txn.http:req_get_headers()["authorization"]
+  if auth_header == nil then
+    return
+  end
+
+  -- Extract Basic Auth credentials
+  -- Format: "Basic base64(username:password)"
+  local auth_type, auth_data = auth_header[0]:match("^(%S+)%s+(.+)$")
+  
+  if auth_type ~= "Basic" then
+    return
+  end
+
+  -- Decode base64
+  local decoded = base64_decode(auth_data)
+  if decoded == nil then
+    core.log(core.err, "Failed to decode authorization header")
+    return
+  end
+
+  -- Extract username and password (token)
+  -- Format: "username:token"
+  local username, token = decoded:match("^([^:]+):(.+)$")
+  
+  if token == nil or token == "" then
+    core.log(core.err, "No token found in authorization")
+    return
+  end
+
+  -- Remove the Authorization header
+  txn.http:req_del_header("Authorization")
+  
+  -- Add Vault token header
+  txn.http:req_set_header("X-Vault-Token", token)
+
+  -- Log for debugging
+  core.log(core.info, "Converted Basic Auth to X-Vault-Token for user: " .. username)
+end)
+
+-- Response unwrapper - extracts Terraform state from Vault KV v1 response
+core.register_action("unwrap_vault_response", {"http-res"}, function(txn)
+  -- Only process successful GET responses
+  local status = txn.sf:status()
+  local method = txn.sf:method()
+  
+  if method ~= "GET" or status ~= 200 then
+    return
+  end
+  
+  -- Get response body
+  local body_dup = txn.res:dup()
+  if body_dup == nil then
+    return
+  end
+  
+  local body = body_dup:get_body()
+  if body == nil or #body == 0 then
+    return
+  end
+  
+  -- Extract data field from Vault response using simple string matching
+  -- Vault KV v1 returns: {"data":{...terraform state...},"wrap_info":null,...}
+  -- We need to extract just the terraform state
+  local data_start = body:find('"data":%s*{')
+  if data_start == nil then
+    return
+  end
+  
+  -- Find the opening brace of the data object
+  local brace_start = body:find('{', data_start + 8)
+  if brace_start == nil then
+    return
+  end
+  
+  -- Count braces to find the matching closing brace
+  local depth = 1
+  local pos = brace_start + 1
+  local data_end = nil
+  
+  while pos <= #body and depth > 0 do
+    local c = body:sub(pos, pos)
+    if c == '{' then
+      depth = depth + 1
+    elseif c == '}' then
+      depth = depth - 1
+      if depth == 0 then
+        data_end = pos
+        break
+      end
+    end
+    pos = pos + 1
+  end
+  
+  if data_end == nil then
+    return
+  end
+  
+  -- Extract the Terraform state (content between braces)
+  local state = body:sub(brace_start, data_end)
+  
+  -- Replace response body with unwrapped state
+  txn.res:set(state)
+end)

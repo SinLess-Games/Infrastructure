@@ -47,8 +47,8 @@ module "technitium_cluster" {
   backup_schedule = "{{ technitium_backup_schedule }}"
 
   # VM options
-  onboot        = {{ technitium_onboot | ternary('true', 'false') }}
-  agent_enabled = {{ technitium_agent_enabled | ternary('true', 'false') }}
+  start_at_node_boot = {{ technitium_start_at_node_boot | ternary('true', 'false') }}
+  agent_enabled      = {{ technitium_agent_enabled | ternary('true', 'false') }}
   protection    = {{ technitium_protection | ternary('true', 'false') }}
   startup_order = {{ technitium_startup_order }}
 

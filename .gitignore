@@ -13,5 +13,8 @@ Terraform/terraform.tfstate
 
 Terraform/.terraform.lock.hcl
 Terraform/terraform.tfstate.backup
-Terraform/technitium-cluster.tf
-Terraform/vault-cluster.tf
+Terraform/*-cluster.tf
+Terraform/modules/vault-secrets/.terraform.lock.hcl
+Terraform/modules/vault-secrets/terraform.tfstate
+Terraform/modules/vault-secrets/.terraform
+Terraform/modules/vault-secrets/terraform.tfstate.backup

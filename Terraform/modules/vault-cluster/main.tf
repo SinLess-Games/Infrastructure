@@ -32,8 +32,8 @@ resource "proxmox_vm_qemu" "vault_node" {
   description = "${var.description} (Node ${count.index + 1}/${var.node_count}) on ${var.target_nodes[count.index % length(var.target_nodes)]}"
 
   # VM lifecycle
-  onboot      = var.onboot
-  protection  = var.protection
+  start_at_node_boot = var.start_at_node_boot
+  protection         = var.protection
   startup     = "order=${var.startup_order}"
 
   # Clone from template

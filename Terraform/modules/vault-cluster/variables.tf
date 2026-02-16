@@ -148,7 +148,7 @@ variable "cidr_subnet" {
 variable "vault_version" {
   description = "HashiCorp Vault version to install"
   type        = string
-  default     = "1.15.4"
+  default     = "1.21.3"
 }
 
 variable "vault_port" {
@@ -279,7 +279,7 @@ variable "description" {
 # Advanced Options
 # ---------------------------------------------------------------------
 
-variable "onboot" {
+variable "start_at_node_boot" {
   description = "Start VM on boot"
   type        = bool
   default     = true

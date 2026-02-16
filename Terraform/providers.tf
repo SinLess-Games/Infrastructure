@@ -1,6 +1,9 @@
 terraform {
   required_version = ">= 1.4"
 
+ 
+
+  # Commented local backend for fallback/testing
   backend "local" {
     path = "terraform.tfstate"
   }

@@ -217,7 +217,7 @@ variable "description" {
 # Advanced Options
 # ---------------------------------------------------------------------
 
-variable "onboot" {
+variable "start_at_node_boot" {
   description = "Start VM on boot"
   type        = bool
   default     = true
