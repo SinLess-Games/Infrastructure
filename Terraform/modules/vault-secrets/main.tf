@@ -27,7 +27,12 @@ locals {
   azure_configs_map      = nonsensitive(var.azure_configs)
   linode_configs_map     = nonsensitive(var.linode_configs)
   kubernetes_configs_map = nonsensitive(var.kubernetes_configs)
-  terraform_configs_map  = nonsensitive(var.terraform_configs)
+  secrets_data_input = try(jsondecode(var.vault_secrets_data), {})
+  secrets_data_map = {
+    for path, secret in nonsensitive(local.secrets_data_input) : path => {
+      data = try(secret.data, {})
+    }
+  }
 }
 
 resource "vault_mount" "kv" {
@@ -200,12 +205,13 @@ resource "vault_transit_secret_backend_key" "transit_key" {
   depends_on = [vault_mount.engine]
 }
 
-resource "vault_terraform_cloud_secret_backend" "terraform" {
-  for_each = local.terraform_configs_map
+# Create KV v2 secrets in the 'secrets' mount
+resource "vault_generic_secret" "secrets" {
+  for_each = local.secrets_data_map
 
-  backend  = each.key
-  address  = each.value.address
-  token    = each.value.token
+  path            = "secrets/data/${each.key}"
+  data_json       = jsonencode(merge({ "_placeholder" = "true" }, each.value.data))
+  delete_all_versions = false
 
-  depends_on = [vault_mount.engine]
+  depends_on = [vault_mount.kv]
 }

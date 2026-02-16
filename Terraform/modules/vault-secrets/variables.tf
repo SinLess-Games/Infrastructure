@@ -33,11 +33,8 @@ variable "kv_mounts" {
   description = "KV v2 mounts to enable"
 
   default = {
-    helix = {
-      description = "Helix secrets (KV v2)"
-    }
-    sinlessgames = {
-      description = "SinLess Games secrets (KV v2)"
+    secrets = {
+      description = "Centralized secrets storage (KV v2)"
     }
     "kubernetes-dev" = {
       description = "Kubernetes dev secrets (KV v2)"
@@ -66,21 +63,6 @@ variable "engine_mounts" {
     aws = {
       type        = "aws"
       description = "AWS secrets engine"
-    }
-    terraform = {
-      type        = "terraform"
-      description = "Terraform Cloud secrets engine"
-    }
-    ansible = {
-      type        = "kv"
-      description = "Ansible secrets engine (KV v1)"
-      options = {
-        version = "1"
-      }
-    }
-    ssh = {
-      type        = "ssh"
-      description = "SSH secrets engine"
     }
   }
 }
@@ -188,13 +170,14 @@ variable "transit_configs" {
   default = {}
 }
 
-variable "terraform_configs" {
-  description = "Terraform secrets engine configuration per mount path"
-  type = map(object({
-    address              = string
-    token                = string
-    default_organization = optional(string)
-  }))
-  default = {}
-  sensitive = true
+variable "vault_secrets_data" {
+  description = "KV v2 secrets to create in the 'secrets' mount, passed as JSON"
+  type        = string
+  default     = "{}"
+  sensitive   = true
+
+  validation {
+    condition = can(jsondecode(var.vault_secrets_data))
+    error_message = "vault_secrets_data must be valid JSON."
+  }
 }

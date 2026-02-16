@@ -1,14 +1,23 @@
 # Vault user policies definition
 vault_user_policies:
-  # Ansible policy - can read/write to ansible secrets engine
-  ansible: |
-    # Read and write to ansible secrets engine (KV v2)
-    path "ansible/data/*" {
+  # Ansible policy - can read/write to ansible secrets in centralized store
+  ansible: |    # Read and write to ansible secrets in centralized KV v2 store
+    path "secrets/data/ansible/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
-    path "ansible/metadata/*" {
+    path "secrets/metadata/ansible/*" {
       capabilities = ["read", "list"]
+    }
+
+    # Allow listing top-level secrets paths for UI navigation
+    path "secrets/metadata/*" {
+      capabilities = ["list"]
+    }
+
+    # Allow listing the KV v2 root
+    path "secrets/metadata" {
+      capabilities = ["list"]
     }
     
     # Read auth methods
@@ -16,19 +25,14 @@ vault_user_policies:
       capabilities = ["read", "list"]
     }
 
-  # Terraform policy - can read/write to terraform secrets engine
+  # Terraform policy - can read/write to terraform secrets in centralized store
   terraform: |
-    # Read and write to terraform secrets engine
-    path "terraform/*" {
+    # Read and write to terraform secrets in centralized KV v2 store
+    path "secrets/data/terraform/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
-    # Read and write terraform variables (KV v2)
-    path "terraform-vars/data/*" {
-      capabilities = ["create", "read", "update", "delete", "list"]
-    }
-
-    path "terraform-vars/metadata/*" {
+    path "secrets/metadata/terraform/*" {
       capabilities = ["read", "list"]
     }
     
@@ -51,15 +55,6 @@ vault_user_policies:
     path "linode/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
-
-    # Read Cloudflare KV secrets (KV v2)
-    path "cloudflare/data/*" {
-      capabilities = ["create", "read", "update", "delete", "list"]
-    }
-
-    path "cloudflare/metadata/*" {
-      capabilities = ["read", "list"]
-    }
     
     # Read auth methods
     path "sys/auth" {
@@ -75,41 +70,41 @@ vault_user_policies:
 
   # Helix frontend policy
   helix-frontend: |
-    path "helix/data/frontend/*" {
+    path "secrets/data/helix/frontend/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
-    path "helix/metadata/frontend/*" {
+    path "secrets/metadata/helix/frontend/*" {
       capabilities = ["read", "list"]
     }
 
   # Helix auth service policy
   helix-auth: |
-    path "helix/data/auth/*" {
+    path "secrets/data/helix/auth/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
-    path "helix/metadata/auth/*" {
+    path "secrets/metadata/helix/auth/*" {
       capabilities = ["read", "list"]
     }
 
   # Helix third-party policy
   helix-third-party: |
-    path "helix/data/third-party/*" {
+    path "secrets/data/helix/third-party/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
-    path "helix/metadata/third-party/*" {
+    path "secrets/metadata/helix/third-party/*" {
       capabilities = ["read", "list"]
     }
 
   # SinLess Games application policy
   sinlessgames-app: |
-    path "sinlessgames/data/*" {
+    path "secrets/data/sinlessgames/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
-    path "sinlessgames/metadata/*" {
+    path "secrets/metadata/sinlessgames/*" {
       capabilities = ["read", "list"]
     }
 
@@ -133,11 +128,11 @@ vault_user_policies:
 
   # Cloudflare secrets policy
   cloudflare: |
-    path "cloudflare/data/*" {
+    path "secrets/data/cloudflare/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
-    path "cloudflare/metadata/*" {
+    path "secrets/metadata/cloudflare/*" {
       capabilities = ["read", "list"]
     }
 
@@ -179,6 +174,10 @@ vault_user_policies:
 
   # SSH operations policy
   ssh-ops: |
-    path "ssh/*" {
+    path "secrets/data/ssh/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "secrets/metadata/ssh/*" {
+      capabilities = ["read", "list"]
     }

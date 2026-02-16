@@ -26,6 +26,7 @@ vault_setup_ssh_configs: "{{ vault_ssh_configs }}"
 vault_setup_pki_configs: "{{ vault_pki_configs }}"
 vault_setup_transit_configs: "{{ vault_transit_configs }}"
 vault_setup_terraform_configs: "{{ vault_terraform_configs }}"
+vault_setup_secrets_data: "{{ vault_secrets_data }}"
 
 # Auth methods to enable (configurable)
 vault_auth_methods:

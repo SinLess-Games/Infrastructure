@@ -35,3 +35,4 @@ vault_setup_ssh_configs: {}
 vault_setup_pki_configs: {}
 vault_setup_transit_configs: {}
 vault_setup_terraform_configs: {}
+vault_setup_secrets_data: {}

@@ -1,0 +1,49 @@
+---
+- name: Take next Vault metadata path from queue
+  ansible.builtin.set_fact:
+    _vault_current_path: "{{ _vault_pending_paths[0] | default('') }}"
+    _vault_pending_paths: "{{ _vault_pending_paths[1:] }}"
+  no_log: true
+
+- name: List Vault keys at current path
+  ansible.builtin.uri:
+    url: >-
+      {{ vault_addr }}/v1/{{ vault_kv_mount }}/metadata
+      {{ '/' ~ _vault_current_path if _vault_current_path else '' }}?list=true
+    method: GET
+    headers:
+      X-Vault-Token: "{{ vault_auth.token }}"
+    validate_certs: "{{ not (vault_skip_verify | bool) }}"
+    return_content: true
+    status_code: [200, 404]
+  register: _vault_list_response
+  no_log: true
+  delegate_to: localhost
+
+- name: Extract listed keys from current path
+  ansible.builtin.set_fact:
+    _vault_listed_keys: "{{ (_vault_list_response.json.data.keys | default([])) if (_vault_list_response.status | int) == 200 else [] }}"
+  no_log: true
+
+- name: Queue child paths and collect leaf secret paths
+  ansible.builtin.set_fact:
+    _vault_pending_paths: "{{ _vault_pending_paths + _vault_child_paths }}"
+    _vault_secret_paths: "{{ _vault_secret_paths + _vault_leaf_paths }}"
+  vars:
+    _vault_prefix: "{{ _vault_current_path ~ '/' if _vault_current_path else '' }}"
+    _vault_child_paths: >-
+      {{
+        _vault_listed_keys
+        | select('search', '/$')
+        | map('regex_replace', '/$', '')
+        | map('regex_replace', '^', _vault_prefix)
+        | list
+      }}
+    _vault_leaf_paths: >-
+      {{
+        _vault_listed_keys
+        | reject('search', '/$')
+        | map('regex_replace', '^', _vault_prefix)
+        | list
+      }}
+  no_log: true

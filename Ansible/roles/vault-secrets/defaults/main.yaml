@@ -1,0 +1,29 @@
+---
+# =============================================================================
+# Vault Secrets Role - Defaults
+# =============================================================================
+
+# Repository root (derived from playbook location)
+vault_repo_root: "{{ playbook_dir | dirname | dirname }}"
+
+# Enable/disable Vault secrets population
+vault_secrets_enabled: true
+
+# Vault address for API calls
+vault_secrets_addr: >-
+  https://{{ vault_keepalived_virtual_ip | default(hostvars[groups['vault'][0]].ansible_host) }}:8200
+
+# KV v2 mount name that stores the secrets
+vault_secrets_mount: "secrets"
+
+# TLS verification
+vault_secrets_skip_tls_verify: true
+
+# Root token file (produced during vault initialization)
+vault_secrets_token_file: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
+
+# Optional explicit token (overrides token file)
+vault_secrets_token: ""
+
+# Source file for secrets definitions
+vault_secrets_file: "{{ vault_repo_root }}/Ansible/group_vars/vault/vault-secrets.yaml"

@@ -215,15 +215,15 @@
     - vault_setup_transit_configs is defined
     - vault_setup_transit_configs | length > 0
 
-- name: "Add Terraform configs to Terraform environment (optional)"
+- name: "Add secrets data to Terraform environment (optional)"
   ansible.builtin.set_fact:
-    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_terraform_configs': vault_setup_terraform_configs | to_json}) }}"
+    vault_setup_tf_env: "{{ vault_setup_tf_env | combine({'TF_VAR_vault_secrets_data': vault_setup_secrets_data | to_json}) }}"
   no_log: true
   run_once: true
   when:
     - vault_setup_enabled | bool
-    - vault_setup_terraform_configs is defined
-    - vault_setup_terraform_configs | length > 0
+    - vault_setup_secrets_data is defined
+    - vault_setup_secrets_data | length > 0
 
 - name: "Create temporary Terraform workdir (Vault secrets)"
   ansible.builtin.tempfile:

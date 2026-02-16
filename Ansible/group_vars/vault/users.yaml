@@ -10,6 +10,7 @@ vault_users:
     description: "Terraform automation user"
     policies:
       - terraform
+      - cloudflare
   
   - name: sinless777
     description: "Primary operator (Admin)"

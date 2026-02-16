@@ -18,3 +18,4 @@ Terraform/modules/vault-secrets/.terraform.lock.hcl
 Terraform/modules/vault-secrets/terraform.tfstate
 Terraform/modules/vault-secrets/.terraform
 Terraform/modules/vault-secrets/terraform.tfstate.backup
+Ansible/group_vars/vault/vault-secrets.yaml
