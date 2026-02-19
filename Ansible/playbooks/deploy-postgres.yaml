@@ -43,7 +43,7 @@
   hosts: postgres
   gather_facts: true
   become: true
-  var_files:
+  vars_files:
     - ../group_vars/all/packages.yaml
     - ../group_vars/all/zsh.yaml
     - ../group_vars/all/users.yaml
