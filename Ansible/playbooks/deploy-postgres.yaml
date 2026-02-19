@@ -49,11 +49,6 @@
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/postgres/main.yaml"
       tags: ["always"]
-    
-    - name: Ensure DNS resolver configuration
-      ansible.builtin.include_role:
-        name: dns-resolver
-      tags: ["dns"]
 
     - name: Check if PostgreSQL environment override exists
       ansible.builtin.stat:
@@ -74,5 +69,20 @@
       tags: ["always"]
 
   roles:
+    - role: dns-resolver
+      tags: ["configure", "dns"]
+    
+    - role: users
+      tags: ["configure", "users"]
+
+    - role: packages
+      tags: ["configure", "packages"]
+    
+    - role: shell-config
+      tags: ["configure", "shell"]
+    
+    - role: ssh
+      tags: ["configure", "sshd"]
+
     - role: postgres-setup-configure
       tags: ["configure", "ha"]

@@ -59,6 +59,18 @@
   roles:
     - role: dns-resolver
       tags: ["configure", "dns"]
+    
+    - role: users
+      tags: ["configure", "users"]
+
+    - role: packages
+      tags: ["configure", "packages"]
+    
+    - role: shell-config
+      tags: ["configure", "shell"]
+    
+    - role: ssh
+      tags: ["configure", "sshd"]
 
     - role: technitium
       tags: ["configure", "cluster"]

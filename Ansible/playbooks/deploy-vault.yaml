@@ -45,34 +45,21 @@
       - net
       - system
 
-  pre_tasks:
-    - name: Ensure DNS nameservers are configured
-      copy:
-        content: |
-          nameserver {{ vault_dns_primary | default('10.10.10.1') }}
-          nameserver {{ vault_dns_secondary | default('1.1.1.1') }}
-        dest: /etc/resolv.conf
-        owner: root
-        group: root
-        mode: '0644'
-      tags: ["dns"]
-
-    - name: Refresh APT cache
-      apt:
-        update_cache: true
-        cache_valid_time: 3600
-      register: apt_cache_result
-      retries: 3
-      delay: 5
-      until: apt_cache_result is succeeded
-      tags: ["packages"]
-
   roles:
-    - role: packages
-      tags: ["packages"]
+    - role: dns-resolver
+      tags: ["configure", "dns"]
+    
+    - role: users
+      tags: ["configure", "users"]
 
+    - role: packages
+      tags: ["configure", "packages"]
+    
     - role: shell-config
-      tags: ["shell"]
+      tags: ["configure", "shell"]
+    
+    - role: ssh
+      tags: ["configure", "sshd"]
   
     - role: vault-configure
       tags: ["configure"]
