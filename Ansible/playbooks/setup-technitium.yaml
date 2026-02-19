@@ -55,6 +55,9 @@
     - ../group_vars/technitium/block-lists.yaml
     - ../group_vars/technitium/reverse-zones.yaml
     - ../group_vars/technitium/firewall.yaml
+    - ../group_vars/all/packages.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/users.yaml
 
   roles:
     - role: dns-resolver
