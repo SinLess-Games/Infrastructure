@@ -20,6 +20,7 @@ vault_listener_address: "{{ ansible_host | default(inventory_hostname) }}:8200"
 vault_tls_disable: false
 vault_tls_cert_file: "/etc/vault/tls/vault.crt"
 vault_tls_key_file: "/etc/vault/tls/vault.key"
+vault_tls_additional_sans: []
 
 # Cluster Configuration
 vault_cluster_name: "vault-cluster"
@@ -47,6 +48,12 @@ vault_plugin_directory: "/opt/vault/plugins"
 
 # Seal type - can be 'shamir', 'transit', 'awskms', or 'azurekeyvault'
 vault_seal_type: "shamir"
+vault_transit_address: ""
+vault_transit_token: ""
+vault_transit_key_name: "autounseal"
+vault_transit_mount_path: "transit"
+vault_transit_skip_verify: true
+vault_transit_disable_renewal: false
 
 # UI
 vault_ui_enabled: true

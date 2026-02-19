@@ -118,6 +118,31 @@
       register: vault_cert_info
       when: vault_cert_stat.stat.exists
 
+    - name: "Build expected Vault certificate SANs"
+      set_fact:
+        vault_tls_expected_sans: >-
+          {{
+            (
+              [
+                'DNS:' ~ inventory_hostname,
+                'DNS:vault.local',
+                'DNS:' ~ (vault_cluster_hostname | default('vault.local')),
+                'IP:' ~ (ansible_host | default(inventory_hostname) | string)
+              ]
+              + (
+                ['IP:' ~ (vault_keepalived_virtual_ip | string)]
+                if (vault_keepalived_virtual_ip | default('') | length > 0)
+                else []
+              )
+              + (vault_tls_additional_sans | default([]))
+            ) | unique
+          }}
+
+    - name: "Compute missing SAN entries from current certificate"
+      set_fact:
+        vault_tls_missing_sans: "{{ vault_tls_expected_sans | difference(vault_cert_info.subject_alt_name | default([])) }}"
+      when: vault_cert_stat.stat.exists
+
     - name: "Read shared CA certificate info"
       openssl_certificate_info:
         path: "{{ vault_tls_ca_cert_file | default('/etc/vault/tls/ca.crt') }}"
@@ -128,7 +153,8 @@
         vault_cert_needs_regen: >-
           {{ (not vault_cert_stat.stat.exists)
              or (vault_cert_info.issuer is defined and vault_cert_info.subject is defined and vault_cert_info.issuer == vault_cert_info.subject)
-             or (vault_ca_cert_info.subject is defined and vault_cert_info.issuer is defined and vault_cert_info.issuer != vault_ca_cert_info.subject) }}
+             or (vault_ca_cert_info.subject is defined and vault_cert_info.issuer is defined and vault_cert_info.issuer != vault_ca_cert_info.subject)
+             or ((vault_tls_missing_sans | default([])) | length > 0) }}
 
     - name: "Generate private key"
       openssl_privatekey:
@@ -144,12 +170,7 @@
         path: "{{ vault_home_dir }}/vault.csr"
         privatekey_path: "{{ vault_tls_key_file }}"
         common_name: "{{ inventory_hostname }}"
-        subject_alt_name:
-          - "DNS:{{ inventory_hostname }}"
-          - "DNS:vault.local"
-          - "DNS:{{ vault_cluster_hostname }}"
-          - "IP:{{ ansible_host | default(inventory_hostname) }}"
-          - "IP:{{ vault_keepalived_virtual_ip }}"
+        subject_alt_name: "{{ vault_tls_expected_sans }}"
         owner: "{{ vault_user }}"
         group: "{{ vault_group }}"
       when: vault_cert_needs_regen | default(true)

@@ -1,0 +1,163 @@
+---
+# =============================================================================
+# Vault Shamir -> Transit Auto-Unseal Migration
+# =============================================================================
+# Preconditions:
+#   1) Transit backend/key exist on an EXTERNAL Vault/KMS endpoint
+#   2) vault_transit_address and vault_transit_token are set (prefer vault-encrypted vars)
+#   3) Current cluster is healthy and unsealed
+# =============================================================================
+
+- name: Validate inputs and load unseal keys
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars_files:
+    - ../group_vars/vault/main.yaml
+
+  vars:
+    vault_unseal_file: "{{ playbook_dir }}/../../.outputs/vault/unseal-keys.json"
+
+  tasks:
+    - name: Assert transit auto-unseal variables are set
+      ansible.builtin.assert:
+        that:
+          - vault_transit_address is defined
+          - vault_transit_address | length > 0
+          - vault_transit_token is defined
+          - vault_transit_token | length > 0
+          - vault_transit_key_name is defined
+          - vault_transit_key_name | length > 0
+        fail_msg: >-
+          Set vault_transit_address, vault_transit_token, and vault_transit_key_name
+          before running migration.
+      no_log: true
+
+    - name: Block known-deadlock transit targets
+      ansible.builtin.assert:
+        that:
+          - "'vault.local.sinlessgames.com' not in (vault_transit_address | lower)"
+          - "'10.10.10.180' not in (vault_transit_address | lower)"
+        fail_msg: >-
+          vault_transit_address appears to point at this same Vault cluster VIP.
+          Use an EXTERNAL transit backend, or startup can deadlock.
+
+    - name: Check for unseal key file
+      ansible.builtin.stat:
+        path: "{{ vault_unseal_file }}"
+      register: vault_unseal_stat
+
+    - name: Fail when unseal key file is missing
+      ansible.builtin.fail:
+        msg: "Missing unseal keys file: {{ vault_unseal_file }}"
+      when: not vault_unseal_stat.stat.exists
+
+    - name: Read unseal keys file
+      ansible.builtin.slurp:
+        src: "{{ vault_unseal_file }}"
+      register: vault_unseal_file_raw
+      no_log: true
+
+    - name: Parse unseal keys
+      ansible.builtin.set_fact:
+        vault_migrate_unseal_data: "{{ vault_unseal_file_raw.content | b64decode | from_json }}"
+      no_log: true
+
+- name: Migrate each Vault node to transit seal (serial)
+  hosts: vault
+  gather_facts: false
+  become: true
+  serial: 1
+
+  vars_files:
+    - ../group_vars/vault/main.yaml
+
+  vars:
+    vault_seal_type: "transit"
+    vault_cli_path: "{{ vault_bin_path | default('/usr/local/bin/vault') }}"
+    vault_unseal_keys_for_migrate: "{{ hostvars['localhost']['vault_migrate_unseal_data']['unseal_keys_b64'] }}"
+
+  tasks:
+    - name: Render Vault config with transit seal stanza
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/vault/vault.hcl.j2"
+        dest: "/etc/vault/vault.hcl"
+        owner: vault
+        group: vault
+        mode: "0600"
+        backup: true
+
+    - name: Restart Vault for migration mode
+      ansible.builtin.systemd:
+        name: vault
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for Vault port to accept connections
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 8200
+        timeout: 45
+        delay: 2
+      delegate_to: localhost
+      become: false
+
+    - name: Unseal with migrate flag
+      ansible.builtin.command: "{{ vault_cli_path }} operator unseal -migrate {{ item }}"
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_SKIP_VERIFY: "true"
+      loop: "{{ vault_unseal_keys_for_migrate[:(vault_key_threshold | int)] }}"
+      no_log: true
+
+    - name: Verify node is unsealed after migration
+      ansible.builtin.command: "{{ vault_cli_path }} status -format=json"
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_SKIP_VERIFY: "true"
+      register: vault_status_after_migrate
+      changed_when: false
+
+    - name: Fail if node is still sealed after migration
+      ansible.builtin.fail:
+        msg: "Vault node {{ inventory_hostname }} is still sealed after migrate unseal."
+      when: (vault_status_after_migrate.stdout | from_json).sealed | bool
+
+- name: Validate restart auto-unseal on each node (serial)
+  hosts: vault
+  gather_facts: false
+  become: true
+  serial: 1
+
+  vars:
+    vault_cli_path: "{{ vault_bin_path | default('/usr/local/bin/vault') }}"
+
+  tasks:
+    - name: Restart Vault to validate auto-unseal
+      ansible.builtin.systemd:
+        name: vault
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for Vault after restart
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 8200
+        timeout: 45
+        delay: 2
+      delegate_to: localhost
+      become: false
+
+    - name: Check sealed status after restart
+      ansible.builtin.command: "{{ vault_cli_path }} status -format=json"
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:8200"
+        VAULT_SKIP_VERIFY: "true"
+      register: vault_status_after_restart
+      changed_when: false
+
+    - name: Fail if auto-unseal did not work
+      ansible.builtin.fail:
+        msg: "Auto-unseal failed on {{ inventory_hostname }} after restart."
+      when: (vault_status_after_restart.stdout | from_json).sealed | bool

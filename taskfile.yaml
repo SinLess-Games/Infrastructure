@@ -16,6 +16,12 @@ includes:
     taskfile: .taskfiles/PXE/Taskfile.yaml
     aliases:
       - pxe
+  vault:
+    taskfile: .taskfiles/vault/Taskfile.yaml
+    aliases:
+      - vault
+      - vlt
+      - v
 
 tasks:
   init:

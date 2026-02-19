@@ -1,0 +1,289 @@
+version: '3'
+
+vars:
+  ANSIBLE_DIR: "Ansible"
+  VENV_DIR: "{{.ANSIBLE_DIR}}/.venv"
+  ANSIBLE_CONFIG_FILE: "{{.ANSIBLE_DIR}}/ansible.cfg"
+  ROLES_PATH: "{{.ANSIBLE_DIR}}/roles"
+  INVENTORY_FILE: "{{default (printf \"%s/inventory/vault.yaml\" .ANSIBLE_DIR) .INVENTORY_FILE}}"
+  DEPLOY_PLAYBOOK: "{{.ANSIBLE_DIR}}/playbooks/deploy-vault.yaml"
+  UNINSTALL_PLAYBOOK: "{{.ANSIBLE_DIR}}/playbooks/uninstall-vault.yaml"
+  MIGRATE_TRANSIT_PLAYBOOK: "{{.ANSIBLE_DIR}}/playbooks/migrate-vault-autounseal-transit.yaml"
+  VAULT_GROUP: "{{default \"vault\" .VAULT_GROUP}}"
+  VAULT_CA_CERT_FILE: "{{default \".outputs/vault/vault-ca.crt\" .VAULT_CA_CERT_FILE}}"
+  FIREFOX_PROFILE_ROOT: "{{default \"$HOME/snap/firefox/common/.mozilla/firefox\" .FIREFOX_PROFILE_ROOT}}"
+  FIREFOX_CERT_NICKNAME: "{{default \"Vault Local CA\" .FIREFOX_CERT_NICKNAME}}"
+  VAULT_UI_URL: "{{default \"https://vault.local.sinlessgames.com\" .VAULT_UI_URL}}"
+
+tasks:
+
+  default:
+    desc: "Show available Vault tasks"
+    cmds:
+      - task --list
+
+  deploy:
+    desc: "Run full Vault deployment/configuration playbook"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.DEPLOY_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          {{.CLI_ARGS}}
+
+  uninstall:
+    desc: "Uninstall Vault from all Vault hosts"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.UNINSTALL_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          {{.CLI_ARGS}}
+
+  configure:
+    desc: "Run only vault-configure role tags from deploy playbook"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.DEPLOY_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          --tags configure \
+          {{.CLI_ARGS}}
+
+  tls:
+    desc: "Refresh Vault TLS and cert-related tasks"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.DEPLOY_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          --tags vault-tls \
+          {{.CLI_ARGS}}
+
+  haproxy:
+    desc: "Refresh Vault HAProxy configuration"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.DEPLOY_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          --tags vault-haproxy \
+          {{.CLI_ARGS}}
+
+  setup:
+    desc: "Run vault-setup role (auth methods + engines + secrets setup)"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.DEPLOY_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          --tags setup \
+          {{.CLI_ARGS}}
+
+  users:
+    desc: "Run vault-users role"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.DEPLOY_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          --tags users \
+          {{.CLI_ARGS}}
+
+  status:
+    desc: "Show Vault status (initialized/sealed/leader) on each node"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        "{{.VENV_DIR}}/bin/ansible" \
+          -i "{{.INVENTORY_FILE}}" \
+          "{{.VAULT_GROUP}}" \
+          -b -m shell \
+          -a 'export VAULT_ADDR="https://127.0.0.1:8200"; export VAULT_SKIP_VERIFY="true"; /usr/local/bin/vault status -format=json | jq -r "[.initialized,.sealed,.ha_enabled,.is_self] | @tsv"' \
+          -o
+
+  peers:
+    desc: "Show raft peers from the first Vault host"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        "{{.VENV_DIR}}/bin/ansible" \
+          -i "{{.INVENTORY_FILE}}" \
+          vault-01 \
+          -b -m shell \
+          -a 'export VAULT_ADDR="https://127.0.0.1:8200"; export VAULT_SKIP_VERIFY="true"; /usr/local/bin/vault operator raft list-peers' \
+          -o
+
+  health:
+    desc: "Check local and VIP Vault health endpoint from each Vault node"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        "{{.VENV_DIR}}/bin/ansible" \
+          -i "{{.INVENTORY_FILE}}" \
+          "{{.VAULT_GROUP}}" \
+          -b -m shell \
+          -a 'echo ==== $(hostname) ====; curl -sk -o /dev/null -w "local_8200=%{http_code}\n" https://127.0.0.1:8200/v1/sys/health; curl -sk -o /dev/null -w "vip_443=%{http_code}\n" https://10.10.10.180:443/v1/sys/health' \
+          -o
+
+  firefox:trust-ca:
+    desc: "Import Vault CA into Firefox Snap profile and trust for websites"
+    preconditions:
+      - sh: test -f "{{.VAULT_CA_CERT_FILE}}"
+        msg: "Vault CA cert not found at {{.VAULT_CA_CERT_FILE}}"
+      - sh: command -v certutil >/dev/null 2>&1
+        msg: "certutil not found. Install libnss3-tools first."
+    cmds:
+      - |
+        set -e
+        PROFILE_ROOT="{{.FIREFOX_PROFILE_ROOT}}"
+        PROFILE_INI="$PROFILE_ROOT/profiles.ini"
+
+        if [ ! -f "$PROFILE_INI" ]; then
+          echo "Firefox profiles.ini not found at $PROFILE_INI"
+          exit 1
+        fi
+
+        PROFILE_REL="$(awk -F= '
+          /^\[Profile/ {in_p=1; path=""; def=0; next}
+          /^Path=/ {if (in_p) path=$2; next}
+          /^Default=/ {if (in_p && $2==1) def=1; next}
+          /^$/ {if (in_p && def && path!="") {print path; exit}; in_p=0}
+          END {if (in_p && def && path!="") print path}
+        ' "$PROFILE_INI")"
+
+        if [ -z "$PROFILE_REL" ]; then
+          PROFILE_REL="$(basename "$(ls -d "$PROFILE_ROOT"/*.default* 2>/dev/null | head -n1)")"
+        fi
+
+        if [ -z "$PROFILE_REL" ]; then
+          echo "Could not determine Firefox profile directory under $PROFILE_ROOT"
+          exit 1
+        fi
+
+        PROFILE_DIR="$PROFILE_ROOT/$PROFILE_REL"
+        DB="sql:$PROFILE_DIR"
+
+        certutil -D -n "{{.FIREFOX_CERT_NICKNAME}}" -d "$DB" >/dev/null 2>&1 || true
+        certutil -A -n "{{.FIREFOX_CERT_NICKNAME}}" -t "C,," -i "{{.VAULT_CA_CERT_FILE}}" -d "$DB"
+
+        if pgrep -f '/firefox/firefox' >/dev/null 2>&1; then
+          pkill -f '/firefox/firefox' || true
+          sleep 2
+        fi
+
+        if command -v firefox >/dev/null 2>&1; then
+          firefox "{{.VAULT_UI_URL}}" >/dev/null 2>&1 &
+          disown || true
+        fi
+
+        echo "Imported '{{.FIREFOX_CERT_NICKNAME}}' into $PROFILE_DIR"
+        echo "Vault UI URL: {{.VAULT_UI_URL}}"
+
+  firefox:clear-cache:
+    desc: "Clear Firefox HSTS/cert override entries for vault.local.sinlessgames.com"
+    cmds:
+      - |
+        set -e
+        PROFILE_ROOT="{{.FIREFOX_PROFILE_ROOT}}"
+        PROFILE_INI="$PROFILE_ROOT/profiles.ini"
+
+        if [ ! -f "$PROFILE_INI" ]; then
+          echo "Firefox profiles.ini not found at $PROFILE_INI"
+          exit 1
+        fi
+
+        PROFILE_REL="$(awk -F= '
+          /^\[Profile/ {in_p=1; path=""; def=0; next}
+          /^Path=/ {if (in_p) path=$2; next}
+          /^Default=/ {if (in_p && $2==1) def=1; next}
+          /^$/ {if (in_p && def && path!="") {print path; exit}; in_p=0}
+          END {if (in_p && def && path!="") print path}
+        ' "$PROFILE_INI")"
+
+        if [ -z "$PROFILE_REL" ]; then
+          PROFILE_REL="$(basename "$(ls -d "$PROFILE_ROOT"/*.default* 2>/dev/null | head -n1)")"
+        fi
+
+        PROFILE_DIR="$PROFILE_ROOT/$PROFILE_REL"
+        HSTS_FILE="$PROFILE_DIR/SiteSecurityServiceState.txt"
+        OVERRIDE_FILE="$PROFILE_DIR/cert_override.txt"
+
+        if pgrep -f '/firefox/firefox' >/dev/null 2>&1; then
+          pkill -f '/firefox/firefox' || true
+          sleep 2
+        fi
+
+        if [ -f "$HSTS_FILE" ]; then
+          sed -i '/vault\.local\.sinlessgames\.com/d' "$HSTS_FILE"
+          echo "Updated $HSTS_FILE"
+        fi
+
+        if [ -f "$OVERRIDE_FILE" ]; then
+          sed -i '/vault\.local\.sinlessgames\.com/d' "$OVERRIDE_FILE"
+          echo "Updated $OVERRIDE_FILE"
+        fi
+
+        echo "Cleared Firefox host cache entries for vault.local.sinlessgames.com"
+
+  seal:
+    desc: "Seal Vault on all nodes"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        "{{.VENV_DIR}}/bin/ansible" \
+          -i "{{.INVENTORY_FILE}}" \
+          "{{.VAULT_GROUP}}" \
+          -b -m shell \
+          -a 'export VAULT_ADDR="https://127.0.0.1:8200"; export VAULT_SKIP_VERIFY="true"; /usr/local/bin/vault operator seal || true; /usr/local/bin/vault status -format=json | jq -r ".sealed"' \
+          -o
+
+  unseal:
+    desc: "Unseal Vault nodes using the vault-configure unseal tasks"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.DEPLOY_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          --tags vault-unseal \
+          {{.CLI_ARGS}}
+
+  migrate:transit:
+    desc: "Migrate Shamir to Transit auto-unseal (requires transit vars via CLI_ARGS or vars files)"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.MIGRATE_TRANSIT_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          {{.CLI_ARGS}}

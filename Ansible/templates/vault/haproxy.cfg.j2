@@ -41,9 +41,15 @@ listen vault-api-443
   mode tcp
   balance roundrobin
   default-server inter 10s fall 3 rise 2
+{% if vault_cluster_nodes is defined and vault_cluster_nodes | length > 0 %}
 {% for node in vault_cluster_nodes %}
   server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }}
 {% endfor %}
+{% else %}
+{% for host in groups['vault'] %}
+  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_api_addr_port }}
+{% endfor %}
+{% endif %}
 
 # Vault API load balancer on legacy port (TLS passthrough)
 listen vault-api-8200
@@ -51,9 +57,15 @@ listen vault-api-8200
   mode tcp
   balance roundrobin
   default-server inter 10s fall 3 rise 2
+{% if vault_cluster_nodes is defined and vault_cluster_nodes | length > 0 %}
 {% for node in vault_cluster_nodes %}
   server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }}
 {% endfor %}
+{% else %}
+{% for host in groups['vault'] %}
+  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_api_addr_port }}
+{% endfor %}
+{% endif %}
 
 # Vault cluster communication (internal only - TLS passthrough)
 listen vault-cluster
@@ -61,9 +73,15 @@ listen vault-cluster
   mode tcp
   balance roundrobin
   default-server inter 10s fall 3 rise 2
+{% if vault_cluster_nodes is defined and vault_cluster_nodes | length > 0 %}
 {% for node in vault_cluster_nodes %}
   server {{ node.name }} {{ node.ip_address }}:{{ vault_cluster_addr_port }}
 {% endfor %}
+{% else %}
+{% for host in groups['vault'] %}
+  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_cluster_addr_port }}
+{% endfor %}
+{% endif %}
 
 # =============================================================================
 # Terraform HTTP State Backend Integration

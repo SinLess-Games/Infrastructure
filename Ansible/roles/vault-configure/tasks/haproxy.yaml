@@ -31,13 +31,19 @@
         mode: "0644"
       when: vault_haproxy_enabled | bool
 
-    - name: "Create combined PEM file for HAProxy SSL"
+    - name: "Create or refresh combined PEM file for HAProxy SSL"
       shell: |
-        cat {{ vault_tls_cert_file }} {{ vault_tls_key_file }} > /etc/haproxy/vault-combined.pem
-        chmod 600 /etc/haproxy/vault-combined.pem
-        chown haproxy:haproxy /etc/haproxy/vault-combined.pem
-      args:
-        creates: /etc/haproxy/vault-combined.pem
+        cat {{ vault_tls_cert_file }} {{ vault_tls_key_file }} > /tmp/vault-combined.pem.new
+        if ! cmp -s /tmp/vault-combined.pem.new /etc/haproxy/vault-combined.pem; then
+          mv /tmp/vault-combined.pem.new /etc/haproxy/vault-combined.pem
+          chmod 600 /etc/haproxy/vault-combined.pem
+          chown haproxy:haproxy /etc/haproxy/vault-combined.pem
+          echo "updated"
+        else
+          rm -f /tmp/vault-combined.pem.new
+        fi
+      register: haproxy_combined_pem_update
+      changed_when: "'updated' in haproxy_combined_pem_update.stdout"
       when: vault_haproxy_enabled | bool
       notify: "restart haproxy"
 

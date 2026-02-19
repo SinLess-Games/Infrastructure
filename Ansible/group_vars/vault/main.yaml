@@ -90,6 +90,17 @@ vault_unseal_keys_file: "unseal-keys.json"
 vault_unseal_keys_backup: true
 vault_unseal_keys_backup_vault: true
 
+# Auto-unseal (Transit) configuration
+# Keep `vault_seal_type: "shamir"` until you run migration.
+# After migration succeeds, set this to "transit" for steady-state config.
+vault_seal_type: "shamir"
+vault_transit_address: ""
+vault_transit_token: ""
+vault_transit_key_name: "autounseal"
+vault_transit_mount_path: "transit"
+vault_transit_skip_verify: true
+vault_transit_disable_renewal: false
+
 # Service Configuration
 vault_systemd_service_enabled: true
 vault_systemd_restart_policy: "always"
