@@ -3,6 +3,7 @@ version: '3'
 vars:
   TERRAFORM_DIR: "Terraform"
   MODULES_DIR: "{{.TERRAFORM_DIR}}/modules"
+  MINIO_TERRAFORM_DIR: "{{.TERRAFORM_DIR}}/minio"
   VAULT_MODULE: "{{.MODULES_DIR}}/vault-cluster"
   VAULT_SECRETS_MODULE: "{{.MODULES_DIR}}/vault-secrets"
   VAULT_SECRETS_WORKDIR: "{{.VAULT_SECRETS_MODULE}}"
@@ -131,6 +132,27 @@ tasks:
       - echo "Auto-applying Terraform configuration..."
       - terraform apply -auto-approve {{.CLI_ARGS}}
       - echo "✓ Terraform apply complete"
+
+  # =============================================================================
+  # MinIO Workspace (Dedicated)
+  # =============================================================================
+
+  minio:init:
+    desc: "Initialize Terraform for MinIO workspace"
+    dir: "{{.MINIO_TERRAFORM_DIR}}"
+    cmds:
+      - echo "Initializing MinIO Terraform workspace..."
+      - terraform init
+      - echo "✓ MinIO Terraform initialized"
+
+  minio:apply:auto:
+    desc: "Apply MinIO Terraform changes without confirmation"
+    dir: "{{.MINIO_TERRAFORM_DIR}}"
+    deps: [minio:init]
+    cmds:
+      - echo "Auto-applying MinIO Terraform configuration..."
+      - terraform apply -auto-approve {{.CLI_ARGS}}
+      - echo "✓ MinIO Terraform apply complete"
 
   apply:plan:
     desc: "Apply a saved Terraform plan"

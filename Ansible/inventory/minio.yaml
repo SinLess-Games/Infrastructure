@@ -1,0 +1,12 @@
+minio:
+  vars:
+    ansible_user: "root"
+    ansible_password: "packer"
+    ansible_ssh_common_args: "-o PreferredAuthentications=password -o PubkeyAuthentication=no"
+  hosts:
+    minio-01:
+      ansible_host: 10.10.40.5
+    minio-02:
+      ansible_host: 10.10.40.6
+    minio-03:
+      ansible_host: 10.10.40.7

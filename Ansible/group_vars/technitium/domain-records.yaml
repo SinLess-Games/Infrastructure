@@ -80,6 +80,15 @@ technitium_domain_records:
         type: "A"
         value: "10.10.10.180"
         ttl: 300
+      # MinIO API and Console (HA VIP)
+      - name: "minio"
+        type: "A"
+        value: "10.10.40.100"
+        ttl: 300
+      - name: "minio-console"
+        type: "A"
+        value: "10.10.40.100"
+        ttl: 300
 
   # ---------------------------------------------------------------------------
   # Zone: local.sinlessgamesllc.com

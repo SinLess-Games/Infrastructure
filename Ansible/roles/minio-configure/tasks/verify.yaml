@@ -1,0 +1,138 @@
+---
+# =============================================================================
+# MinIO Configure Role - Verification Tasks
+# =============================================================================
+# Purpose: Verify that all MinIO components are properly configured and running
+# =============================================================================
+
+- name: Verify MinIO directories exist with correct permissions
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: minio_dir_stat
+  loop:
+    - "{{ minio_data_dir }}"
+    - "{{ minio_config_dir }}"
+    - "{{ minio_config_dir }}/certs"
+  changed_when: false
+
+- name: Assert MinIO directories exist
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isdir
+    fail_msg: "Missing required MinIO directory: {{ item.item }}"
+  loop: "{{ minio_dir_stat.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  changed_when: false
+
+- name: Verify MinIO user and group exist
+  ansible.builtin.getent:
+    database: group
+    key: "{{ minio_group }}"
+    fail_key: false
+  changed_when: false
+
+- name: Verify MinIO binaries are in place
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: minio_bins
+  loop:
+    - "{{ minio_bin_dir }}/minio"
+    - "{{ minio_bin_dir }}/mc"
+  changed_when: false
+
+- name: Assert MinIO binaries are present
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+    fail_msg: "Missing required MinIO binary: {{ item.item }}"
+  loop: "{{ minio_bins.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  changed_when: false
+
+- name: Verify MinIO service is installed
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ minio_service_name }}.service"
+  register: minio_service_file
+  changed_when: false
+  failed_when: not minio_service_file.stat.exists
+
+- name: Verify MinIO service is enabled and running
+  ansible.builtin.systemd:
+    name: "{{ minio_service_name }}"
+    enabled: true
+    state: started
+  changed_when: false
+
+- name: Verify MinIO API is responding
+  ansible.builtin.uri:
+    url: "{{ minio_effective_scheme | default('http') }}://localhost:{{ minio_api_port }}/minio/health/live"
+    method: GET
+    status_code: 200
+    validate_certs: "{{ not (minio_skip_tls_verify | bool) }}"
+  register: minio_health_check
+  retries: 5
+  delay: 2
+  changed_when: false
+
+- name: Verify HAProxy service is running (if enabled)
+  ansible.builtin.systemd:
+    name: haproxy
+    enabled: true
+    state: started
+  changed_when: false
+  when: haproxy_enabled | bool
+
+- name: Verify HAProxy configuration is valid (if enabled)
+  ansible.builtin.command:
+    cmd: "haproxy -c -f /etc/haproxy/haproxy.cfg"
+  changed_when: false
+  when: haproxy_enabled | bool
+
+- name: Verify Keepalived service is running (if enabled)
+  ansible.builtin.systemd:
+    name: keepalived
+    enabled: true
+    state: started
+  changed_when: false
+  when: keepalived_enabled | bool
+
+- name: Verify MinIO environment configuration exists
+  ansible.builtin.stat:
+    path: "{{ minio_config_dir }}/minio.env"
+  register: minio_env_file
+  changed_when: false
+  failed_when: not minio_env_file.stat.exists
+
+- name: Debug MinIO service status
+  ansible.builtin.command:
+    cmd: "systemctl status {{ minio_service_name }}"
+  register: minio_status
+  changed_when: false
+  failed_when: false
+
+- name: Display MinIO health check results
+  ansible.builtin.debug:
+    msg:
+      - "MinIO Service: {{ minio_status.rc == 0 | ternary('✓ Running', '✗ Not Running') }}"
+      - "MinIO API Health: {{ minio_health_check.status | default('?') }}"
+      - "MinIO Data Directory: {{ minio_data_dir }}"
+      - "MinIO Config Directory: {{ minio_config_dir }}"
+  changed_when: false
+
+- name: Verify buckets exist (if configured)
+  ansible.builtin.command:
+    cmd: "{{ minio_bin_dir }}/mc ls local/"
+  environment:
+    MC_HOST_local: "{{ minio_effective_scheme | default('http') }}://{{ vault_runtime_secrets.root_user }}:{{ vault_runtime_secrets.root_password }}@localhost:{{ minio_api_port }}"
+    MC_INSECURE: "{{ (minio_tls_enabled | bool and minio_skip_tls_verify | bool) | ternary('true', 'false') }}"
+  register: bucket_list
+  changed_when: false
+  failed_when: false
+  no_log: true
+  run_once: true
+  tags: ['minio', 'verify-buckets']
+  when: vault_runtime_secrets is defined

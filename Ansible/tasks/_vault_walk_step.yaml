@@ -12,12 +12,13 @@
       {{ '/' ~ _vault_current_path if _vault_current_path else '' }}?list=true
     method: GET
     headers:
-      X-Vault-Token: "{{ vault_auth.token }}"
+      X-Vault-Token: "{{ vault_effective_token }}"
     validate_certs: "{{ not (vault_skip_verify | bool) }}"
     return_content: true
-    status_code: [200, 404]
+    status_code: [200, 403, 404, 500]
   register: _vault_list_response
   no_log: true
+  failed_when: false
   delegate_to: localhost
 
 - name: Extract listed keys from current path

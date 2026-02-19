@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# MinIO Configure Role - Handlers
+# =============================================================================
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart MinIO
+  ansible.builtin.systemd:
+    name: "{{ minio_service_name }}"
+    state: restarted
+
+- name: Restart HAProxy
+  ansible.builtin.systemd:
+    name: haproxy
+    state: restarted
+
+- name: Restart Keepalived
+  ansible.builtin.systemd:
+    name: keepalived
+    state: restarted

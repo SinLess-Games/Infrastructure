@@ -10,6 +10,11 @@
     vault_auth_file: "{{ vault_auth_file | default(playbook_dir ~ '/../../.outputs/vault/ansible.json', true) }}"
     vault_skip_verify: "{{ vault_skip_verify | default((lookup('env', 'VAULT_SKIP_VERIFY') | default('true', true)) | bool, true) }}"
     vault_kv_walk_max_iterations: "{{ vault_kv_walk_max_iterations | default(100, true) }}"
+    vault_token: >-
+      {{
+        vault_token
+        | default(minio_vault_token | default(lookup('env', 'VAULT_TOKEN') | default('', true), true), true)
+      }}
 
 - name: Normalize Vault KV path
   ansible.builtin.set_fact:
@@ -25,22 +30,29 @@
     path: "{{ vault_auth_file }}"
   register: vault_auth_file_stat
   delegate_to: localhost
+  when: vault_token | length == 0
 
 - name: Fail when Vault credential file is missing
   ansible.builtin.fail:
     msg: "Vault credential file not found: {{ vault_auth_file }}"
-  when: not vault_auth_file_stat.stat.exists
+  when: vault_token | length == 0 and not vault_auth_file_stat.stat.exists
 
 - name: Load Vault credentials
   ansible.builtin.include_vars:
     file: "{{ vault_auth_file }}"
     name: vault_auth
   no_log: true
+  when: vault_token | length == 0
+
+- name: Set effective Vault token
+  ansible.builtin.set_fact:
+    vault_effective_token: "{{ vault_token if vault_token | length > 0 else vault_auth.token }}"
+  no_log: true
 
 - name: Initialize Vault discovery state
   ansible.builtin.set_fact:
     _vault_pending_paths: ["{{ vault_kv_path }}"]
-    _vault_secret_paths: []
+    _vault_secret_paths: "{{ [vault_kv_path] if vault_kv_path else [] }}"
     vault_runtime_secrets: {}
   no_log: true
 
@@ -63,7 +75,7 @@
     url: "{{ vault_addr }}/v1/{{ vault_kv_mount }}/data/{{ item }}"
     method: GET
     headers:
-      X-Vault-Token: "{{ vault_auth.token }}"
+      X-Vault-Token: "{{ vault_effective_token }}"
     validate_certs: "{{ not (vault_skip_verify | bool) }}"
     return_content: true
     status_code: 200
@@ -93,4 +105,4 @@
     msg: >-
       Loaded {{ vault_runtime_secrets | length }} variables from Vault mount
       '{{ vault_kv_mount }}'{{ '/' ~ vault_kv_path if vault_kv_path else '/' }}.
-  verbosity: 1
+    verbosity: 1

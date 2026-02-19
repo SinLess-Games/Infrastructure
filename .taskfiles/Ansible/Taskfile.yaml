@@ -164,3 +164,15 @@ tasks:
           -i {{.ANSIBLE_DIR}}/inventory \
           {{.ANSIBLE_DIR}}/playbooks/deploy-postgres.yaml \
           {{.CLI_ARGS}}
+
+  deploy-minio:
+    desc: "Deploy MinIO S3-compatible object storage cluster"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-minio.yaml \
+          {{.CLI_ARGS}}

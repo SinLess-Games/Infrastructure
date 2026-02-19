@@ -13,3 +13,4 @@ all:
     dns:
     vault:
     postgres:
+    minio:

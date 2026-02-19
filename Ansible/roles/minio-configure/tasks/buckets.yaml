@@ -1,0 +1,180 @@
+# =============================================================================
+# MinIO Configure Role - Bucket Configuration Tasks
+# =============================================================================
+
+- name: Wait for MinIO API to be ready for admin operations
+  ansible.builtin.uri:
+    url: "{{ minio_effective_scheme | default('http') }}://localhost:{{ minio_api_port }}/minio/health/ready"
+    method: GET
+    status_code: 200
+    validate_certs: "{{ not (minio_skip_tls_verify | bool) }}"
+  register: minio_admin_ready
+  until: minio_admin_ready.status == 200
+  retries: 30
+  delay: 2
+
+- name: Wait for MinIO cluster to report healthy
+  ansible.builtin.uri:
+    url: "{{ minio_effective_scheme | default('http') }}://localhost:{{ minio_api_port }}/minio/health/cluster"
+    method: GET
+    status_code: 200
+    validate_certs: "{{ not (minio_skip_tls_verify | bool) }}"
+  register: minio_cluster_ready
+  until: minio_cluster_ready.status == 200
+  retries: 120
+  delay: 5
+  failed_when: false
+
+- name: Configure MinIO client alias
+  ansible.builtin.shell: |
+    set -euo pipefail
+    . /etc/minio/minio.env
+    /usr/local/bin/mc alias set local \
+      {{ minio_effective_scheme | default('http') }}://{{ hostvars[inventory_hostname].ansible_host | default('127.0.0.1') }}:{{ minio_api_port }} \
+      "$MINIO_ROOT_USER" \
+      "$MINIO_ROOT_PASSWORD"
+  args:
+    executable: /bin/bash
+  register: minio_alias_set
+  until: minio_alias_set.rc == 0
+  retries: 30
+  delay: 5
+  no_log: true
+  changed_when: false
+
+- name: Configure MinIO client alias (legacy command fallback)
+  ansible.builtin.command:
+    cmd: >
+      mc alias set local
+      {{ minio_effective_scheme | default('http') }}://localhost:{{ minio_api_port }}
+      {{ vault_runtime_secrets.root_user }}
+      {{ vault_runtime_secrets.root_password }}
+  environment:
+    MC_HOST_local: "{{ minio_effective_scheme | default('http') }}://{{ vault_runtime_secrets.root_user }}:{{ vault_runtime_secrets.root_password }}@localhost:{{ minio_api_port }}"
+    MC_INSECURE: "{{ (minio_tls_enabled | bool and minio_skip_tls_verify | bool) | ternary('true', 'false') }}"
+  register: minio_alias_set
+  until: minio_alias_set.rc == 0
+  retries: 30
+  delay: 5
+  no_log: true
+  changed_when: false
+  when: false
+
+- name: Create MinIO buckets
+  ansible.builtin.command:
+    cmd: "mc mb local/{{ item.name }} --ignore-existing"
+  loop: "{{ minio_buckets }}"
+  register: bucket_create
+  changed_when: "'Bucket created successfully' in bucket_create.stdout"
+  failed_when: bucket_create.rc != 0 and 'already exists' not in bucket_create.stderr
+
+- name: Enable bucket versioning
+  ansible.builtin.command:
+    cmd: "mc version enable local/{{ item.name }}"
+  loop: "{{ minio_buckets }}"
+  when: item.versioning | default(false)
+  changed_when: true
+
+- name: Set bucket quotas
+  ansible.builtin.command:
+    cmd: "mc quota set local/{{ item.name }} --size {{ item.quota }}"
+  loop: "{{ minio_buckets }}"
+  when: item.quota is defined
+  changed_when: true
+
+- name: Ensure MinIO token output directory exists on controller
+  ansible.builtin.file:
+    path: "{{ minio_token_output_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  when: minio_manage_service_accounts | bool
+
+- name: Build per-bucket API credential definitions
+  ansible.builtin.set_fact:
+    minio_bucket_tokens: "{{ (minio_bucket_tokens | default([])) + [bucket_token] }}"
+  vars:
+    token_user: "{{ item.token_user | default(item.name ~ '-user') }}"
+    bucket_token:
+      bucket: "{{ item.name }}"
+      token_user: "{{ token_user }}"
+      access_key: "{{ (item.access_key | default((item.name | regex_replace('[^A-Za-z0-9]', '') ~ 'ak')))[:20] }}"
+      secret_key: "{{ lookup('password', '/dev/null', length=40, chars=['ascii_letters', 'digits']) }}"
+  loop: "{{ minio_buckets }}"
+  when: minio_manage_service_accounts | bool
+  no_log: true
+
+- name: Render bucket-scoped policy documents
+  ansible.builtin.copy:
+    dest: "/tmp/minio-policy-{{ item.token_user }}.json"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "s3:ListBucket",
+              "s3:GetBucketLocation"
+            ],
+            "Resource": [
+              "arn:aws:s3:::{{ item.bucket }}"
+            ]
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "s3:AbortMultipartUpload",
+              "s3:DeleteObject",
+              "s3:GetObject",
+              "s3:ListBucketMultipartUploads",
+              "s3:ListMultipartUploadParts",
+              "s3:PutObject"
+            ],
+            "Resource": [
+              "arn:aws:s3:::{{ item.bucket }}/*"
+            ]
+          }
+        ]
+      }
+  loop: "{{ minio_bucket_tokens | default([]) }}"
+  when: minio_manage_service_accounts | bool
+  no_log: true
+
+- name: Create or update bucket-scoped users and policies
+  ansible.builtin.shell: |
+    set -euo pipefail
+    mc admin policy rm local {{ item.token_user }}-rw >/dev/null 2>&1 || true
+    mc admin user remove local {{ item.access_key }} >/dev/null 2>&1 || true
+    mc admin policy create local {{ item.token_user }}-rw /tmp/minio-policy-{{ item.token_user }}.json
+    mc admin user add local {{ item.access_key }} {{ item.secret_key }}
+    mc admin policy attach local {{ item.token_user }}-rw --user {{ item.access_key }}
+  args:
+    executable: /bin/bash
+  loop: "{{ minio_bucket_tokens | default([]) }}"
+  when: minio_manage_service_accounts | bool
+  no_log: true
+
+- name: Write bucket API credentials to controller output files
+  ansible.builtin.copy:
+    dest: "{{ minio_token_output_dir }}/{{ item.token_user }}.json"
+    mode: "0600"
+    content: >-
+      {{
+        {
+          "bucket": item.bucket,
+          "token_user": item.token_user,
+          "access_key": item.access_key,
+          "secret_key": item.secret_key,
+          "endpoint": (minio_effective_scheme | default('http')) ~ '://' ~ (minio_vip_address | default(hostvars[inventory_hostname].ansible_host)) ~ ':' ~ (minio_api_port | string)
+        } | to_nice_json
+      }}
+  delegate_to: localhost
+  become: false
+  loop: "{{ minio_bucket_tokens | default([]) }}"
+  when: minio_manage_service_accounts | bool
+  no_log: true
