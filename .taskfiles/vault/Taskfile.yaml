@@ -287,3 +287,16 @@ tasks:
           "{{.MIGRATE_TRANSIT_PLAYBOOK}}" \
           -i "{{.INVENTORY_FILE}}" \
           {{.CLI_ARGS}}
+  
+  update:secrets:
+    desc: "Run only vault-secrets role to update secrets/config in Vault"
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.DEPLOY_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          --tags secrets \
+          {{.CLI_ARGS}}
