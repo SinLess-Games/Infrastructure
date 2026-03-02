@@ -1,0 +1,29 @@
+# =============================================================================
+# RKE2 Configuration Template
+# =============================================================================
+# Managed by Ansible - role: rke2-install
+# =============================================================================
+
+{% if rke2_node_role == 'server' %}
+# Control plane configuration
+cni: {{ rke2_cni }}
+cluster-cidr: {{ rke2_pod_cidr }}
+service-cidr: {{ rke2_service_cidr }}
+cluster-dns: {{ rke2_cluster_dns }}
+{% if not rke2_is_bootstrap_node and rke2_server_url %}
+server: {{ rke2_server_url }}
+token: {{ rke2_token }}
+{% endif %}
+tls-san:
+  - {{ ansible_host }}
+  - {{ inventory_hostname }}
+{% if rke2_tls_san_extra is defined %}
+{% for san in rke2_tls_san_extra %}
+  - {{ san }}
+{% endfor %}
+{% endif %}
+{% else %}
+# Worker (agent) configuration
+server: {{ rke2_server_url }}
+token: {{ rke2_token }}
+{% endif %}

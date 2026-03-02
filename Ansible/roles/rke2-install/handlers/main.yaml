@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# RKE2 Install Role - Handlers
+# =============================================================================
+
+- name: Restart rke2
+  ansible.builtin.systemd:
+    name: "rke2-{{ rke2_node_role }}.service"
+    state: restarted
+    daemon_reload: true

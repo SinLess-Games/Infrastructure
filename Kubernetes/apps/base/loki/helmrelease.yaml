@@ -24,7 +24,8 @@ spec:
       storage:
         type: s3
         s3:
-          # MinIO S3-compatible endpoint hosted on the storage VLAN (10.10.40.x)
+          # MinIO HA VIP (Keepalived) on the storage VLAN (VLAN 40, 10.10.40.0/24)
+          # Managed by Ansible/group_vars/minio/main.yaml: minio_vip_address: "10.10.40.100"
           endpoint: "http://10.10.40.100"
           bucketnames: "loki"
           region: us-east-1

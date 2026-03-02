@@ -1,3 +1,4 @@
+---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
@@ -61,19 +62,11 @@ spec:
   interval: 24h
   url: https://prometheus-community.github.io/helm-charts
 ---
+# Hosts Grafana, Loki, Alloy, Beyla, and other Grafana Labs charts
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
   name: grafana
-  namespace: flux-system
-spec:
-  interval: 24h
-  url: https://grafana.github.io/helm-charts
----
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
-  name: beyla
   namespace: flux-system
 spec:
   interval: 24h

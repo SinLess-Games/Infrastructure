@@ -39,7 +39,7 @@
 
   pre_tasks:
     - name: Ensure DNS nameservers are configured
-      copy:
+      ansible.builtin.copy:
         content: |
           nameserver {{ influxdb_dns_primary | default('10.10.10.1') }}
           nameserver {{ influxdb_dns_secondary | default('1.1.1.1') }}
@@ -50,7 +50,7 @@
       tags: ["dns"]
 
     - name: Refresh APT cache
-      apt:
+      ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
       register: apt_cache_result
