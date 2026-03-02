@@ -1,0 +1,62 @@
+// Managed by Ansible - DO NOT EDIT MANUALLY
+// =====================================================================
+// InfluxDB Terraform Configuration (Managed by Ansible)
+// =====================================================================
+// Source: Ansible/templates/influxdb/influxdb.tf.j2
+// =====================================================================
+
+module "influxdb" {
+  source = "{{ influxdb_module_source }}"
+
+  # Deployment configuration
+  cluster_name = "{{ influxdb_cluster_name }}"
+  environment  = "{{ influxdb_environment }}"
+
+  # VM identity
+  node_name = "{{ influxdb_node_name }}"
+  vm_id     = {{ influxdb_vm_id }}
+
+  # Proxmox placement
+  target_node    = "{{ influxdb_target_node }}"
+  clone_template = "{{ influxdb_clone_template }}"
+
+  # Network configuration (VLAN 20, Services network)
+  ip_address     = "{{ influxdb_ip_address }}"
+  gateway        = "{{ influxdb_gateway }}"
+  cidr_subnet    = "{{ influxdb_cidr_subnet }}"
+  vlan_id        = {{ influxdb_vlan_id }}
+  network_bridge = "{{ influxdb_network_bridge }}"
+  nameservers    = "{{ influxdb_nameservers }}"
+
+  # Resource allocation
+  cpu_cores   = {{ influxdb_cpu_cores }}
+  cpu_sockets = {{ influxdb_cpu_sockets }}
+  memory_mb   = {{ influxdb_memory_mb }}
+  disk_size   = "{{ influxdb_disk_size }}"
+  storage     = "{{ influxdb_storage }}"
+
+  # Access configuration
+  default_user = "{{ influxdb_default_user }}"
+  ansible_user = "{{ influxdb_ansible_user }}"
+  ssh_keys     = {{ influxdb_ssh_keys | to_json }}
+
+  # HA and backup
+  ha_enabled      = {{ influxdb_ha_enabled | ternary('true', 'false') }}
+  ha_group        = "{{ influxdb_ha_group }}"
+  backup_enabled  = {{ influxdb_backup_enabled | ternary('true', 'false') }}
+  backup_schedule = "{{ influxdb_backup_schedule }}"
+
+  # VM options
+  start_at_node_boot = {{ influxdb_start_at_node_boot | ternary('true', 'false') }}
+  agent_enabled      = {{ influxdb_agent_enabled | ternary('true', 'false') }}
+  protection         = {{ influxdb_protection | ternary('true', 'false') }}
+  startup_order      = {{ influxdb_startup_order }}
+
+  # InfluxDB application configuration
+  influxdb_version = "{{ influxdb_version }}"
+  influxdb_port    = {{ influxdb_port }}
+
+  # Tags and metadata
+  tags        = {{ influxdb_tags | to_json }}
+  description = "{{ influxdb_description }}"
+}

@@ -1,0 +1,104 @@
+---
+# =============================================================================
+# InfluxDB Deploy Role - Tasks
+# =============================================================================
+# Purpose:
+#   - Render Terraform configuration for InfluxDB VM
+#   - Execute Terraform via Taskfile
+# =============================================================================
+
+- name: Assert required InfluxDB deployment variables
+  ansible.builtin.assert:
+    that:
+      - influxdb_target_node is defined and influxdb_target_node | length > 0
+      - influxdb_ip_address is defined and influxdb_ip_address | length > 0
+      - influxdb_vm_id is defined
+      - influxdb_memory_mb is defined and influxdb_memory_mb | int > 0
+    fail_msg: "InfluxDB deployment requires valid target_node, ip_address, vm_id, and memory_mb"
+
+- name: Read Proxmox API token file for Terraform
+  ansible.builtin.slurp:
+    src: "{{ influxdb_repo_root }}/{{ influxdb_proxmox_api_token_file }}"
+  register: influxdb_proxmox_token_file
+  no_log: true
+
+- name: Parse Proxmox API token values
+  ansible.builtin.set_fact:
+    influxdb_proxmox_token_text: "{{ influxdb_proxmox_token_file.content | b64decode | string }}"
+  no_log: true
+
+- name: Extract Proxmox API token ID and secret
+  ansible.builtin.set_fact:
+    influxdb_proxmox_api_token_id: >-
+      {{ (influxdb_proxmox_token_text
+        | regex_findall('(?m)^FULL_TOKENID=([^\n]+)'))
+        | first | default('') }}
+    influxdb_proxmox_api_token_secret: >-
+      {{ (influxdb_proxmox_token_text
+        | regex_findall('(?m)^TOKEN_SECRET=([^\n]+)'))
+        | first | default('') }}
+  no_log: true
+
+- name: Assert Proxmox API token values were parsed
+  ansible.builtin.assert:
+    that:
+      - influxdb_proxmox_api_token_id is not none
+      - influxdb_proxmox_api_token_secret is not none
+    fail_msg: "Failed to parse Proxmox API token ID/secret from token file"
+
+- name: Ensure Terraform output directory exists
+  ansible.builtin.file:
+    path: "{{ influxdb_terraform_dir }}"
+    state: directory
+
+- name: Render InfluxDB Terraform module configuration
+  ansible.builtin.template:
+    src: "{{ influxdb_repo_root }}/Ansible/templates/influxdb/influxdb.tf.j2"
+    dest: "{{ influxdb_terraform_dir }}/influxdb.tf"
+    mode: "0644"
+
+- name: Initialize Terraform (Taskfile)
+  ansible.builtin.command:
+    cmd: "task terraform:init"
+    chdir: "{{ influxdb_repo_root }}"
+  environment:
+    TF_IN_AUTOMATION: "1"
+    TF_VAR_proxmox_api_url: "{{ influxdb_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ influxdb_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ influxdb_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ influxdb_proxmox_tls_insecure | ternary('true', 'false') }}"
+
+- name: Check if InfluxDB VM already exists
+  ansible.builtin.command:
+    cmd: "ssh-keyscan -H {{ influxdb_ip_address }} 2>/dev/null"
+  register: influxdb_vm_check
+  failed_when: false
+  changed_when: false
+
+- name: Apply Terraform configuration (Taskfile)
+  ansible.builtin.command:
+    cmd: "task terraform:apply:auto"
+    chdir: "{{ influxdb_repo_root }}"
+  environment:
+    TF_IN_AUTOMATION: "1"
+    TF_VAR_proxmox_api_url: "{{ influxdb_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ influxdb_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ influxdb_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ influxdb_proxmox_tls_insecure | ternary('true', 'false') }}"
+    TF_VAR_force_create: "{{ (influxdb_vm_check.rc == 0) | ternary('true', 'false') }}"
+  register: terraform_result
+  ignore_errors: true
+
+- name: Skip terraform if VM already exists
+  ansible.builtin.meta: noop
+  when: terraform_result is failed and 'already in use' in (terraform_result.stderr | default(''))
+
+- name: Wait for InfluxDB VM to be accessible
+  ansible.builtin.pause:
+    seconds: 30
+
+- name: Wait for cloud-init configuration to complete
+  ansible.builtin.pause:
+    seconds: 10
+  tags:
+    - influxdb-cloud-init
