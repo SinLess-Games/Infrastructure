@@ -24,10 +24,12 @@ spec:
       storage:
         type: s3
         s3:
+          # MinIO S3-compatible endpoint hosted on the storage VLAN (10.10.40.x)
           endpoint: "http://10.10.40.100"
           bucketnames: "loki"
           region: us-east-1
           s3ForcePathStyle: true
+          # Internal storage VLAN traffic; TLS not required within VLAN 40
           insecure: true
     singleBinary:
       replicas: 1

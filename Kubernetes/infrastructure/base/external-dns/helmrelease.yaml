@@ -19,7 +19,8 @@ spec:
       webhook:
         image:
           repository: ghcr.io/mconfalonieri/external-dns-technitium-webhook
-          tag: latest
+          # Pin to a specific release tag; update when new versions are available
+          tag: "v0.5.0"
     policy: sync
     sources:
       - ingress
