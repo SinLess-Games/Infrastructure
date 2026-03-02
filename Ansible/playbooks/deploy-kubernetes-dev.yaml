@@ -1,0 +1,60 @@
+---
+- name: Deploy Kubernetes dev infrastructure and core cluster foundation
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars_files:
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/development/main.yaml
+  vars:
+    kubernetes_plan_only: "{{ (kubernetes_plan_only | default(false)) | bool }}"
+    kubernetes_destroy: "{{ (kubernetes_destroy | default(false)) | bool }}"
+  roles:
+    - role: dev-kubernetes-configure
+      vars:
+        kubernetes_configure_phase: "infrastructure"
+
+- name: Configure Kubernetes dev nodes and deploy platform apps via FluxCD
+  hosts: kubernetes_dev
+  gather_facts: false
+  become: true
+  vars_files:
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/development/main.yaml
+  pre_tasks:
+    - name: Remove stale host keys for dev node IPs
+      ansible.builtin.command:
+        cmd: "ssh-keygen -f {{ lookup('env', 'HOME') }}/.ssh/known_hosts -R {{ item.ip }}"
+      loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+      loop_control:
+        label: "{{ item.ip }}"
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+      failed_when: false
+
+    - name: Bootstrap Python on Flatcar nodes via Miniconda
+      ansible.builtin.raw: |
+        set -euo pipefail
+        if [ ! -x "{{ kubernetes_miniconda_prefix }}/bin/python3" ]; then
+          curl -fsSL "{{ kubernetes_miniconda_installer_url }}" -o /tmp/miniconda.sh
+          bash /tmp/miniconda.sh -b -p "{{ kubernetes_miniconda_prefix }}"
+          rm -f /tmp/miniconda.sh
+        fi
+      changed_when: false
+
+    - name: Gather facts after Python bootstrap
+      ansible.builtin.setup:
+  roles:
+    - role: dev-kubernetes-configure
+      vars:
+        kubernetes_configure_phase: "nodes"
+      when:
+        - not (kubernetes_plan_only | default(false) | bool)
+        - not (kubernetes_destroy | default(false) | bool)
+
+    - role: dev-kubernetes-deploy
+      tags: ["k8s", "dev", "deploy", "flux", "platform-apps"]
+      when:
+        - not (kubernetes_plan_only | default(false) | bool)
+        - not (kubernetes_destroy | default(false) | bool)

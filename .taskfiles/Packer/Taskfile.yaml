@@ -89,3 +89,36 @@ tasks:
         msg: "Packer template not found"
     cmds:
       - packer inspect debian-12.pkr.hcl
+
+  build:flatcar:
+    desc: "Build Flatcar Container Linux template"
+    dir: "{{.PACKER_DIR}}/flatcar"
+    preconditions:
+      - sh: test -f flatcar.pkr.hcl
+        msg: "Packer template not found: {{.PACKER_DIR}}/flatcar/flatcar.pkr.hcl"
+      - sh: test -f ../credentials.pkvars.hcl
+        msg: "Credentials file not found: {{.PACKER_DIR}}/credentials.pkvars.hcl"
+    cmds:
+      - echo "Validating Packer configuration..."
+      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl flatcar.pkr.hcl
+      - echo "Starting Flatcar template build (estimated 5-10 minutes)..."
+      - packer build -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl flatcar.pkr.hcl 2>&1 | tee build.log
+
+  validate:flatcar:
+    desc: "Validate Flatcar Packer configuration without building"
+    dir: "{{.PACKER_DIR}}/flatcar"
+    preconditions:
+      - sh: test -f flatcar.pkr.hcl
+        msg: "Packer template not found"
+    cmds:
+      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl flatcar.pkr.hcl
+      - echo "✓ Packer configuration is valid"
+
+  inspect:flatcar:
+    desc: "Inspect Flatcar Packer template variables and sources"
+    dir: "{{.PACKER_DIR}}/flatcar"
+    preconditions:
+      - sh: test -f flatcar.pkr.hcl
+        msg: "Packer template not found"
+    cmds:
+      - packer inspect flatcar.pkr.hcl

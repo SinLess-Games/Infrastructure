@@ -1,0 +1,111 @@
+---
+- name: Validate deploy prerequisites
+  ansible.builtin.assert:
+    that:
+      - kubernetes_environment == "dev"
+      - kubernetes_flux_git_url | length > 0
+      - kubernetes_flux_git_branch | length > 0
+      - kubernetes_flux_path | length > 0
+    fail_msg: "Flux GitOps deployment variables are missing"
+
+- name: Ensure kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubernetes_dev_kubeconfig }}"
+  register: kubernetes_dev_kubeconfig_stat
+  become: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Fail if kubeconfig is missing
+  ansible.builtin.assert:
+    that:
+      - kubernetes_dev_kubeconfig_stat.stat.exists
+    fail_msg: "Kubeconfig not found at {{ kubernetes_dev_kubeconfig }}. Run dev-kubernetes-configure first."
+
+- name: Ensure flux-system namespace exists
+  ansible.builtin.command:
+    cmd: kubectl create namespace flux-system --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+    KUBECONFIG: "{{ kubernetes_dev_kubeconfig }}"
+  become: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Install Flux controllers (pinned)
+  ansible.builtin.shell: |
+    kubectl apply -f https://github.com/fluxcd/flux2/releases/download/v{{ kubernetes_versions.flux }}/install.yaml
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: "{{ kubernetes_dev_kubeconfig }}"
+  become: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Wait for Flux source-controller rollout
+  ansible.builtin.command:
+    cmd: kubectl -n flux-system rollout status deploy/source-controller --timeout=10m
+  environment:
+    KUBECONFIG: "{{ kubernetes_dev_kubeconfig }}"
+  become: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Apply Flux bootstrap manifests for dev
+  ansible.builtin.command:
+    cmd: kubectl apply -k {{ kubernetes_bootstrap_dir }}
+  environment:
+    KUBECONFIG: "{{ kubernetes_dev_kubeconfig }}"
+  become: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Wait for Flux Kustomization reconciliation
+  ansible.builtin.command:
+    cmd: kubectl -n flux-system wait --for=condition=ready kustomization/dev-cluster --timeout=10m
+  environment:
+    KUBECONFIG: "{{ kubernetes_dev_kubeconfig }}"
+  become: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Configure Vault Kubernetes auth for ESO
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [ -z "{{ kubernetes_vault_token }}" ]; then
+      exit 0
+    fi
+
+    export VAULT_ADDR="{{ kubernetes_vault_addr }}"
+    export VAULT_TOKEN="{{ kubernetes_vault_token }}"
+
+    vault auth enable kubernetes || true
+
+    KUBE_TOKEN=$(kubectl -n kube-system create token default)
+    KUBE_CA=$(kubectl config view --raw --minify --flatten -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+    KUBE_HOST=$(kubectl config view --raw --minify --flatten -o jsonpath='{.clusters[0].cluster.server}')
+
+    vault write auth/kubernetes/config \
+      token_reviewer_jwt="$KUBE_TOKEN" \
+      kubernetes_host="$KUBE_HOST" \
+      kubernetes_ca_cert="$(echo "$KUBE_CA" | base64 -d)"
+
+    vault policy write external-secrets - <<'EOF'
+    path "{{ kubernetes_vault_eso_mount }}/data/{{ kubernetes_vault_eso_secret_path }}/*" {
+      capabilities = ["read", "list"]
+    }
+    EOF
+
+    vault write auth/kubernetes/role/external-secrets \
+      bound_service_account_names=external-secrets \
+      bound_service_account_namespaces=external-secrets \
+      policies=external-secrets \
+      ttl=1h
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: "{{ kubernetes_dev_kubeconfig }}"
+  become: false
+  delegate_to: localhost
+  run_once: true
+  no_log: true

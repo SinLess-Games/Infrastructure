@@ -55,7 +55,7 @@ ssh:
 
   server:
     port: 22
-    listen_addresses: ["0.0.0.0", "::"]
+    listen_addresses: ["0.0.0.0"]
 
     pubkey_authentication: true
     password_authentication: false

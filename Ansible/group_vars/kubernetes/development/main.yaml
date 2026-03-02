@@ -1,0 +1,69 @@
+---
+kubernetes_environment: "dev"
+kubernetes_cluster_name: "k8s-dev"
+kubernetes_domain_suffix: "dev.k8s.sinlessgames.com"
+kubernetes_enable_ignition_fw_cfg: false
+kubernetes_ignition_server_url: "http://10.10.10.10:9000/ignition"
+kubernetes_force_create: true
+
+kubernetes_network:
+  bridge: "vmbr0"
+  vlan_id: 20
+  subnet: "10.10.20.0/24"
+  cidr_suffix: "/24"
+  gateway: "10.10.20.1"
+  nameservers: "10.10.10.1 1.1.1.1"
+
+kubernetes_proxmox_target_nodes:
+  - pve-01
+  - pve-04
+  - pve-05
+
+kubernetes_control_plane:
+  count: 1
+  vmid_start: 300
+  name_prefix: "k8s-dev-cp"
+  cpu_cores: 4
+  cpu_sockets: 1
+  memory_mb: 8192
+  disk_size: "100G"
+
+kubernetes_workers:
+  count: 2
+  vmid_start: 310
+  name_prefix: "k8s-dev-wk"
+  cpu_cores: 4
+  cpu_sockets: 1
+  memory_mb: 8192
+  disk_size: "100G"
+
+kubernetes_nodes:
+  control_plane:
+    - name: "k8s-dev-cp-01"
+      hostname: "k8s-dev-cp-01"
+      fqdn: "k8s-dev-cp-01.dev.k8s.sinlessgames.com"
+      ip: "10.10.20.11"
+      vmid: 300
+      target_node: "pve-01"
+  workers:
+    - name: "k8s-dev-wk-01"
+      hostname: "k8s-dev-wk-01"
+      fqdn: "k8s-dev-wk-01.dev.k8s.sinlessgames.com"
+      ip: "10.10.20.21"
+      vmid: 310
+      target_node: "pve-04"
+    - name: "k8s-dev-wk-02"
+      hostname: "k8s-dev-wk-02"
+      fqdn: "k8s-dev-wk-02.dev.k8s.sinlessgames.com"
+      ip: "10.10.20.22"
+      vmid: 311
+      target_node: "pve-04"
+
+kubernetes_externaldns:
+  technitium:
+    server: "http://10.10.10.11:5380"
+    zone: "dev.k8s.sinlessgames.com"
+    token: "{{ lookup('env', 'TECHNITIUM_API_TOKEN') | default('', true) }}"
+  cloudflare:
+    domain_filter: "sinlessgames.com"
+    token: "{{ lookup('env', 'CLOUDFLARE_API_TOKEN') | default('', true) }}"

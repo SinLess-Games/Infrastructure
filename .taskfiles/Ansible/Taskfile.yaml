@@ -176,3 +176,69 @@ tasks:
           -i {{.ANSIBLE_DIR}}/inventory \
           {{.ANSIBLE_DIR}}/playbooks/deploy-minio.yaml \
           {{.CLI_ARGS}}
+  # =============================================================================
+  # Kubernetes Deployment Tasks
+  # =============================================================================
+
+  k8s:dev:
+    desc: "Deploy Kubernetes dev cluster (Terraform + RKE2 + core addons + Flux bootstrap)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-kubernetes-dev.yaml \
+          {{.CLI_ARGS}}
+
+  k8s:dev:plan:
+    desc: "Show Terraform plan for dev cluster (no apply)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-kubernetes-dev.yaml \
+          -e kubernetes_plan_only=true \
+          {{.CLI_ARGS}}
+
+  k8s:dev:destroy:
+    desc: "Destroy dev cluster VMs (Terraform destroy only, no cluster ops)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-kubernetes-dev.yaml \
+          -e kubernetes_destroy=true \
+          {{.CLI_ARGS}}
+
+  k8s:dev:kubeconfig:
+    desc: "Print kubeconfig path for dev cluster"
+    cmds:
+      - echo ".outputs/kubernetes/dev/kubeconfig"
+
+  k8s:dev:status:
+    desc: "Check dev cluster status (requires kubeconfig)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export KUBECONFIG=$$(pwd)/.outputs/kubernetes/dev/kubeconfig
+        if ! [ -f "$$KUBECONFIG" ]; then
+          echo "Kubeconfig not found. Deploy cluster first with: task ansible:k8s:dev"
+          exit 1
+        fi
+        echo "=== Cluster Nodes ==="
+        kubectl get nodes -o wide
+        echo ""
+        echo "=== Cilium Status ==="
+        kubectl -n kube-system get pods -l k8s-app=cilium
+        echo ""
+        echo "=== Ingress Controllers ==="
+        kubectl -n ingress-nginx get pods

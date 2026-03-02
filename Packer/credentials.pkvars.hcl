@@ -10,8 +10,8 @@ proxmox_endpoint = "https://10.10.10.15:8006/api2/json"
 proxmox_api_token_id = "packer-prov@pve!packer-automation"
 proxmox_api_token_secret = "a87e58b8-57db-4c66-8e29-30cafb058f99"
 
-# Default Proxmox node for builds
-proxmox_node = "pve-01"
+# Default Proxmox node for builds (use IP address for SSH/SCP access)
+proxmox_node = "10.10.10.15"
 
 # Storage configuration
 # ISO storage: ISOs (Ceph filesystem)

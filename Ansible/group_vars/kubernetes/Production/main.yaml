@@ -1,0 +1,16 @@
+---
+kubernetes_environment: "prod"
+kubernetes_cluster_name: "k8s-prod"
+
+kubernetes_network:
+  bridge: "vmbr40"
+  vlan_id: 40
+  subnet: "10.10.40.0/24"
+  cidr_suffix: "/24"
+  gateway: "10.10.40.1"
+
+kubernetes_control_plane:
+  count: 5
+
+kubernetes_workers:
+  count: 4

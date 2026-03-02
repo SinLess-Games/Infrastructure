@@ -1,0 +1,9 @@
+---
+kubernetes_dev_tf_file: "{{ kubernetes_terraform_dir }}/kubernetes-dev-cluster.tf"
+kubernetes_dev_inventory_file: "{{ kubernetes_repo_root }}/Ansible/inventory/kubernetes-dev.yaml"
+kubernetes_dev_generated_dir: "{{ kubernetes_generated_dir }}/{{ kubernetes_environment }}"
+kubernetes_dev_butane_dir: "{{ kubernetes_dev_generated_dir }}/butane"
+kubernetes_dev_ignition_dir: "{{ kubernetes_dev_generated_dir }}/ignition"
+kubernetes_dev_kubeconfig: "{{ kubernetes_dev_generated_dir }}/kubeconfig"
+kubernetes_dev_externaldns_values_dir: "{{ kubernetes_dev_generated_dir }}/helm-values"
+kubernetes_configure_phase: "all"

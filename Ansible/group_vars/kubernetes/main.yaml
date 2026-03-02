@@ -1,0 +1,65 @@
+---
+kubernetes_repo_root: "{{ playbook_dir | dirname | dirname }}"
+kubernetes_terraform_dir: "{{ kubernetes_repo_root }}/Terraform"
+kubernetes_templates_dir: "{{ kubernetes_repo_root }}/Ansible/templates/kubernetes"
+kubernetes_generated_dir: "{{ kubernetes_repo_root }}/.outputs/kubernetes"
+
+kubernetes_proxmox_api_url: "https://10.10.10.15:8006/api2/json"
+kubernetes_proxmox_tls_insecure: true
+kubernetes_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
+
+kubernetes_flatcar_template: "flatcar-template"
+kubernetes_enable_ignition_fw_cfg: true
+kubernetes_force_create: false
+kubernetes_storage: "VM_Disks"
+
+kubernetes_default_user: "sinless777"
+kubernetes_ansible_user: "sinless777"
+kubernetes_ssh_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519"
+kubernetes_python_interpreter: "/opt/miniconda/bin/python3"
+kubernetes_miniconda_installer_url: "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+kubernetes_miniconda_prefix: "/opt/miniconda"
+
+kubernetes_ssh_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA7g0acAC3ORT/DUzu3ftMtRW6MlVWuWZ7qqd4tNHLcY automation@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKDoqYKB+akwuGHSAJWn6EeXR70zIg9oZXuP60Al1mOS breakglass@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEMakhAavnUU1qkhadP1tNtmwG7tsu49siUyMIEcKKn9 root@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ0Ch6BKvYa5V+7su2oXhf8jRBgBdRKvoqd0UKVtt1mS sinless777@sinlessgames"
+
+kubernetes_versions:
+  rke2: "v1.31.5+rke2r1"
+  cilium_chart: "1.16.5"
+  ingress_nginx_chart: "4.11.3"
+  cert_manager_chart: "v1.16.2"
+  external_dns_chart: "1.15.0"
+  external_secrets_chart: "0.10.5"
+  kube_prometheus_stack_chart: "66.3.1"
+  promtail_chart: "6.16.6"
+  beyla_chart: "1.8.9"
+  istio_chart: "1.24.2"
+  flux: "2.4.0"
+
+kubernetes_plan_only: false
+kubernetes_destroy: false
+kubernetes_force_apply: false
+kubernetes_wait_for_ssh_timeout: 900
+
+kubernetes_proxmox_node_ssh_hosts:
+  pve-01: "10.10.10.15"
+  pve-02: "10.10.10.16"
+  pve-03: "10.10.10.17"
+  pve-04: "10.10.10.18"
+  pve-05: "10.10.10.19"
+
+kubernetes_vault_addr: "https://vault.service.sinlessgames.com"
+kubernetes_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
+kubernetes_vault_kv_path: "secret/data/kubernetes/dev"
+kubernetes_vault_eso_mount: "kv"
+kubernetes_vault_eso_secret_path: "kubernetes/dev"
+
+kubernetes_mimir_remote_write_url: "https://mimir.service.sinlessgames.com/api/v1/push"
+kubernetes_loki_push_url: "https://loki.service.sinlessgames.com/loki/api/v1/push"
+
+kubernetes_flux_git_url: "https://github.com/Sinless777/Infrastructure.git"
+kubernetes_flux_git_branch: "main"
+kubernetes_flux_path: "./Kubernetes/clusters/dev"

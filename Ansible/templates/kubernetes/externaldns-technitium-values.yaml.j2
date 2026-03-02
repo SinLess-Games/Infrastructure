@@ -1,0 +1,22 @@
+provider:
+  name: webhook
+sources:
+  - ingress
+  - service
+interval: 1m
+policy: sync
+txtOwnerId: "{{ kubernetes_cluster_name }}-technitium"
+domainFilters:
+  - {{ kubernetes_externaldns.technitium.zone }}
+extraArgs:
+  - --webhook-provider-url=http://localhost:8888
+env:
+  - name: TECHNITIUM_API_URL
+    value: {{ kubernetes_externaldns.technitium.server }}
+  - name: TECHNITIUM_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: externaldns-technitium-secret
+        key: api-token
+podLabels:
+  cluster: {{ kubernetes_environment }}

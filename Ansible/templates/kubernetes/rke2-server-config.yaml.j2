@@ -1,0 +1,13 @@
+write-kubeconfig-mode: "0644"
+node-name: "{{ inventory_hostname }}"
+token: "{{ kubernetes_rke2_token }}"
+disable:
+  - rke2-ingress-nginx
+cni:
+  - none
+tls-san:
+  - "{{ hostvars[groups['kubernetes_dev_control_plane'][0]].ansible_host }}"
+  - "{{ hostvars[groups['kubernetes_dev_control_plane'][0]].node_fqdn | default(groups['kubernetes_dev_control_plane'][0]) }}"
+{% if inventory_hostname != groups['kubernetes_dev_control_plane'][0] %}
+server: "https://{{ hostvars[groups['kubernetes_dev_control_plane'][0]].ansible_host }}:9345"
+{% endif %}

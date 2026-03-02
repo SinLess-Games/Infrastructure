@@ -1,0 +1,80 @@
+variant: flatcar
+version: 1.0.0
+passwd:
+  users:
+    - name: {{ kubernetes_default_user }}
+      groups:
+        - sudo
+        - wheel
+      ssh_authorized_keys:
+{% for key in kubernetes_ssh_keys %}
+        - {{ key }}
+{% endfor %}
+storage:
+  files:
+    - path: /etc/modules-load.d/k8s.conf
+      mode: 0644
+      contents:
+        inline: |
+          br_netfilter
+          overlay
+          nf_conntrack
+    - path: /etc/sysctl.d/99-kubernetes.conf
+      mode: 0644
+      contents:
+        inline: |
+          net.ipv4.ip_forward = 1
+          net.bridge.bridge-nf-call-iptables = 1
+          vm.max_map_count = 262144
+          net.ipv6.conf.all.disable_ipv6 = 1
+          net.ipv6.conf.default.disable_ipv6 = 1
+          net.ipv6.conf.lo.disable_ipv6 = 1
+    - path: /etc/systemd/timesyncd.conf.d/99-k8s.conf
+      mode: 0644
+      contents:
+        inline: |
+          [Time]
+          NTP=10.10.10.1
+    - path: /etc/systemd/journald.conf.d/99-k8s.conf
+      mode: 0644
+      contents:
+        inline: |
+          [Journal]
+          SystemMaxUse=1G
+          RuntimeMaxUse=256M
+    - path: /etc/hostname
+      mode: 0644
+      contents:
+        inline: {{ node.hostname }}
+    - path: /etc/systemd/network/10-eth0.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name=eth0
+
+          [Network]
+          Address={{ node.ip }}{{ kubernetes_network.cidr_suffix }}
+          Gateway={{ kubernetes_network.gateway }}
+{% for ns in (kubernetes_network.nameservers | split(' ')) if ns | length > 0 %}
+          DNS={{ ns }}
+{% endfor %}
+          IPv6AcceptRA=no
+          LinkLocalAddressing=ipv4
+    - path: /etc/rancher/rke2/config.yaml
+      mode: 0600
+      contents:
+        inline: |
+          write-kubeconfig-mode: "0644"
+          node-name: "{{ node.hostname }}"
+          tls-san:
+            - "{{ node.fqdn }}"
+            - "{{ node.ip }}"
+systemd:
+  units:
+    - name: systemd-sysctl.service
+      enabled: true
+    - name: qemu-guest-agent.service
+      enabled: true
+    - name: rke2-server.service
+      enabled: false

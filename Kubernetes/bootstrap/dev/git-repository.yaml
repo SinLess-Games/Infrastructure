@@ -1,0 +1,18 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: infrastructure
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/Sinless777/Infrastructure
+  ref:
+    branch: main
+  secretRef:
+    name: flux-ssh
+  ignore: |
+    # exclude all
+    /*
+    # include deploy dir
+    !/Kubernetes/

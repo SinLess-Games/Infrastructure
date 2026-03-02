@@ -1,0 +1,55 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: istio-system
+
+helmCharts:
+  - name: istiod
+    repo: https://istio-release.storage.googleapis.com/charts
+    version: 1.24.2
+    releaseName: istiod
+    valuesInline:
+      telemetry:
+        v2:
+          prometheus:
+            enabled: true
+
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: istio-system
+
+resources:
+  - east-west-gateway.yaml
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: istio-eastwestgateway
+  namespace: istio-system
+spec:
+  type: LoadBalancer
+  selector:
+    istio: eastwestgateway
+  ports:
+    - port: 15021
+      protocol: TCP
+      name: status-port
+    - port: 15443
+      protocol: TCP
+      name: tls
+    - port: 15012
+      protocol: TCP
+      name: tls-istiod
+    - port: 15017
+      protocol: TCP
+      name: tls-webhook
+    - port: 8080
+      protocol: TCP
+      name: http
+    - port: 443
+      protocol: TCP
+      name: https

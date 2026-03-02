@@ -1,0 +1,5 @@
+---
+kubernetes_dev_generated_dir: "{{ kubernetes_generated_dir }}/{{ kubernetes_environment }}"
+kubernetes_dev_kubeconfig: "{{ kubernetes_dev_generated_dir }}/kubeconfig"
+kubernetes_bootstrap_dir: "{{ kubernetes_repo_root }}/Kubernetes/bootstrap/dev"
+kubernetes_cluster_manifests_dir: "{{ kubernetes_repo_root }}/Kubernetes/clusters/dev"
