@@ -1,0 +1,86 @@
+---
+# =============================================================================
+# Kubernetes Cluster Deployment Playbook
+# =============================================================================
+# Purpose:
+#   - Deploy K8S VMs using Terraform module
+#   - Render Terraform configuration from group_vars/k8s
+#   - Bootstrap control plane and worker nodes
+# =============================================================================
+# Usage:
+#   Deploy dev cluster:
+#     task ansible:deploy-k8s -- -e @Ansible/group_vars/k8s/dev.yaml
+#   Deploy staging cluster:
+#     task ansible:deploy-k8s -- -e @Ansible/group_vars/k8s/staging.yaml
+#   Deploy prod cluster:
+#     task ansible:deploy-k8s -- -e @Ansible/group_vars/k8s/prod.yaml
+# =============================================================================
+
+- name: Deploy K8S cluster VMs with Terraform
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  connection: local
+
+  vars_files:
+    - ../group_vars/k8s/dev.yaml
+
+  roles:
+    - role: k8s-deploy
+      tags: ["deploy"]
+
+- name: Bootstrap K8S control plane nodes
+  hosts: k8s_dev_control_plane:k8s_staging_control_plane:k8s_prod_control_plane
+  gather_facts: true
+  become: true
+  tags: [control_plane]
+
+  vars_files:
+    - ../group_vars/all/packages.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+
+  roles:
+    - role: dns-resolver
+      tags: ["dns"]
+
+    - role: users
+      tags: ["users"]
+
+    - role: packages
+      tags: ["packages"]
+
+    - role: ssh
+      tags: ["ssh"]
+
+    - role: shell-config
+      tags: ["shell"]
+
+- name: Configure K8S worker nodes
+  hosts: k8s_dev_workers:k8s_staging_workers:k8s_prod_workers
+  gather_facts: true
+  become: true
+  tags: [workers]
+
+  vars_files:
+    - ../group_vars/all/packages.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+
+  roles:
+    - role: dns-resolver
+      tags: ["dns"]
+
+    - role: users
+      tags: ["users"]
+
+    - role: packages
+      tags: ["packages"]
+
+    - role: ssh
+      tags: ["ssh"]
+
+    - role: shell-config
+      tags: ["shell"]

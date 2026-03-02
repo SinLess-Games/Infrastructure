@@ -1,0 +1,105 @@
+---
+# =============================================================================
+# K8S Deploy Role - Tasks
+# =============================================================================
+# Purpose:
+#   - Render Terraform configuration for K8S cluster
+#   - Execute Terraform via Taskfile
+# =============================================================================
+
+- name: Assert required K8S deployment variables
+  ansible.builtin.assert:
+    that:
+      - k8s_control_plane_count >= 1
+      - k8s_worker_count >= 1
+      - k8s_control_plane_ip_addresses | length == k8s_control_plane_count | int
+      - k8s_worker_ip_addresses | length == k8s_worker_count | int
+    fail_msg: "K8S deployment requires valid node counts and matching IP address lists"
+
+- name: Read Proxmox API token file for Terraform
+  ansible.builtin.slurp:
+    src: "{{ k8s_repo_root }}/{{ k8s_proxmox_api_token_file }}"
+  register: k8s_proxmox_token_file
+  no_log: true
+
+- name: Parse Proxmox API token values
+  ansible.builtin.set_fact:
+    k8s_proxmox_token_text: "{{ k8s_proxmox_token_file.content | b64decode | string }}"
+  no_log: true
+
+- name: Extract Proxmox API token ID and secret
+  ansible.builtin.set_fact:
+    k8s_proxmox_api_token_id: >-
+      {{ (k8s_proxmox_token_text
+        | regex_findall('(?m)^FULL_TOKENID=([^\n]+)'))
+        | first | default('') }}
+    k8s_proxmox_api_token_secret: >-
+      {{ (k8s_proxmox_token_text
+        | regex_findall('(?m)^TOKEN_SECRET=([^\n]+)'))
+        | first | default('') }}
+  no_log: true
+
+- name: Assert Proxmox API token values were parsed
+  ansible.builtin.assert:
+    that:
+      - k8s_proxmox_api_token_id is not none
+      - k8s_proxmox_api_token_secret is not none
+    fail_msg: "Failed to parse Proxmox API token ID/secret from token file"
+
+- name: Ensure Terraform output directory exists
+  ansible.builtin.file:
+    path: "{{ k8s_terraform_dir }}"
+    state: directory
+
+- name: Render K8S Terraform module configuration
+  ansible.builtin.template:
+    src: "{{ k8s_repo_root }}/Ansible/templates/k8s/k8s-cluster.tf.j2"
+    dest: "{{ k8s_terraform_dir }}/k8s-{{ k8s_environment }}-cluster.tf"
+    mode: "0644"
+
+- name: Initialize Terraform (Taskfile)
+  ansible.builtin.command:
+    cmd: "task terraform:init"
+    chdir: "{{ k8s_repo_root }}"
+  environment:
+    TF_IN_AUTOMATION: "1"
+    TF_VAR_proxmox_api_url: "{{ k8s_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ k8s_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ k8s_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ k8s_proxmox_tls_insecure | ternary('true', 'false') }}"
+
+- name: Check if K8S VMs already exist
+  ansible.builtin.command:
+    cmd: "ssh-keyscan -H {{ item }} 2>/dev/null"
+  loop: "{{ k8s_control_plane_ip_addresses + k8s_worker_ip_addresses }}"
+  register: k8s_vm_check
+  failed_when: false
+  changed_when: false
+
+- name: Apply Terraform configuration (Taskfile)
+  ansible.builtin.command:
+    cmd: "task terraform:apply:auto"
+    chdir: "{{ k8s_repo_root }}"
+  environment:
+    TF_IN_AUTOMATION: "1"
+    TF_VAR_proxmox_api_url: "{{ k8s_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ k8s_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ k8s_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ k8s_proxmox_tls_insecure | ternary('true', 'false') }}"
+    TF_VAR_force_create: "{{ (k8s_vm_check.results | selectattr('rc', 'equalto', 0) | list | length == 0) | ternary('false', 'true') }}"
+  register: terraform_result
+  ignore_errors: true
+
+- name: Skip terraform if VMs already exist
+  ansible.builtin.meta: noop
+  when: terraform_result is failed and 'already in use' in (terraform_result.stderr | default(''))
+
+- name: Wait for K8S VMs to be accessible
+  ansible.builtin.pause:
+    seconds: 30
+
+- name: Wait for cloud-init configuration to complete
+  ansible.builtin.pause:
+    seconds: 10
+  tags:
+    - k8s-cloud-init

@@ -1,0 +1,142 @@
+---
+# =============================================================================
+# K8S Production Cluster Deployment Variables
+# =============================================================================
+# Purpose:
+#   - Terraform inputs for K8S production cluster VM deployment
+#   - Network placement (VLAN 30, 10.10.30.0/24)
+#   - Proxmox storage and HA configuration
+# =============================================================================
+
+# =============================================================================
+# Terraform Module Configuration
+# =============================================================================
+
+k8s_module_source: "./modules/k8s-cluster"
+
+# Proxmox API access for Terraform
+k8s_proxmox_api_url: "https://10.10.10.15:8006/api2/json"
+k8s_proxmox_tls_insecure: true
+k8s_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
+k8s_proxmox_api_token_file_ansible: ".outputs/api-tokens/ansible-prov-api-token.txt"
+
+# =============================================================================
+# Cluster Identity
+# =============================================================================
+
+k8s_cluster_name: "k8s-prod"
+k8s_environment: "prod"
+
+# =============================================================================
+# Proxmox Placement (HA Distribution across all nodes)
+# =============================================================================
+
+k8s_target_nodes:
+  - pve-01
+  - pve-02
+  - pve-03
+  - pve-04
+  - pve-05
+
+# =============================================================================
+# Control Plane Configuration
+# =============================================================================
+
+k8s_control_plane_count: 5
+k8s_control_plane_name_prefix: "k8s-prod-cp"
+k8s_control_plane_vm_id_start: 320
+k8s_control_plane_ip_addresses:
+  - "10.10.30.30"
+  - "10.10.30.31"
+  - "10.10.30.32"
+  - "10.10.30.33"
+  - "10.10.30.34"
+k8s_control_plane_cpu_cores: 4
+k8s_control_plane_cpu_sockets: 1
+k8s_control_plane_memory_mb: 16384
+k8s_control_plane_disk_size: "120G"
+
+# =============================================================================
+# Worker Configuration
+# =============================================================================
+
+k8s_worker_count: 4
+k8s_worker_name_prefix: "k8s-prod-worker"
+k8s_worker_vm_id_start: 325
+k8s_worker_ip_addresses:
+  - "10.10.30.35"
+  - "10.10.30.36"
+  - "10.10.30.37"
+  - "10.10.30.38"
+k8s_worker_cpu_cores: 8
+k8s_worker_cpu_sockets: 1
+k8s_worker_memory_mb: 32768
+k8s_worker_disk_size: "200G"
+
+# =============================================================================
+# Network Configuration (VLAN 30 - 10.10.30.0/24 Kubernetes Network)
+# =============================================================================
+
+k8s_vlan_id: 30
+k8s_network_bridge: "vmbr0"
+k8s_gateway: "10.10.30.1"
+k8s_cidr_subnet: "/24"
+k8s_nameservers: "10.10.10.1 1.1.1.1"
+
+# =============================================================================
+# Proxmox Template and Storage
+# =============================================================================
+
+k8s_clone_template: "debian-13-template"
+k8s_storage: "VM_Disks"
+
+# =============================================================================
+# Access Configuration
+# =============================================================================
+
+k8s_default_user: "sinless777"
+k8s_ansible_user: "sinless777"
+
+k8s_ssh_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA7g0acAC3ORT/DUzu3ftMtRW6MlVWuWZ7qqd4tNHLcY automation@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKDoqYKB+akwuGHSAJWn6EeXR70zIg9oZXuP60Al1mOS breakglass@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEMakhAavnUU1qkhadP1tNtmwG7tsu49siUyMIEcKKn9 root@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ0Ch6BKvYa5V+7su2oXhf8jRBgBdRKvoqd0UKVtt1mS sinless777@sinlessgames"
+
+# =============================================================================
+# HA and Backup Configuration
+# =============================================================================
+
+k8s_ha_enabled: true
+k8s_ha_group: "k8s-prod-ha"
+k8s_backup_enabled: true
+k8s_backup_schedule: "0 1 * * *"
+
+# =============================================================================
+# VM Lifecycle Options
+# =============================================================================
+
+k8s_start_at_node_boot: true
+k8s_agent_enabled: true
+k8s_protection: true
+k8s_control_plane_startup_order: 40
+k8s_worker_startup_order: 50
+
+# =============================================================================
+# Tags and Metadata
+# =============================================================================
+
+k8s_tags:
+  - "kubernetes"
+  - "rke2"
+  - "prod"
+
+# =============================================================================
+# RKE2 Cluster Configuration
+# =============================================================================
+
+k8s_rke2_version: "v1.31.4+rke2r1"
+k8s_rke2_cni: "cilium"
+k8s_pod_cidr: "10.42.0.0/16"
+k8s_service_cidr: "10.43.0.0/16"
+k8s_cluster_dns: "10.43.0.10"

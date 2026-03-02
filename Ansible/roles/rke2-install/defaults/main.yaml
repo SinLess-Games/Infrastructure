@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# RKE2 Install Role - Default Variables
+# =============================================================================
+
+rke2_version: "v1.31.4+rke2r1"
+rke2_cni: "cilium"
+rke2_config_dir: "/etc/rancher/rke2"
+rke2_data_dir: "/var/lib/rancher/rke2"
+rke2_bin_dir: "/var/lib/rancher/rke2/bin"
+rke2_install_script_url: "https://get.rke2.io"
+
+# Node role: 'server' for control plane, 'agent' for workers
+rke2_node_role: "server"
+
+# Control plane VIP (used by workers to join the cluster)
+rke2_server_url: ""
+
+# Token for cluster join authentication
+rke2_token: ""
+
+# Pod and service CIDRs
+rke2_pod_cidr: "10.42.0.0/16"
+rke2_service_cidr: "10.43.0.0/16"
+rke2_cluster_dns: "10.43.0.10"
+
+# Whether this is the bootstrap (first) control plane node
+rke2_is_bootstrap_node: false

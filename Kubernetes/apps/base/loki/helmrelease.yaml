@@ -1,0 +1,75 @@
+---
+# Loki (log aggregation)
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: logging
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: loki
+      version: "6.*"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  values:
+    deploymentMode: SingleBinary
+    loki:
+      auth_enabled: false
+      commonConfig:
+        replication_factor: 1
+      storage:
+        type: s3
+        s3:
+          # MinIO HA VIP (Keepalived) on the storage VLAN (VLAN 40, 10.10.40.0/24)
+          # Managed by Ansible/group_vars/minio/main.yaml: minio_vip_address: "10.10.40.100"
+          endpoint: "http://10.10.40.100"
+          bucketnames: "loki"
+          region: us-east-1
+          s3ForcePathStyle: true
+          # Internal storage VLAN traffic; TLS not required within VLAN 40
+          insecure: true
+    singleBinary:
+      replicas: 1
+---
+# Alloy (log shipper - replaces Promtail)
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: alloy
+  namespace: logging
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: alloy
+      version: "0.*"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  values:
+    alloy:
+      configMap:
+        create: true
+        content: |
+          loki.source.kubernetes_events "k8s_events" {
+            forward_to = [loki.write.central.receiver]
+          }
+          loki.source.kubernetes "k8s_pods" {
+            targets    = discovery.kubernetes.pods.targets
+            forward_to = [loki.write.central.receiver]
+          }
+          discovery.kubernetes "pods" {
+            role = "pod"
+          }
+          loki.write "central" {
+            endpoint {
+              url = "http://loki-gateway.logging.svc.cluster.local/loki/api/v1/push"
+            }
+          }
+    controller:
+      type: daemonset

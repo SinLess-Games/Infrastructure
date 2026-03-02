@@ -1,0 +1,20 @@
+---
+# ClusterSecretStore backed by HashiCorp Vault
+# Vault address and auth token are injected via ExternalSecret from a pre-created Secret
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: vault-backend
+spec:
+  provider:
+    vault:
+      server: "https://10.10.10.2:8200"
+      path: "secret"
+      version: "v2"
+      auth:
+        kubernetes:
+          mountPath: "kubernetes"
+          role: "external-secrets"
+          serviceAccountRef:
+            name: external-secrets
+            namespace: external-secrets

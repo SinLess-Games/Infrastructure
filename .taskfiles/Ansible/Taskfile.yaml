@@ -176,3 +176,78 @@ tasks:
           -i {{.ANSIBLE_DIR}}/inventory \
           {{.ANSIBLE_DIR}}/playbooks/deploy-minio.yaml \
           {{.CLI_ARGS}}
+
+  deploy-influxdb:
+    desc: "Deploy InfluxDB VM for metrics storage"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-influxdb.yaml \
+          {{.CLI_ARGS}}
+
+  deploy-k8s:
+    desc: "Deploy Kubernetes cluster VMs (use -e @Ansible/group_vars/k8s/<env>.yaml to select environment)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-k8s.yaml \
+          {{.CLI_ARGS}}
+
+  deploy-k8s-dev:
+    desc: "Deploy Kubernetes development cluster VMs"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-k8s.yaml \
+          -e @{{.ANSIBLE_DIR}}/group_vars/k8s/dev.yaml \
+          {{.CLI_ARGS}}
+
+  deploy-k8s-staging:
+    desc: "Deploy Kubernetes staging cluster VMs"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-k8s.yaml \
+          -e @{{.ANSIBLE_DIR}}/group_vars/k8s/staging.yaml \
+          {{.CLI_ARGS}}
+
+  deploy-k8s-prod:
+    desc: "Deploy Kubernetes production cluster VMs"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-k8s.yaml \
+          -e @{{.ANSIBLE_DIR}}/group_vars/k8s/prod.yaml \
+          {{.CLI_ARGS}}
+
+  bootstrap-flux:
+    desc: "Bootstrap FluxCD on a Kubernetes cluster (set k8s_env=dev|staging|prod)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/bootstrap-flux.yaml \
+          {{.CLI_ARGS}}

@@ -1,0 +1,117 @@
+---
+# =============================================================================
+# RKE2 Install Role - Tasks
+# =============================================================================
+# Purpose:
+#   - Install and configure RKE2 Kubernetes distribution
+#   - Bootstrap control plane nodes and join worker nodes
+#
+# Usage:
+#   Control plane (bootstrap):
+#     rke2_node_role: server
+#     rke2_is_bootstrap_node: true
+#   Control plane (additional):
+#     rke2_node_role: server
+#     rke2_is_bootstrap_node: false
+#     rke2_server_url: "https://<first-cp-ip>:9345"
+#     rke2_token: "<cluster-token>"
+#   Worker:
+#     rke2_node_role: agent
+#     rke2_server_url: "https://<cp-vip>:9345"
+#     rke2_token: "<cluster-token>"
+# =============================================================================
+
+- name: Ensure kernel modules are loaded for Kubernetes networking
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+    persistent: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Configure kernel parameters for Kubernetes
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { key: "net.bridge.bridge-nf-call-iptables", value: "1" }
+    - { key: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+    - { key: "net.ipv4.ip_forward", value: "1" }
+
+- name: Disable swap (required by Kubernetes)
+  ansible.builtin.command:
+    cmd: swapoff -a
+  when: ansible_swaptotal_mb > 0
+  changed_when: ansible_swaptotal_mb > 0
+
+- name: Remove swap from /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*?\sswap\s+sw\s+.*)$'
+    replace: '# \1'
+
+- name: Ensure RKE2 config directory exists
+  ansible.builtin.file:
+    path: "{{ rke2_config_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Render RKE2 configuration
+  ansible.builtin.template:
+    src: rke2-config.yaml.j2
+    dest: "{{ rke2_config_dir }}/config.yaml"
+    mode: "0600"
+  notify: Restart rke2
+
+- name: Download and install RKE2
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      curl -sfL {{ rke2_install_script_url }} | \
+        INSTALL_RKE2_VERSION="{{ rke2_version }}" \
+        INSTALL_RKE2_TYPE="{{ rke2_node_role }}" \
+        sh -
+    creates: /usr/local/bin/rke2
+
+- name: Enable and start RKE2 service
+  ansible.builtin.systemd:
+    name: "rke2-{{ rke2_node_role }}.service"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for RKE2 to be ready (bootstrap node only)
+  ansible.builtin.wait_for:
+    path: "{{ rke2_data_dir }}/server/node-token"
+    timeout: 180
+  when: rke2_is_bootstrap_node | bool
+
+- name: Read cluster token (bootstrap node only)
+  ansible.builtin.slurp:
+    src: "{{ rke2_data_dir }}/server/node-token"
+  register: rke2_node_token_file
+  when: rke2_is_bootstrap_node | bool
+
+- name: Set cluster token fact (bootstrap node only)
+  ansible.builtin.set_fact:
+    rke2_cluster_token: "{{ rke2_node_token_file.content | b64decode | trim }}"
+  when: rke2_is_bootstrap_node | bool
+
+- name: Add RKE2 bin directory to PATH
+  ansible.builtin.copy:
+    content: |
+      export PATH="{{ rke2_bin_dir }}:${PATH}"
+      export KUBECONFIG="{{ rke2_data_dir }}/server/creds/admin.kubeconfig"
+    dest: /etc/profile.d/rke2.sh
+    mode: "0644"
+
+- name: Create kubectl symlink
+  ansible.builtin.file:
+    src: "{{ rke2_bin_dir }}/kubectl"
+    dest: /usr/local/bin/kubectl
+    state: link
+  ignore_errors: true

@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base/helm-repositories.yaml
+  - ../../base/cilium
+  - ../../base/cert-manager
+  - ../../base/nginx-ingress
+  - ../../base/external-dns
+  - ../../base/external-secrets
+  - ../../base/vault-auth
+  - ../../base/istio
+  - ../../base/network-policies
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/values/controller/replicaCount
+        value: 3
+    target:
+      kind: HelmRelease
+      name: ingress-nginx
+  - patch: |-
+      - op: replace
+        path: /spec/values/pilot/replicaCount
+        value: 2
+    target:
+      kind: HelmRelease
+      name: istiod
+  - patch: |-
+      - op: replace
+        path: /spec/values/replicaCount
+        value: 2
+    target:
+      kind: HelmRelease
+      name: cert-manager

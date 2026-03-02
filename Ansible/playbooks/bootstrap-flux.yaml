@@ -1,0 +1,73 @@
+---
+# =============================================================================
+# FluxCD Bootstrap Playbook
+# =============================================================================
+# Purpose:
+#   - Bootstrap FluxCD on Kubernetes clusters
+#   - Configure GitOps sync from this repository
+#
+# Usage:
+#   Bootstrap dev cluster:
+#     task ansible:bootstrap-flux -- -e k8s_env=dev -e k8s_kubeconfig=/path/to/kubeconfig
+#   Bootstrap staging:
+#     task ansible:bootstrap-flux -- -e k8s_env=staging -e k8s_kubeconfig=/path/to/kubeconfig
+#   Bootstrap prod:
+#     task ansible:bootstrap-flux -- -e k8s_env=prod -e k8s_kubeconfig=/path/to/kubeconfig
+# =============================================================================
+
+- name: Bootstrap FluxCD on Kubernetes cluster
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    k8s_env: "dev"
+    k8s_kubeconfig: "~/.kube/config"
+    flux_version: "2.4.0"
+    git_repo_url: "ssh://git@github.com/Sinless777/Infrastructure"
+    git_branch: "main"
+    flux_path: "Kubernetes/clusters/{{ k8s_env }}"
+
+  tasks:
+    - name: Ensure flux CLI is available
+      ansible.builtin.command:
+        cmd: flux version --client
+      register: flux_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if flux CLI is not installed
+      ansible.builtin.fail:
+        msg: |
+          flux CLI is not installed. Install it with:
+            curl -s https://fluxcd.io/install.sh | sudo bash
+      when: flux_version_check.rc != 0
+
+    - name: Run flux pre-flight checks
+      ansible.builtin.command:
+        cmd: flux check --pre --kubeconfig {{ k8s_kubeconfig }}
+      changed_when: false
+
+    - name: Bootstrap FluxCD
+      ansible.builtin.command:
+        cmd: >
+          flux bootstrap github
+          --kubeconfig {{ k8s_kubeconfig }}
+          --owner Sinless777
+          --repository Infrastructure
+          --branch {{ git_branch }}
+          --path {{ flux_path }}
+          --personal
+          --token-auth
+      environment:
+        GITHUB_TOKEN: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+      register: flux_bootstrap_result
+
+    - name: Wait for FluxCD to reconcile
+      ansible.builtin.command:
+        cmd: flux reconcile kustomization flux-system --kubeconfig {{ k8s_kubeconfig }}
+      register: flux_reconcile
+      retries: 10
+      delay: 30
+      until: flux_reconcile.rc == 0
+      changed_when: false

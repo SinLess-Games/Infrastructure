@@ -1,0 +1,70 @@
+// =====================================================================
+// K8S Cluster Terraform Configuration (Managed by Ansible)
+// =====================================================================
+// Source: Ansible/templates/k8s/k8s-cluster.tf.j2
+// DO NOT EDIT MANUALLY
+// =====================================================================
+
+module "k8s_cluster" {
+  source = "{{ k8s_module_source }}"
+
+  # Cluster configuration
+  cluster_name = "{{ k8s_cluster_name }}"
+  environment  = "{{ k8s_environment }}"
+
+  # Proxmox placement
+  target_nodes   = {{ k8s_target_nodes | to_json }}
+  clone_template = "{{ k8s_clone_template }}"
+
+  # Control plane configuration
+  control_plane_count         = {{ k8s_control_plane_count }}
+  control_plane_name_prefix   = "{{ k8s_control_plane_name_prefix }}"
+  control_plane_vm_id_start   = {{ k8s_control_plane_vm_id_start }}
+  control_plane_ip_addresses  = {{ k8s_control_plane_ip_addresses | to_json }}
+  control_plane_cpu_cores     = {{ k8s_control_plane_cpu_cores }}
+  control_plane_cpu_sockets   = {{ k8s_control_plane_cpu_sockets }}
+  control_plane_memory_mb     = {{ k8s_control_plane_memory_mb }}
+  control_plane_disk_size     = "{{ k8s_control_plane_disk_size }}"
+  control_plane_startup_order = {{ k8s_control_plane_startup_order }}
+
+  # Worker configuration
+  worker_count         = {{ k8s_worker_count }}
+  worker_name_prefix   = "{{ k8s_worker_name_prefix }}"
+  worker_vm_id_start   = {{ k8s_worker_vm_id_start }}
+  worker_ip_addresses  = {{ k8s_worker_ip_addresses | to_json }}
+  worker_cpu_cores     = {{ k8s_worker_cpu_cores }}
+  worker_cpu_sockets   = {{ k8s_worker_cpu_sockets }}
+  worker_memory_mb     = {{ k8s_worker_memory_mb }}
+  worker_disk_size     = "{{ k8s_worker_disk_size }}"
+  worker_startup_order = {{ k8s_worker_startup_order }}
+
+  # Network configuration
+  vlan_id        = {{ k8s_vlan_id }}
+  network_bridge = "{{ k8s_network_bridge }}"
+  gateway        = "{{ k8s_gateway }}"
+  cidr_subnet    = "{{ k8s_cidr_subnet }}"
+  nameservers    = "{{ k8s_nameservers }}"
+
+  # Storage
+  storage = "{{ k8s_storage }}"
+
+  # Access configuration
+  default_user = "{{ k8s_default_user }}"
+  ansible_user = "{{ k8s_ansible_user }}"
+  ssh_keys     = {{ k8s_ssh_keys | to_json }}
+
+  # HA and backup
+  ha_enabled      = {{ k8s_ha_enabled | ternary('true', 'false') }}
+  ha_group        = "{{ k8s_ha_group }}"
+  backup_enabled  = {{ k8s_backup_enabled | ternary('true', 'false') }}
+  backup_schedule = "{{ k8s_backup_schedule }}"
+
+  # VM options
+  start_at_node_boot = {{ k8s_start_at_node_boot | ternary('true', 'false') }}
+  agent_enabled      = {{ k8s_agent_enabled | ternary('true', 'false') }}
+  protection         = {{ k8s_protection | ternary('true', 'false') }}
+
+  # Tags and metadata
+  tags        = {{ k8s_tags | to_json }}
+  description = "{{ k8s_description | default('RKE2 Kubernetes cluster node') }}"
+}

@@ -1,0 +1,29 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-dns
+  namespace: external-dns
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: external-dns
+      version: "1.15.*"
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+        namespace: flux-system
+  values:
+    provider:
+      name: webhook
+      webhook:
+        image:
+          repository: ghcr.io/mconfalonieri/external-dns-technitium-webhook
+          # Pin to a specific release tag; update when new versions are available
+          tag: "v0.5.0"
+    policy: sync
+    sources:
+      - ingress
+      - service
+    txtOwnerId: "k8s"
+    interval: 1m

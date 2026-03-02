@@ -1,0 +1,81 @@
+---
+# =============================================================================
+# InfluxDB Deployment Playbook
+# =============================================================================
+# Purpose:
+#   - Deploy InfluxDB VM using Terraform module
+#   - Render Terraform configuration from group_vars/influxdb
+#   - Configure InfluxDB application
+# =============================================================================
+
+- name: Deploy InfluxDB VM with Terraform
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  connection: local
+
+  vars:
+    influxdb_repo_root: "{{ playbook_dir | dirname | dirname }}"
+    influxdb_terraform_dir: "{{ influxdb_repo_root }}/Terraform"
+
+  vars_files:
+    - ../group_vars/influxdb/main.yaml
+
+  roles:
+    - role: influxdb-deploy
+      tags: ["deploy"]
+
+- name: Configure InfluxDB
+  hosts: influxdb
+  gather_facts: true
+  become: true
+
+  vars_files:
+    - ../group_vars/influxdb/main.yaml
+    - ../group_vars/all/packages.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+
+  pre_tasks:
+    - name: Ensure DNS nameservers are configured
+      ansible.builtin.copy:
+        content: |
+          nameserver {{ influxdb_dns_primary | default('10.10.10.1') }}
+          nameserver {{ influxdb_dns_secondary | default('1.1.1.1') }}
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: '0644'
+      tags: ["dns"]
+
+    - name: Refresh APT cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      register: apt_cache_result
+      retries: 3
+      delay: 5
+      until: apt_cache_result is succeeded
+      tags: ["packages"]
+
+  roles:
+    - role: dns-resolver
+      tags: ["dns"]
+
+    - role: users
+      tags: ["users"]
+
+    - role: packages
+      tags: ["packages"]
+
+    - role: shell-config
+      tags: ["shell"]
+
+    - role: ssh
+      tags: ["ssh"]
+
+    # TODO: implement influxdb-configure role and uncomment below
+    # The role should install InfluxDB, configure org/bucket/retention, and set up systemd service
+    # - role: influxdb-configure
+    #   tags: ["influxdb"]

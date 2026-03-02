@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# K8S Deploy Role - Defaults
+# =============================================================================
+
+# Repository root (derived from playbook location)
+k8s_repo_root: "{{ playbook_dir | dirname | dirname }}"
+
+# Terraform directory within repository
+k8s_terraform_dir: "{{ k8s_repo_root }}/Terraform"

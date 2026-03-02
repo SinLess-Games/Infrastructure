@@ -1,0 +1,137 @@
+---
+# =============================================================================
+# InfluxDB Deployment Variables
+# =============================================================================
+# Purpose:
+#   - Terraform inputs for InfluxDB VM deployment
+#   - Network placement (VLAN 20, 10.10.20.0/24)
+#   - Proxmox storage and HA configuration
+# =============================================================================
+
+influxdb_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
+
+# =============================================================================
+# Terraform Module Configuration
+# =============================================================================
+
+influxdb_module_source: "./modules/influxdb"
+
+# Proxmox API access for Terraform
+influxdb_proxmox_api_url: "https://10.10.10.15:8006/api2/json"
+influxdb_proxmox_tls_insecure: true
+influxdb_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
+influxdb_proxmox_api_token_file_ansible: ".outputs/api-tokens/ansible-prov-api-token.txt"
+
+# =============================================================================
+# Cluster Identity
+# =============================================================================
+
+influxdb_cluster_name: "influxdb"
+influxdb_environment: "prod"
+
+# =============================================================================
+# Proxmox Placement
+# =============================================================================
+
+influxdb_target_node: "pve-02"
+
+# =============================================================================
+# VM Naming and ID
+# =============================================================================
+
+influxdb_node_name: "influxdb-01"
+influxdb_vm_id: 212
+
+# =============================================================================
+# Network Configuration (VLAN 20 - 10.10.20.0/24 Services Network)
+# =============================================================================
+
+influxdb_vlan_id: 20
+influxdb_network_bridge: "vmbr0"
+influxdb_gateway: "10.10.20.1"
+influxdb_cidr_subnet: "/24"
+influxdb_nameservers: "10.10.10.1 1.1.1.1"
+influxdb_dns_primary: "10.10.10.1"
+influxdb_dns_secondary: "1.1.1.1"
+
+influxdb_ip_address: "10.10.20.5"
+
+# =============================================================================
+# Proxmox Template and Storage
+# =============================================================================
+
+influxdb_clone_template: "debian-13-template"
+influxdb_storage: "VM_Disks"
+
+# =============================================================================
+# Resource Allocation
+# =============================================================================
+
+influxdb_cpu_cores: 4
+influxdb_cpu_sockets: 1
+influxdb_memory_mb: 8192
+influxdb_disk_size: "100G"
+influxdb_data_dir: "/var/lib/influxdb2"
+
+# =============================================================================
+# Access Configuration
+# =============================================================================
+
+influxdb_default_user: "sinless777"
+influxdb_ansible_user: "sinless777"
+
+# SSH keys from .outputs/ssh/ directories
+influxdb_ssh_keys:
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA7g0acAC3ORT/DUzu3ftMtRW6MlVWuWZ7qqd4tNHLcY automation@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKDoqYKB+akwuGHSAJWn6EeXR70zIg9oZXuP60Al1mOS breakglass@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEMakhAavnUU1qkhadP1tNtmwG7tsu49siUyMIEcKKn9 root@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ0Ch6BKvYa5V+7su2oXhf8jRBgBdRKvoqd0UKVtt1mS sinless777@sinlessgames"
+
+# =============================================================================
+# HA and Backup Configuration
+# =============================================================================
+
+influxdb_ha_enabled: true
+influxdb_ha_group: "influxdb-ha"
+
+influxdb_backup_enabled: true
+influxdb_backup_schedule: "0 4 * * *"
+
+# =============================================================================
+# VM Lifecycle Options
+# =============================================================================
+
+influxdb_start_at_node_boot: true
+influxdb_agent_enabled: true
+influxdb_protection: false
+influxdb_startup_order: 30
+
+# =============================================================================
+# Tags and Metadata
+# =============================================================================
+
+influxdb_tags:
+  - "influxdb"
+  - "metrics"
+  - "monitoring"
+  - "tier-2"
+
+influxdb_description: "InfluxDB Time-Series Database VM"
+
+# =============================================================================
+# InfluxDB Application Configuration
+# =============================================================================
+
+influxdb_version: "2.7.10"
+influxdb_port: 8086
+influxdb_config_dir: "/etc/influxdb"
+influxdb_org: "sinlessgames"
+influxdb_bucket: "metrics"
+influxdb_retention_hours: 8760
+influxdb_fqdn: "influxdb.local.sinlessgames.com"
+
+# =============================================================================
+# Vault Secrets Reference
+# =============================================================================
+
+influxdb_vault_kv_path: "ansible/influxdb"

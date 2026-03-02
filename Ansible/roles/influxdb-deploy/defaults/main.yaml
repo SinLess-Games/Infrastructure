@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# InfluxDB Deploy Role - Defaults
+# =============================================================================
+
+# Repository root (derived from playbook location)
+influxdb_repo_root: "{{ playbook_dir | dirname | dirname }}"
+
+# Terraform directory within repository
+influxdb_terraform_dir: "{{ influxdb_repo_root }}/Terraform"

@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# Kubernetes Cluster Inventory
+# =============================================================================
+# Purpose:
+#   - Dev, Staging, and Production Kubernetes cluster hosts
+#   - VLAN 30, 10.10.30.0/24
+# =============================================================================
+
+k8s:
+  vars:
+    ansible_user: sinless777
+  children:
+    k8s_dev:
+      children:
+        k8s_dev_control_plane:
+          hosts:
+            k8s-dev-cp-01:
+              ansible_host: 10.10.30.10
+        k8s_dev_workers:
+          hosts:
+            k8s-dev-worker-01:
+              ansible_host: 10.10.30.11
+            k8s-dev-worker-02:
+              ansible_host: 10.10.30.12
+    k8s_staging:
+      children:
+        k8s_staging_control_plane:
+          hosts:
+            k8s-stg-cp-01:
+              ansible_host: 10.10.30.20
+            k8s-stg-cp-02:
+              ansible_host: 10.10.30.21
+            k8s-stg-cp-03:
+              ansible_host: 10.10.30.22
+        k8s_staging_workers:
+          hosts:
+            k8s-stg-worker-01:
+              ansible_host: 10.10.30.23
+            k8s-stg-worker-02:
+              ansible_host: 10.10.30.24
+            k8s-stg-worker-03:
+              ansible_host: 10.10.30.25
+    k8s_prod:
+      children:
+        k8s_prod_control_plane:
+          hosts:
+            k8s-prod-cp-01:
+              ansible_host: 10.10.30.30
+            k8s-prod-cp-02:
+              ansible_host: 10.10.30.31
+            k8s-prod-cp-03:
+              ansible_host: 10.10.30.32
+            k8s-prod-cp-04:
+              ansible_host: 10.10.30.33
+            k8s-prod-cp-05:
+              ansible_host: 10.10.30.34
+        k8s_prod_workers:
+          hosts:
+            k8s-prod-worker-01:
+              ansible_host: 10.10.30.35
+            k8s-prod-worker-02:
+              ansible_host: 10.10.30.36
+            k8s-prod-worker-03:
+              ansible_host: 10.10.30.37
+            k8s-prod-worker-04:
+              ansible_host: 10.10.30.38
