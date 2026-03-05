@@ -1,0 +1,207 @@
+task: [ansible:create-venv] set -e
+if [ ! -d "Ansible/.venv" ]; then
+  python3 -m venv "Ansible/.venv"
+fi
+
+task: [ansible:install-python-deps] set -e
+Ansible/.venv/bin/pip install --no-user --upgrade pip setuptools wheel
+Ansible/.venv/bin/pip install --no-user --upgrade -r "Ansible/requirements.txt"
+
+Requirement already satisfied: pip in ./Ansible/.venv/lib/python3.14/site-packages (26.0.1)
+Requirement already satisfied: setuptools in ./Ansible/.venv/lib/python3.14/site-packages (82.0.0)
+Requirement already satisfied: wheel in ./Ansible/.venv/lib/python3.14/site-packages (0.46.3)
+Requirement already satisfied: packaging>=24.0 in ./Ansible/.venv/lib/python3.14/site-packages (from wheel) (25.0)
+Requirement already satisfied: ansible==10.1.0 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 17)) (10.1.0)
+Requirement already satisfied: ansible-core==2.17.3 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 18)) (2.17.3)
+Requirement already satisfied: ansible-lint==24.6.1 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 19)) (24.6.1)
+Requirement already satisfied: ansible-creator==24.6.1 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 20)) (24.6.1)
+Requirement already satisfied: requests==2.32.4 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 26)) (2.32.4)
+Requirement already satisfied: urllib3==2.2.3 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 27)) (2.2.3)
+Requirement already satisfied: netaddr==1.3.0 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 28)) (1.3.0)
+Requirement already satisfied: cloudflare==3.0.1 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 29)) (3.0.1)
+Requirement already satisfied: proxmoxer==2.0.1 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 35)) (2.0.1)
+Requirement already satisfied: cryptography==45.0.5 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 42)) (45.0.5)
+Requirement already satisfied: passlib==1.7.4 in ./Ansible/.venv/lib/python3.14/site-packages (from passlib[bcrypt]==1.7.4->-r Ansible/requirements.txt (line 43)) (1.7.4)
+Requirement already satisfied: kubernetes==31.0.0 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 49)) (31.0.0)
+Requirement already satisfied: openshift==0.13.2 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 50)) (0.13.2)
+Requirement already satisfied: pyyaml==6.0.2 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 51)) (6.0.2)
+Requirement already satisfied: jmespath==1.0.1 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 52)) (1.0.1)
+Requirement already satisfied: mkdocs==1.6.1 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 58)) (1.6.1)
+Requirement already satisfied: mkdocs-material==9.5.42 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 59)) (9.5.42)
+Requirement already satisfied: mkdocs-mermaid2-plugin==1.2.1 in ./Ansible/.venv/lib/python3.14/site-packages (from -r Ansible/requirements.txt (line 60)) (1.2.1)
+Requirement already satisfied: jinja2>=3.0.0 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-core==2.17.3->-r Ansible/requirements.txt (line 18)) (3.1.6)
+Requirement already satisfied: packaging in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-core==2.17.3->-r Ansible/requirements.txt (line 18)) (25.0)
+Requirement already satisfied: resolvelib<1.1.0,>=0.5.3 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-core==2.17.3->-r Ansible/requirements.txt (line 18)) (1.0.1)
+Requirement already satisfied: ansible-compat>=24.5.0dev0 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (25.12.0)
+Requirement already satisfied: black>=24.3.0 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (25.12.0)
+Requirement already satisfied: filelock>=3.3.0 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (3.20.1)
+Requirement already satisfied: importlib-metadata in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (8.7.0)
+Requirement already satisfied: jsonschema>=4.10.0 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (4.25.1)
+Requirement already satisfied: pathspec>=0.10.3 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (0.12.1)
+Requirement already satisfied: rich>=12.0.0 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (14.2.0)
+Requirement already satisfied: ruamel.yaml>=0.18.5 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (0.18.17)
+Requirement already satisfied: subprocess-tee>=0.4.1 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (0.4.2)
+Requirement already satisfied: yamllint>=1.30.0 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (1.37.1)
+Requirement already satisfied: wcmatch>=8.5.0 in ./Ansible/.venv/lib/python3.14/site-packages (from ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (10.1)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./Ansible/.venv/lib/python3.14/site-packages (from requests==2.32.4->-r Ansible/requirements.txt (line 26)) (3.4.4)
+Requirement already satisfied: idna<4,>=2.5 in ./Ansible/.venv/lib/python3.14/site-packages (from requests==2.32.4->-r Ansible/requirements.txt (line 26)) (3.11)
+Requirement already satisfied: certifi>=2017.4.17 in ./Ansible/.venv/lib/python3.14/site-packages (from requests==2.32.4->-r Ansible/requirements.txt (line 26)) (2025.11.12)
+Requirement already satisfied: anyio<5,>=3.5.0 in ./Ansible/.venv/lib/python3.14/site-packages (from cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (4.12.0)
+Requirement already satisfied: distro<2,>=1.7.0 in ./Ansible/.venv/lib/python3.14/site-packages (from cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (1.9.0)
+Requirement already satisfied: httpx<1,>=0.23.0 in ./Ansible/.venv/lib/python3.14/site-packages (from cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (0.28.1)
+Requirement already satisfied: pydantic<3,>=1.9.0 in ./Ansible/.venv/lib/python3.14/site-packages (from cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (2.12.5)
+Requirement already satisfied: sniffio in ./Ansible/.venv/lib/python3.14/site-packages (from cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (1.3.1)
+Requirement already satisfied: typing-extensions<5,>=4.7 in ./Ansible/.venv/lib/python3.14/site-packages (from cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (4.15.0)
+Requirement already satisfied: cffi>=1.14 in ./Ansible/.venv/lib/python3.14/site-packages (from cryptography==45.0.5->-r Ansible/requirements.txt (line 42)) (2.0.0)
+Requirement already satisfied: six>=1.9.0 in ./Ansible/.venv/lib/python3.14/site-packages (from kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (1.17.0)
+Requirement already satisfied: python-dateutil>=2.5.3 in ./Ansible/.venv/lib/python3.14/site-packages (from kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (2.9.0.post0)
+Requirement already satisfied: google-auth>=1.0.1 in ./Ansible/.venv/lib/python3.14/site-packages (from kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (2.45.0)
+Requirement already satisfied: websocket-client!=0.40.0,!=0.41.*,!=0.42.*,>=0.32.0 in ./Ansible/.venv/lib/python3.14/site-packages (from kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (1.9.0)
+Requirement already satisfied: requests-oauthlib in ./Ansible/.venv/lib/python3.14/site-packages (from kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (2.0.0)
+Requirement already satisfied: oauthlib>=3.2.2 in ./Ansible/.venv/lib/python3.14/site-packages (from kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (3.3.1)
+Requirement already satisfied: durationpy>=0.7 in ./Ansible/.venv/lib/python3.14/site-packages (from kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (0.10)
+Requirement already satisfied: python-string-utils in ./Ansible/.venv/lib/python3.14/site-packages (from openshift==0.13.2->-r Ansible/requirements.txt (line 50)) (1.0.0)
+Requirement already satisfied: click>=7.0 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs==1.6.1->-r Ansible/requirements.txt (line 58)) (8.3.1)
+Requirement already satisfied: ghp-import>=1.0 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs==1.6.1->-r Ansible/requirements.txt (line 58)) (2.1.0)
+Requirement already satisfied: markdown>=3.3.6 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs==1.6.1->-r Ansible/requirements.txt (line 58)) (3.10)
+Requirement already satisfied: markupsafe>=2.0.1 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs==1.6.1->-r Ansible/requirements.txt (line 58)) (3.0.3)
+Requirement already satisfied: mergedeep>=1.3.4 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs==1.6.1->-r Ansible/requirements.txt (line 58)) (1.3.4)
+Requirement already satisfied: mkdocs-get-deps>=0.2.0 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs==1.6.1->-r Ansible/requirements.txt (line 58)) (0.2.0)
+Requirement already satisfied: pyyaml-env-tag>=0.1 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs==1.6.1->-r Ansible/requirements.txt (line 58)) (1.1)
+Requirement already satisfied: watchdog>=2.0 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs==1.6.1->-r Ansible/requirements.txt (line 58)) (6.0.0)
+Requirement already satisfied: babel~=2.10 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-material==9.5.42->-r Ansible/requirements.txt (line 59)) (2.17.0)
+Requirement already satisfied: colorama~=0.4 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-material==9.5.42->-r Ansible/requirements.txt (line 59)) (0.4.6)
+Requirement already satisfied: mkdocs-material-extensions~=1.3 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-material==9.5.42->-r Ansible/requirements.txt (line 59)) (1.3.1)
+Requirement already satisfied: paginate~=0.5 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-material==9.5.42->-r Ansible/requirements.txt (line 59)) (0.5.7)
+Requirement already satisfied: pygments~=2.16 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-material==9.5.42->-r Ansible/requirements.txt (line 59)) (2.19.2)
+Requirement already satisfied: pymdown-extensions~=10.2 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-material==9.5.42->-r Ansible/requirements.txt (line 59)) (10.19.1)
+Requirement already satisfied: regex>=2022.4 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-material==9.5.42->-r Ansible/requirements.txt (line 59)) (2025.11.3)
+Requirement already satisfied: beautifulsoup4>=4.6.3 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-mermaid2-plugin==1.2.1->-r Ansible/requirements.txt (line 60)) (4.14.3)
+Requirement already satisfied: jsbeautifier in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-mermaid2-plugin==1.2.1->-r Ansible/requirements.txt (line 60)) (1.15.4)
+Requirement already satisfied: setuptools>=18.5 in ./Ansible/.venv/lib/python3.14/site-packages (from mkdocs-mermaid2-plugin==1.2.1->-r Ansible/requirements.txt (line 60)) (82.0.0)
+Requirement already satisfied: bcrypt>=3.1.0 in ./Ansible/.venv/lib/python3.14/site-packages (from passlib[bcrypt]==1.7.4->-r Ansible/requirements.txt (line 43)) (5.0.0)
+Requirement already satisfied: httpcore==1.* in ./Ansible/.venv/lib/python3.14/site-packages (from httpx<1,>=0.23.0->cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (1.0.9)
+Requirement already satisfied: h11>=0.16 in ./Ansible/.venv/lib/python3.14/site-packages (from httpcore==1.*->httpx<1,>=0.23.0->cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (0.16.0)
+Requirement already satisfied: annotated-types>=0.6.0 in ./Ansible/.venv/lib/python3.14/site-packages (from pydantic<3,>=1.9.0->cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (0.7.0)
+Requirement already satisfied: pydantic-core==2.41.5 in ./Ansible/.venv/lib/python3.14/site-packages (from pydantic<3,>=1.9.0->cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (2.41.5)
+Requirement already satisfied: typing-inspection>=0.4.2 in ./Ansible/.venv/lib/python3.14/site-packages (from pydantic<3,>=1.9.0->cloudflare==3.0.1->-r Ansible/requirements.txt (line 29)) (0.4.2)
+Requirement already satisfied: soupsieve>=1.6.1 in ./Ansible/.venv/lib/python3.14/site-packages (from beautifulsoup4>=4.6.3->mkdocs-mermaid2-plugin==1.2.1->-r Ansible/requirements.txt (line 60)) (2.8.1)
+Requirement already satisfied: mypy-extensions>=0.4.3 in ./Ansible/.venv/lib/python3.14/site-packages (from black>=24.3.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (1.1.0)
+Requirement already satisfied: platformdirs>=2 in ./Ansible/.venv/lib/python3.14/site-packages (from black>=24.3.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (4.5.1)
+Requirement already satisfied: pytokens>=0.3.0 in ./Ansible/.venv/lib/python3.14/site-packages (from black>=24.3.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (0.3.0)
+Requirement already satisfied: pycparser in ./Ansible/.venv/lib/python3.14/site-packages (from cffi>=1.14->cryptography==45.0.5->-r Ansible/requirements.txt (line 42)) (2.23)
+Requirement already satisfied: cachetools<7.0,>=2.0.0 in ./Ansible/.venv/lib/python3.14/site-packages (from google-auth>=1.0.1->kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (6.2.4)
+Requirement already satisfied: pyasn1-modules>=0.2.1 in ./Ansible/.venv/lib/python3.14/site-packages (from google-auth>=1.0.1->kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (0.4.2)
+Requirement already satisfied: rsa<5,>=3.1.4 in ./Ansible/.venv/lib/python3.14/site-packages (from google-auth>=1.0.1->kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (4.9.1)
+Requirement already satisfied: pyasn1>=0.1.3 in ./Ansible/.venv/lib/python3.14/site-packages (from rsa<5,>=3.1.4->google-auth>=1.0.1->kubernetes==31.0.0->-r Ansible/requirements.txt (line 49)) (0.6.1)
+Requirement already satisfied: attrs>=22.2.0 in ./Ansible/.venv/lib/python3.14/site-packages (from jsonschema>=4.10.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (25.4.0)
+Requirement already satisfied: jsonschema-specifications>=2023.03.6 in ./Ansible/.venv/lib/python3.14/site-packages (from jsonschema>=4.10.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (2025.9.1)
+Requirement already satisfied: referencing>=0.28.4 in ./Ansible/.venv/lib/python3.14/site-packages (from jsonschema>=4.10.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (0.37.0)
+Requirement already satisfied: rpds-py>=0.7.1 in ./Ansible/.venv/lib/python3.14/site-packages (from jsonschema>=4.10.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (0.30.0)
+Requirement already satisfied: markdown-it-py>=2.2.0 in ./Ansible/.venv/lib/python3.14/site-packages (from rich>=12.0.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (4.0.0)
+Requirement already satisfied: mdurl~=0.1 in ./Ansible/.venv/lib/python3.14/site-packages (from markdown-it-py>=2.2.0->rich>=12.0.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (0.1.2)
+Requirement already satisfied: ruamel.yaml.clib>=0.2.15 in ./Ansible/.venv/lib/python3.14/site-packages (from ruamel.yaml>=0.18.5->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (0.2.15)
+Requirement already satisfied: bracex>=2.1.1 in ./Ansible/.venv/lib/python3.14/site-packages (from wcmatch>=8.5.0->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (2.6)
+Requirement already satisfied: zipp>=3.20 in ./Ansible/.venv/lib/python3.14/site-packages (from importlib-metadata->ansible-lint==24.6.1->-r Ansible/requirements.txt (line 19)) (3.23.0)
+Requirement already satisfied: editorconfig>=0.12.2 in ./Ansible/.venv/lib/python3.14/site-packages (from jsbeautifier->mkdocs-mermaid2-plugin==1.2.1->-r Ansible/requirements.txt (line 60)) (0.17.1)
+task: [ansible:install-galaxy-content] set -e
+Ansible/.venv/bin/ansible-galaxy collection install -r "Ansible/requirements.yaml" --collections-path Ansible/.collections/ansible_collections
+Ansible/.venv/bin/ansible-galaxy role install -r "Ansible/requirements.yaml" --roles-path Ansible/.collections/roles
+
+Starting galaxy collection install process
+Nothing to do. All requested collections are already installed. If you want to reinstall them, consider using `--force`.
+Starting galaxy role install process
+- lablabs.rke2 (1.24.4) is already installed, skipping.
+- lae.proxmox (v1.9.0) is already installed, skipping.
+task: [ansible:setup-proxmox-nodes] set -e
+Ansible/.venv/bin/ansible-playbook "Ansible/playbooks/setup-proxmox-nodes.yaml" --ask-pass 
+
+
+PLAY [Configure Proxmox VE nodes and cluster] **********************************
+
+TASK [ssh : Validate SSH key type] *********************************************
+[0;32mok: [pve-01 -> localhost] => changed=false [0m
+[0;32m  msg: All assertions passed[0m
+
+TASK [ssh : Validate users variable structure] *********************************
+[0;32mok: [pve-01 -> localhost] => changed=false [0m
+[0;32m  msg: All assertions passed[0m
+
+TASK [ssh : Validate each user entry] ******************************************
+[0;32mok: [pve-01 -> localhost] => (item=sinless777) => changed=false [0m
+[0;32m  ansible_loop_var: item[0m
+[0;32m  item:[0m
+[0;32m    comment: Primary operator (SinLess Games LLC)[0m
+[0;32m    groups:[0m
+[0;32m    - sudo[0m
+[0;32m    - adm[0m
+[0;32m    - docker[0m
+[0;32m    name: sinless777[0m
+[0;32m    shared-certs:[0m
+[0;32m    - root[0m
+[0;32m    shell: /bin/zsh[0m
+[0;32m    ssh_principals:[0m
+[0;32m    - sinless777[0m
+[0;32m    - admin[0m
+[0;32m    - root[0m
+[0;32m    sudo: true[0m
+[0;32m    sudo_nopasswd: true[0m
+[0;32m  msg: All assertions passed[0m
+[0;32mok: [pve-01 -> localhost] => (item=root) => changed=false [0m
+[0;32m  ansible_loop_var: item[0m
+[0;32m  item:[0m
+[0;32m    comment: Root user[0m
+[0;32m    groups:[0m
+[0;32m    - sudo[0m
+[0;32m    - adm[0m
+[0;32m    home_directory: /root[0m
+[0;32m    name: root[0m
+[0;32m    shell: /bin/bash[0m
+[0;32m    ssh_principals:[0m
+[0;32m    - root[0m
+[0;32m    - admin[0m
+[0;32m    sudo: true[0m
+[0;32m    sudo_nopasswd: true[0m
+[0;32m  msg: All assertions passed[0m
+[0;32mok: [pve-01 -> localhost] => (item=automation) => changed=false [0m
+[0;32m  ansible_loop_var: item[0m
+[0;32m  item:[0m
+[0;32m    comment: Automation and CI user (Ansible, GitOps, Terraform)[0m
+[0;32m    groups:[0m
+[0;32m    - docker[0m
+[0;32m    name: automation[0m
+[0;32m    shell: /usr/sbin/nologin[0m
+[0;32m    sudo: true[0m
+[0;32m    sudo_nopasswd: true[0m
+[0;32m    system: true[0m
+[0;32m  msg: All assertions passed[0m
+[0;32mok: [pve-01 -> localhost] => (item=breakglass) => changed=false [0m
+[0;32m  ansible_loop_var: item[0m
+[0;32m  item:[0m
+[0;32m    comment: Emergency access account (break-glass)[0m
+[0;32m    groups:[0m
+[0;32m    - sudo[0m
+[0;32m    name: breakglass[0m
+[0;32m    password_lock: true[0m
+[0;32m    shell: /bin/bash[0m
+[0;32m    sudo: true[0m
+[0;32m    sudo_nopasswd: true[0m
+[0;32m  msg: All assertions passed[0m
+
+TASK [ssh : Validate SSH output paths are defined] *****************************
+[0;32mok: [pve-01 -> localhost] => changed=false [0m
+[0;32m  msg: All assertions passed[0m
+
+TASK [ssh : Validate SSH CA configuration when enabled] ************************
+[0;32mok: [pve-01 -> localhost] => changed=false [0m
+[0;32m  msg: All assertions passed[0m
+
+TASK [ssh : Validate CA certificate extensions list] ***************************
+[0;32mok: [pve-01 -> localhost] => changed=false [0m
+[0;32m  msg: All assertions passed[0m
+
+TASK [ssh : Check for existing SSH user private keys (controller)] *************
+[0;32mok: [pve-01 -> localhost] => (item={'name': 'sinless777', 'comment': 'Primary operator (SinLess Games LLC)', 'shell': '/bin/zsh', 'ssh_principals': ['sinless777', 'admin', 'root'], 'groups': ['sudo', 'adm', 'docker'], 'sudo': True, 'sudo_nopasswd': True, 'shared-certs': ['root']})[0m
+[0;32mok: [pve-01 -> localhost] => (item={'name': 'root', 'comment': 'Root user', 'shell': '/bin/bash', 'home_directory': '/root', 'ssh_principals': ['root', 'admin'], 'sudo': True, 'sudo_nopasswd': True, 'groups': ['sudo', 'adm']})[0m
+[0;32mok: [pve-01 -> localhost] => (item={'name': 'automation', 'comment': 'Automation and CI user (Ansible, GitOps, Terraform)', 'shell': '/usr/sbin/nologin', 'system': True, 'groups': ['docker'], 'sudo': True, 'sudo_nopasswd': True})[0m
+[0;32mok: [pve-01 -> localhost] => (item={'name': 'breakglass', 'comment': 'Emergency access account (break-glass)', 'shell': '/bin/bash', 'groups': ['sudo'], 'sudo': True, 'sudo_nopasswd': True, 'password_lock': True})[0m

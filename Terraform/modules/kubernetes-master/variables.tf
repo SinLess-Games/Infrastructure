@@ -17,18 +17,17 @@ variable "node_role" {
 variable "nodes" {
   description = "Control-plane VM definitions"
   type = list(object({
-    name          = string
-    vmid          = number
-    target_node   = string
-    ip_address    = string
-    hostname      = string
-    fqdn          = string
-    ignition_json = string
+    name        = string
+    vmid        = number
+    target_node = string
+    ip_address  = string
+    hostname    = string
+    fqdn        = string
   }))
 }
 
 variable "clone_template" {
-  description = "Proxmox Flatcar template name"
+  description = "Proxmox template name (e.g., debian-13-template)"
   type        = string
 }
 
@@ -63,6 +62,12 @@ variable "nameservers" {
 variable "storage" {
   description = "Primary storage target"
   type        = string
+}
+
+variable "resource_pool" {
+  description = "Proxmox resource pool for cluster VMs"
+  type        = string
+  default     = ""
 }
 
 variable "disk_size" {
@@ -129,18 +134,6 @@ variable "description" {
   description = "VM description prefix"
   type        = string
   default     = "RKE2 control-plane node"
-}
-
-variable "enable_ignition_fw_cfg" {
-  description = "Whether to inject Ignition via QEMU fw_cfg args"
-  type        = bool
-  default     = true
-}
-
-variable "ignition_server_url" {
-  description = "HTTP server URL for Ignition configs (e.g., http://10.10.10.10:8080/ignition)"
-  type        = string
-  default     = ""
 }
 
 variable "proxmox_node_ssh_hosts" {

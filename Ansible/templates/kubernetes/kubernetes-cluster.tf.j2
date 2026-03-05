@@ -11,9 +11,7 @@ module "kubernetes_{{ kubernetes_environment }}_masters" {
   cluster_name   = "{{ kubernetes_cluster_name }}"
   environment    = "{{ kubernetes_environment }}"
   node_role      = "control-plane"
-  clone_template = "{{ kubernetes_flatcar_template }}"
-  enable_ignition_fw_cfg = {{ (kubernetes_enable_ignition_fw_cfg | default(true)) | ternary('true', 'false') }}
-  ignition_server_url = "{{ kubernetes_ignition_server_url | default('') }}"
+  clone_template = "debian-13-template"
   force_create   = {{ (kubernetes_force_create | default(false)) | ternary('true', 'false') }}
   proxmox_node_ssh_hosts = {
 {% for node_name, ssh_host in kubernetes_proxmox_node_ssh_hosts.items() %}
@@ -32,19 +30,19 @@ module "kubernetes_{{ kubernetes_environment }}_masters" {
   memory_mb   = {{ kubernetes_control_plane.memory_mb }}
   disk_size   = "{{ kubernetes_control_plane.disk_size }}"
   storage     = "{{ kubernetes_storage }}"
+  resource_pool = "{{ kubernetes_resource_pool }}"
 
   tags = ["kubernetes", "{{ kubernetes_environment }}", "control-plane"]
 
   nodes = [
 {% for node in kubernetes_nodes.control_plane %}
     {
-      name          = "{{ node.name }}"
-      vmid          = {{ node.vmid }}
-      target_node   = "{{ node.target_node }}"
-      ip_address    = "{{ node.ip }}"
-      hostname      = "{{ node.hostname }}"
-      fqdn          = "{{ node.fqdn }}"
-      ignition_json = file("{{ kubernetes_generated_dir }}/{{ kubernetes_environment }}/ignition/{{ node.name }}.ign")
+      name        = "{{ node.name }}"
+      vmid        = {{ node.vmid }}
+      target_node = "{{ node.target_node }}"
+      ip_address  = "{{ node.ip }}"
+      hostname    = "{{ node.hostname }}"
+      fqdn        = "{{ node.fqdn }}"
     }{% if not loop.last %},{% endif %}
 {% endfor %}
   ]
@@ -56,9 +54,7 @@ module "kubernetes_{{ kubernetes_environment }}_workers" {
   cluster_name   = "{{ kubernetes_cluster_name }}"
   environment    = "{{ kubernetes_environment }}"
   node_role      = "worker"
-  clone_template = "{{ kubernetes_flatcar_template }}"
-  enable_ignition_fw_cfg = {{ (kubernetes_enable_ignition_fw_cfg | default(true)) | ternary('true', 'false') }}
-  ignition_server_url = "{{ kubernetes_ignition_server_url | default('') }}"
+  clone_template = "debian-13-template"
   force_create   = {{ (kubernetes_force_create | default(false)) | ternary('true', 'false') }}
   proxmox_node_ssh_hosts = {
 {% for node_name, ssh_host in kubernetes_proxmox_node_ssh_hosts.items() %}
@@ -77,19 +73,19 @@ module "kubernetes_{{ kubernetes_environment }}_workers" {
   memory_mb   = {{ kubernetes_workers.memory_mb }}
   disk_size   = "{{ kubernetes_workers.disk_size }}"
   storage     = "{{ kubernetes_storage }}"
+  resource_pool = "{{ kubernetes_resource_pool }}"
 
   tags = ["kubernetes", "{{ kubernetes_environment }}", "worker"]
 
   nodes = [
 {% for node in kubernetes_nodes.workers %}
     {
-      name          = "{{ node.name }}"
-      vmid          = {{ node.vmid }}
-      target_node   = "{{ node.target_node }}"
-      ip_address    = "{{ node.ip }}"
-      hostname      = "{{ node.hostname }}"
-      fqdn          = "{{ node.fqdn }}"
-      ignition_json = file("{{ kubernetes_generated_dir }}/{{ kubernetes_environment }}/ignition/{{ node.name }}.ign")
+      name        = "{{ node.name }}"
+      vmid        = {{ node.vmid }}
+      target_node = "{{ node.target_node }}"
+      ip_address  = "{{ node.ip }}"
+      hostname    = "{{ node.hostname }}"
+      fqdn        = "{{ node.fqdn }}"
     }{% if not loop.last %},{% endif %}
 {% endfor %}
   ]

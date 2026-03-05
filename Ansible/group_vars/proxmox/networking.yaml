@@ -1,73 +1,143 @@
----
 # =============================================================================
 # Proxmox Cluster Networking Configuration
 # =============================================================================
-# Manages network interfaces, bridges, and VLAN configuration
+# Manages network interfaces, bonds, bridges, and VLAN configuration
 # for the Proxmox cluster
 
-# Network interface configuration per node
+# =============================================================================
+# Network Interface Configuration (Management IPs)
+# =============================================================================
 proxmox_node_interfaces:
   pve-01:
-    # Mgmt interface - Infrastructure VLAN
     enp9s0:
       inet: "10.10.10.15"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
+
   pve-02:
     enp0s25:
       inet: "10.10.10.16"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
+
   pve-03:
     eno1:
       inet: "10.10.10.17"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
+
   pve-04:
     eno1:
       inet: "10.10.10.18"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
+
   pve-05:
     enp6s0f0:
       inet: "10.10.10.19"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
 
+
+# =============================================================================
+# Bond Configuration
+# =============================================================================
+# bond0 = LACP trunk uplink for VLAN networks
+proxmox_node_bonds:
+
+  pve-01:
+    bond0:
+      interfaces:
+        - enp8s0
+      mode: 802.3ad
+      miimon: 100
+      lacp_rate: fast
+      xmit_hash_policy: layer3+4
+
+  pve-04:
+    bond0:
+      interfaces:
+        - eno2
+        - eno3
+        - eno4
+      mode: 802.3ad
+      miimon: 100
+      lacp_rate: fast
+      xmit_hash_policy: layer3+4
+
+  pve-05:
+    bond0:
+      interfaces:
+        - eno2
+        - eno3
+        - eno4
+      mode: 802.3ad
+      miimon: 100
+      lacp_rate: fast
+      xmit_hash_policy: layer3+4
+
+
+# =============================================================================
 # Bridges configuration
-# vmbr0 = VLAN 1 (Infrastructure/Management)
+# =============================================================================
+# vmbr0  = VLAN 1  (Infrastructure / Management)
 # vmbr20 = VLAN 20 (Development)
 # vmbr30 = VLAN 30 (Testing)
 # vmbr40 = VLAN 40 (Production)
 # vmbr50 = VLAN 50 (DMZ)
-# vmbr60 = VLAN 60 (Ceph) - Only on pve-01, pve-04, pve-05 with 10Gb ports
+# vmbr60 = VLAN 60 (Ceph Storage)
 
-# Bridge configuration per node (node-specific overrides)
+# Node specific bridge overrides
 proxmox_node_bridges:
+
   pve-01:
+    vmbr0:
+      description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
+      vlan_id: 1
+      ports:
+        - enp9s0
+      address: "10.10.10.15/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
+
+    vmbr1:
+      description: "VM Bridge - all vm traffic not production (Development, Staging)"
+      vlan_id: 0
+      ports:
+        - bond0
+      address: "10.10.20.15/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
+
     vmbr40:
       description: "VM Bridge - VLAN 40 (Production)"
       vlan_id: 40
       ports:
-        - "enp10s0f0"  # 10Gb SFP+ port for Production
+        - enp10s0f0
       address: "10.10.40.15/24"
       vlan_aware: true
       auto: true
       stp: true
       stp_forward_delay: 0
-    
+
     vmbr60:
       description: "VM Bridge - VLAN 60 (Ceph)"
       vlan_id: 60
       ports:
-        - "enp10s0f1"  # 10Gb SFP+ port for Ceph
+        - enp10s0f1
       address: "10.10.60.15/24"
       vlan_aware: false
       auto: true
       stp: false
       stp_forward_delay: 0
-  
+
+
   pve-02:
+
     vmbr40:
       description: "VM Bridge - VLAN 40 (Production)"
       vlan_id: 40
@@ -77,102 +147,133 @@ proxmox_node_bridges:
       auto: true
       stp: true
       stp_forward_delay: 0
-    
-    # No Ceph on pve-02
+
     vmbr60: null
-  
+
+
   pve-03:
+
     vmbr40:
       description: "VM Bridge - VLAN 40 (Production)"
       vlan_id: 40
       ports:
-        - "eno2"  # 1Gb port for Production
+        - eno2
       address: "10.10.40.17/24"
       vlan_aware: true
       auto: true
       stp: true
       stp_forward_delay: 0
-    
-    # No Ceph on pve-03
+
     vmbr60: null
-  
+
+
   pve-04:
+    vmbr0:
+      description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
+      vlan_id: 1
+      ports:
+        - eno1
+      address: "10.10.10.18/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
+
+    vmbr1:
+      description: "VM Bridge - all vm traffic not production (Development, Staging)"
+      vlan_id: 0
+      ports:
+        - bond0
+      address: "10.10.20.18/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
+
     vmbr40:
       description: "VM Bridge - VLAN 40 (Production)"
       vlan_id: 40
       ports:
-        - "enp10s0f0"  # 10Gb SFP+ port for Production
+        - enp10s0f0
       address: "10.10.40.18/24"
       vlan_aware: true
       auto: true
       stp: true
       stp_forward_delay: 0
-    
+
     vmbr60:
       description: "VM Bridge - VLAN 60 (Ceph)"
       vlan_id: 60
       ports:
-        - "enp10s0f1"  # 10Gb SFP+ port for Ceph
+        - enp10s0f1
       address: "10.10.60.18/24"
       vlan_aware: false
       auto: true
       stp: false
       stp_forward_delay: 0
-  
+
+
   pve-05:
+    vmbr0:
+      description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
+      vlan_id: 1
+      ports:
+        - enp6s0f0
+      address: "10.10.10.19/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
+
+    vmbr1:
+      description: "VM Bridge - all vm traffic not production (Development, Staging)"
+      vlan_id: 0
+      ports:
+        - bond0
+      address: "10.10.20.19/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
+
     vmbr40:
       description: "VM Bridge - VLAN 40 (Production)"
       vlan_id: 40
       ports:
-        - "enp6s0f0"  # 10Gb SFP+ port for Production
+        - enp6s0f0
       address: "10.10.40.19/24"
       vlan_aware: true
       auto: true
       stp: true
       stp_forward_delay: 0
-    
+
     vmbr60:
       description: "VM Bridge - VLAN 60 (Ceph)"
       vlan_id: 60
       ports:
-        - "enp6s0f1"  # 10Gb SFP+ port for Ceph
+        - enp6s0f1
       address: "10.10.60.19/24"
       vlan_aware: false
       auto: true
       stp: false
       stp_forward_delay: 0
 
-# Global bridge defaults (applied to all nodes unless overridden above)
+
+# =============================================================================
+# Global Bridge Defaults
+# =============================================================================
 proxmox_bridges:
+
   vmbr0:
-    description: "VM Bridge - VLAN 1 (Infrastructure/Management)"
+    description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
     vlan_id: 1
-    # Physical port members for trunk connections - preserved from original config
     ports:
-      - "enp9s0"
+      - enp9s0
     vlan_aware: true
     auto: true
     stp: true
     stp_forward_delay: 0
-  
-  vmbr20:
-    description: "VM Bridge - VLAN 20 (Development)"
-    vlan_id: 20
-    ports: []
-    vlan_aware: true
-    auto: true
-    stp: true
-    stp_forward_delay: 0
-  
-  vmbr30:
-    description: "VM Bridge - VLAN 30 (Testing)"
-    vlan_id: 30
-    ports: []
-    vlan_aware: true
-    auto: true
-    stp: true
-    stp_forward_delay: 0
-  
+
   vmbr40:
     description: "VM Bridge - VLAN 40 (Production)"
     vlan_id: 40
@@ -181,20 +282,13 @@ proxmox_bridges:
     auto: true
     stp: true
     stp_forward_delay: 0
-  
-  vmbr50:
-    description: "VM Bridge - VLAN 50 (DMZ)"
-    vlan_id: 50
-    ports: []
-    vlan_aware: true
-    auto: true
-    stp: true
-    stp_forward_delay: 0
 
-# Network restart strategy
+# =============================================================================
+# Networking Behavior
+# =============================================================================
+
 proxmox_networking_restart_required: false
 
-# Management network details (used for cluster communication)
 proxmox_management_network: "10.10.10.0/24"
 proxmox_cluster_network: "10.10.10.0/24"
 proxmox_ceph_network: "10.10.60.0/24"

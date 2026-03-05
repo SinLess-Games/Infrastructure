@@ -1,16 +1,93 @@
 ---
-kubernetes_environment: "testing"
-kubernetes_cluster_name: "k8s-testing"
+kubernetes_environment: "staging"
+kubernetes_cluster_name: "k8s-staging"
+kubernetes_resource_pool: "staging"
+kubernetes_domain_suffix: "staging.k8s.sinlessgames.com"
+kubernetes_enable_ignition_fw_cfg: false
+kubernetes_ignition_server_url: "http://10.10.10.10:9000/ignition"
+kubernetes_force_create: true
 
 kubernetes_network:
-  bridge: "vmbr0"
+  bridge: "vmbr1"
   vlan_id: 30
   subnet: "10.10.30.0/24"
   cidr_suffix: "/24"
   gateway: "10.10.30.1"
+  nameservers: "10.10.10.1 1.1.1.1"
+
+kubernetes_proxmox_target_nodes:
+  - pve-01
+  - pve-04
+  - pve-05
 
 kubernetes_control_plane:
   count: 3
+  vmid_start: 320
+  name_prefix: "k8s-staging-cp"
+  cpu_cores: 4
+  cpu_sockets: 1
+  memory_mb: 8192
+  disk_size: "100G"
 
 kubernetes_workers:
   count: 3
+  vmid_start: 330
+  name_prefix: "k8s-staging-wk"
+  cpu_cores: 4
+  cpu_sockets: 1
+  memory_mb: 8192
+  disk_size: "100G"
+
+kubernetes_nodes:
+  control_plane:
+    - name: "k8s-staging-cp-01"
+      hostname: "k8s-staging-cp-01"
+      fqdn: "k8s-staging-cp-01.staging.k8s.sinlessgames.com"
+      ip: "10.10.30.11"
+      vmid: 320
+      target_node: "pve-01"
+    - name: "k8s-staging-cp-02"
+      hostname: "k8s-staging-cp-02"
+      fqdn: "k8s-staging-cp-02.staging.k8s.sinlessgames.com"
+      ip: "10.10.30.12"
+      vmid: 321
+      target_node: "pve-04"
+    - name: "k8s-staging-cp-03"
+      hostname: "k8s-staging-cp-03"
+      fqdn: "k8s-staging-cp-03.staging.k8s.sinlessgames.com"
+      ip: "10.10.30.13"
+      vmid: 322
+      target_node: "pve-05"
+  workers:
+    - name: "k8s-staging-wk-01"
+      hostname: "k8s-staging-wk-01"
+      fqdn: "k8s-staging-wk-01.staging.k8s.sinlessgames.com"
+      ip: "10.10.30.21"
+      vmid: 330
+      target_node: "pve-01"
+    - name: "k8s-staging-wk-02"
+      hostname: "k8s-staging-wk-02"
+      fqdn: "k8s-staging-wk-02.staging.k8s.sinlessgames.com"
+      ip: "10.10.30.22"
+      vmid: 331
+      target_node: "pve-04"
+    - name: "k8s-staging-wk-03"
+      hostname: "k8s-staging-wk-03"
+      fqdn: "k8s-staging-wk-03.staging.k8s.sinlessgames.com"
+      ip: "10.10.30.23"
+      vmid: 332
+      target_node: "pve-05"
+
+kubernetes_externaldns:
+  technitium:
+    server: "http://10.10.10.11:5380"
+    zone: "staging.k8s.sinlessgames.com"
+    token: "{{ lookup('env', 'TECHNITIUM_API_TOKEN') | default('', true) }}"
+  cloudflare:
+    domain_filter: "sinlessgames.com"
+    token: "{{ lookup('env', 'CLOUDFLARE_API_TOKEN') | default('', true) }}"
+
+kubernetes_flux_path: "./Kubernetes/clusters/staging"
+kubernetes_vault_kv_path: "secret/data/kubernetes/staging"
+kubernetes_vault_eso_secret_path: "kubernetes/staging"
+kubernetes_externaldns_technitium_enabled: false

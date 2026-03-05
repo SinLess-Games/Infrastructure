@@ -1,13 +1,14 @@
 ---
 kubernetes_environment: "dev"
 kubernetes_cluster_name: "k8s-dev"
+kubernetes_resource_pool: "development"
 kubernetes_domain_suffix: "dev.k8s.sinlessgames.com"
 kubernetes_enable_ignition_fw_cfg: false
 kubernetes_ignition_server_url: "http://10.10.10.10:9000/ignition"
 kubernetes_force_create: true
 
 kubernetes_network:
-  bridge: "vmbr0"
+  bridge: "vmbr1"
   vlan_id: 20
   subnet: "10.10.20.0/24"
   cidr_suffix: "/24"
@@ -39,14 +40,14 @@ kubernetes_workers:
 
 kubernetes_nodes:
   control_plane:
-    - name: "k8s-dev-cp-01"
+    - name: "k8s-dev-master-01"
       hostname: "k8s-dev-cp-01"
       fqdn: "k8s-dev-cp-01.dev.k8s.sinlessgames.com"
       ip: "10.10.20.11"
       vmid: 300
       target_node: "pve-01"
   workers:
-    - name: "k8s-dev-wk-01"
+    - name: "k8s-dev-worker-01"
       hostname: "k8s-dev-wk-01"
       fqdn: "k8s-dev-wk-01.dev.k8s.sinlessgames.com"
       ip: "10.10.20.21"
@@ -57,7 +58,7 @@ kubernetes_nodes:
       fqdn: "k8s-dev-wk-02.dev.k8s.sinlessgames.com"
       ip: "10.10.20.22"
       vmid: 311
-      target_node: "pve-04"
+      target_node: "pve-05"
 
 kubernetes_externaldns:
   technitium:

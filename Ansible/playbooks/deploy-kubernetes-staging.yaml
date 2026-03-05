@@ -1,11 +1,11 @@
 ---
-- name: Deploy Kubernetes dev infrastructure and core cluster foundation
+- name: Deploy Kubernetes staging infrastructure and core cluster foundation
   hosts: localhost
   gather_facts: false
   connection: local
   vars_files:
     - ../group_vars/kubernetes/main.yaml
-    - ../group_vars/kubernetes/development/main.yaml
+    - ../group_vars/kubernetes/staging/main.yaml
   vars:
     kubernetes_plan_only: "{{ (kubernetes_plan_only | default(false)) | bool }}"
     kubernetes_destroy: "{{ (kubernetes_destroy | default(false)) | bool }}"
@@ -59,15 +59,15 @@
       vars:
         kubernetes_configure_phase: "infrastructure"
 
-- name: Configure Kubernetes dev nodes and deploy platform apps via FluxCD
-  hosts: kubernetes_dev
+- name: Configure Kubernetes staging nodes and deploy platform apps via FluxCD
+  hosts: kubernetes_staging
   gather_facts: false
   become: true
   vars_files:
     - ../group_vars/kubernetes/main.yaml
-    - ../group_vars/kubernetes/development/main.yaml
+    - ../group_vars/kubernetes/staging/main.yaml
   pre_tasks:
-    - name: Remove stale host keys for dev node IPs
+    - name: Remove stale host keys for staging node IPs
       ansible.builtin.command:
         cmd: "ssh-keygen -f {{ lookup('env', 'HOME') }}/.ssh/known_hosts -R {{ item.ip }}"
       loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
@@ -90,6 +90,7 @@
 
     - name: Gather facts after Python bootstrap
       ansible.builtin.setup:
+
   roles:
     - role: kubernetes-configure
       vars:
@@ -99,7 +100,7 @@
         - not (kubernetes_destroy | default(false) | bool)
 
     - role: kubernetes-deploy
-      tags: ["k8s", "dev", "deploy", "flux", "platform-apps"]
+      tags: ["k8s", "staging", "deploy", "flux", "platform-apps"]
       when:
         - not (kubernetes_plan_only | default(false) | bool)
         - not (kubernetes_destroy | default(false) | bool)

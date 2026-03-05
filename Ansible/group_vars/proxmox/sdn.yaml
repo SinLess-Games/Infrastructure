@@ -6,13 +6,13 @@ proxmox_sdn_enabled: true
 proxmox_sdn_apply_node_network: true
 
 # Primary bridge for VLAN tagging (must exist on all nodes)
-proxmox_sdn_primary_bridge: "vmbr0"
+proxmox_sdn_primary_bridge: "vmbr1"
 
 # SDN zone definition - VLAN zone for all nodes
 proxmox_sdn_zones:
   - name: "vlanzone"
     type: "vlan"
-    bridge: "vmbr0"
+    bridge: "vmbr1"
     nodes: "pve-01,pve-02,pve-03,pve-04,pve-05"
     disable_arp_nd_suppression: 0
   - name: "devzone"

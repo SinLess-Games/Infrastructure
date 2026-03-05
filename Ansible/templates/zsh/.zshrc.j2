@@ -35,9 +35,35 @@ bindkey '^[[H'     beginning-of-line
 bindkey '^[[F'     end-of-line
 bindkey '^[[Z'     undo
 
-# -------------------------- PATH --------------------------
-export PATH="$PATH:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/snap/bin"
+# -----------------------------------------------------------------------------
+# Base PATH setup
+# -----------------------------------------------------------------------------
 
+# User binaries first
+export PATH="$HOME/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
+
+# Python (pip user installs)
+export PATH="$HOME/.local/bin:$PATH"
+
+# Homebrew (Linuxbrew)
+if [ -d "/home/linuxbrew/.linuxbrew/bin" ]; then
+  export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
+fi
+
+# Snap
+if [ -d "/snap/bin" ]; then
+  export PATH="/snap/bin:$PATH"
+fi
+
+# Node / npm global configuration
+export NPM_CONFIG_PREFIX="$HOME/.npm-global"
+export PATH="$NPM_CONFIG_PREFIX/bin:$PATH"
+
+# Allow Python virtualenvs to override system python
+export PATH="$HOME/.venv/bin:$PATH"
+
+# Deduplicate PATH entries while preserving order
+typeset -U path PATH
 # -------------------------- Environment --------------------------
 export ZSH="{{ oh_my_zsh_path }}"
 export STARSHIP_SHELL=zsh

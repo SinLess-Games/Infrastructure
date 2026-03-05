@@ -10,9 +10,6 @@ locals {
     ]
   )
 
-  ignition_json_escaped = [
-    for node in var.nodes : replace(replace(replace(replace(node.ignition_json, "\\", "\\\\"), "\"", "\\\""), ",", "\\,"), "\n", "")
-  ]
 }
 
 resource "proxmox_vm_qemu" "worker" {
@@ -22,6 +19,7 @@ resource "proxmox_vm_qemu" "worker" {
   vmid        = var.nodes[count.index].vmid
   target_node = var.nodes[count.index].target_node
   description = "${var.description} (${var.nodes[count.index].fqdn})"
+  pool        = var.resource_pool != "" ? var.resource_pool : null
 
   start_at_node_boot = var.start_at_node_boot
   protection         = var.protection
@@ -61,30 +59,19 @@ resource "proxmox_vm_qemu" "worker" {
 
   ipconfig0  = "ip=${var.nodes[count.index].ip_address}${var.cidr_subnet},gw=${var.gateway}"
   nameserver = var.nameservers
+  cicustom   = "user=local:snippets/${var.nodes[count.index].name}-cloud-init.yaml"
 
-  # args cannot be set via API token (requires root@pam)
-  # Will be set via SSH post-creation using local-exec provisioner
+  # Keep VM stopped during apply; Ansible starts nodes after Terraform completes.
+  vm_state = "stopped"
 
   tags = join(";", local.common_tags)
-}
 
-# Set QEMU args via SSH since API token lacks root@pam privileges
-resource "null_resource" "set_ignition_args" {
-  count = var.ignition_server_url != "" ? length(var.nodes) : 0
-
-  depends_on = [proxmox_vm_qemu.worker]
-
-  triggers = {
-    vmid         = var.nodes[count.index].vmid
-    target_node  = var.nodes[count.index].target_node
-    ssh_host     = lookup(var.proxmox_node_ssh_hosts, var.nodes[count.index].target_node, var.nodes[count.index].target_node)
-    ignition_file = "/var/lib/vz/snippets/${var.nodes[count.index].name}.ign"
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      ssh -o StrictHostKeyChecking=no root@${self.triggers.ssh_host} \
-        "qm set ${self.triggers.vmid} -args '-fw_cfg name=opt/com.coreos/config,file=${self.triggers.ignition_file}'"
-    EOT
+  lifecycle {
+    # VM power state is controlled by Ansible after Terraform completes.
+    ignore_changes = [
+      vm_state,
+    ]
   }
 }
+# Cloud-init is handled via Proxmox cloud-init drive
+# No additional configuration needed for Debian

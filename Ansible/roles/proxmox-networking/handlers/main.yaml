@@ -2,17 +2,17 @@
 # =============================================================================
 # Proxmox Networking Handlers
 # =============================================================================
+# Handlers for network configuration management.
+# Triggered by notify: in tasks when network configuration is changed.
+# =============================================================================
 
-- name: Reload networking interfaces
-  shell: |
-    ifreload -a
-  become: yes
-  listen: "reload networking"
+- name: restart networking
+  block:
+    - name: Reload network interfaces with ifreload
+      command: ifreload -a
+      become: yes
+      register: reload_result
+      failed_when: "'error' in reload_result.stderr | lower"
+      listen: "restart networking"
 
-- name: Restart networking service
-  systemd:
-    name: networking
-    state: restarted
-    daemon_reload: yes
   become: yes
-  listen: "restart networking"

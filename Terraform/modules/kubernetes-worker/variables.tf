@@ -17,18 +17,17 @@ variable "node_role" {
 variable "nodes" {
   description = "Worker VM definitions"
   type = list(object({
-    name          = string
-    vmid          = number
-    target_node   = string
-    ip_address    = string
-    hostname      = string
-    fqdn          = string
-    ignition_json = string
+    name        = string
+    vmid        = number
+    target_node = string
+    ip_address  = string
+    hostname    = string
+    fqdn        = string
   }))
 }
 
 variable "clone_template" {
-  description = "Proxmox Flatcar template name"
+  description = "Proxmox template name (e.g., debian-13-template)"
   type        = string
 }
 
@@ -63,6 +62,12 @@ variable "nameservers" {
 variable "storage" {
   description = "Primary storage target"
   type        = string
+}
+
+variable "resource_pool" {
+  description = "Proxmox resource pool for cluster VMs"
+  type        = string
+  default     = ""
 }
 
 variable "disk_size" {
