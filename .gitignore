@@ -22,5 +22,6 @@ Ansible/group_vars/vault/vault-secrets.yaml
 notes.md
 Packer/flatcar/manifest.json
 Terraform/terraform.tfstate.1772233972.backup
+Terraform/.terraform.tfstate.lock.info
 Terraform/tfplan
 terraform.tfstate

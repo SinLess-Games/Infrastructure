@@ -68,7 +68,7 @@
     src: "{{ proxmox_interfaces_file }}"
     dest: "{{ proxmox_networking_backup_dir }}/{{ inventory_hostname }}_interfaces_{{ ansible_date_time.iso8601_basic_short }}"
     flat: yes
-  become: yes
+  become: true
   when: proxmox_networking_backup
   tags: [network, backup]
 
@@ -77,7 +77,7 @@
     - name: Create backup of interfaces file on node
       shell: |
         cp {{ proxmox_interfaces_file }} {{ proxmox_interfaces_file }}.bak.{{ ansible_date_time.iso8601_basic_short }}
-      become: yes
+      become: true
       changed_when: false
       register: backup_created
 
@@ -98,7 +98,7 @@
     ip link show | grep -E "^[0-9]+:" | awk -F': ' '{print $2}' | grep -v "^lo$"
   register: current_interfaces
   changed_when: false
-  become: yes
+  become: true
   tags: [network, facts]
 
 - name: Extract existing management interface configuration
@@ -110,7 +110,7 @@
     ' {{ proxmox_interfaces_file }}
   register: original_config
   changed_when: false
-  become: yes
+  become: true
   tags: [network, parse]
 
 - name: Get interface addresses
@@ -118,7 +118,7 @@
     ip addr show | grep -E "inet|inet6" | grep -v "127.0.0.1" | awk '{print $2}'
   register: interface_addresses
   changed_when: false
-  become: yes
+  become: true
   tags: [network, facts]
 
 - name: Display current network state
@@ -211,7 +211,7 @@
         group: root
         mode: '0644'
         backup: yes
-      become: yes
+      become: true
       register: interfaces_template
       tags: [network, template]
 
@@ -219,7 +219,7 @@
       shell: cat /etc/network/interfaces.new
       register: generated_config
       changed_when: false
-      become: yes
+      become: true
       tags: [network, template]
 
     - name: Show generated configuration
@@ -301,7 +301,7 @@
         group: root
         mode: '0644'
         backup: yes
-      become: yes
+      become: true
       register: config_applied
       notify: "restart networking"
       tags: [network, apply]
@@ -315,7 +315,7 @@
     - name: Test configuration with ifreload (dry-run)
       shell: |
         ifreload -n 2>&1 || echo "Validation passed (warnings may occur)"
-      become: yes
+      become: true
       register: ifreload_test
       changed_when: false
       tags: [network, apply]
@@ -336,7 +336,7 @@
   block:
     - name: Reload network interfaces (ifreload -a)
       command: ifreload -a
-      become: yes
+      become: true
       register: reload_result
       changed_when: "'error' not in reload_result.stderr | lower"
       when: proxmox_networking_restart_required | bool
@@ -356,7 +356,7 @@
         ip link show | grep -E "vmbr" | awk '{print $2}' | sed 's/:$//' | sort
       register: created_bridges
       changed_when: false
-      become: yes
+      become: true
       when: proxmox_networking_restart_required | bool
       tags: [network, reload]
 
