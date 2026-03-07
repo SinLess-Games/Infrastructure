@@ -1,0 +1,11 @@
+---
+# =============================================================================
+# Kubernetes Configure Role - Main Task Entry Point
+# =============================================================================
+
+- name: Include Kubernetes installation tasks
+  ansible.builtin.include_tasks: install.yaml
+  when: "'kubernetes_master' in group_names or 'kubernetes_worker' in group_names"
+
+- name: Include kubeconfig save tasks
+  ansible.builtin.include_tasks: save-kubeconfig.yaml

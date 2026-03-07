@@ -51,24 +51,39 @@
 
 - name: Initialize Vault discovery state
   ansible.builtin.set_fact:
-    _vault_pending_paths: ["{{ vault_kv_path }}"]
-    _vault_secret_paths: "{{ [vault_kv_path] if vault_kv_path else [] }}"
+    _vault_pending_paths: "{{ [vault_kv_path] if vault_kv_path | length > 0 else [] }}"
+    _vault_secret_paths: "{{ [vault_kv_path] if vault_kv_path | length > 0 else [] }}"
     vault_runtime_secrets: {}
+    _vault_use_direct_load: "{{ vault_kv_path | length > 0 }}"
   no_log: true
 
-- name: Walk Vault metadata tree
+- name: Display Vault load strategy
+  ansible.builtin.debug:
+    msg: >-
+      {%- if _vault_use_direct_load -%}
+      ✓ Direct load: {{ vault_kv_path }}
+      {%- else -%}
+      ✓ Metadata walk: {{ vault_kv_mount }}/
+      {%- endif -%}
+    verbosity: 1
+
+- name: Walk Vault metadata tree (only when no specific path provided)
   ansible.builtin.include_tasks: _vault_walk_step.yaml
   loop: "{{ range(0, (vault_kv_walk_max_iterations | int)) | list }}"
   loop_control:
     loop_var: _vault_walk_iteration
-  when: _vault_pending_paths | length > 0
+  when: 
+    - not _vault_use_direct_load
+    - _vault_pending_paths | length > 0
 
 - name: Fail when Vault walk exceeds iteration guard
   ansible.builtin.fail:
     msg: >-
       Vault metadata walk exceeded {{ vault_kv_walk_max_iterations }} iterations.
       Remaining paths: {{ _vault_pending_paths | to_json }}
-  when: _vault_pending_paths | length > 0
+  when:
+    - not _vault_use_direct_load
+    - _vault_pending_paths | length > 0
 
 - name: Read discovered Vault secret documents
   ansible.builtin.uri:

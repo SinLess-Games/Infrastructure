@@ -1,11 +1,29 @@
 ---
+# =============================================================================
+# Kubernetes Development Cluster Variables
+# =============================================================================
+# Purpose:
+#   - Master and worker node configuration
+#   - Network setup for development environment
+#   - Integration with Vault for secrets
+#   - Terraform module inputs
+#
+# Usage:
+#   - Automatically loaded when deploying to kubernetes:dev inventory
+#   - Vault variables provide SSH keys and cluster secrets
+#   - All sensitive data referenced via {{ vault_* }} patterns
+# =============================================================================
+
+# =============================================================================
+# Cluster Identity
+# =============================================================================
+
 kubernetes_environment: "dev"
 kubernetes_cluster_name: "k8s-dev"
-kubernetes_resource_pool: "development"
-kubernetes_domain_suffix: "dev.k8s.sinlessgames.com"
-kubernetes_enable_ignition_fw_cfg: false
-kubernetes_ignition_server_url: "http://10.10.10.10:9000/ignition"
-kubernetes_force_create: true
+
+# =============================================================================
+# Network Configuration (VLAN 20 - Kubernetes)
+# =============================================================================
 
 kubernetes_network:
   bridge: "vmbr1"
@@ -15,56 +33,148 @@ kubernetes_network:
   gateway: "10.10.20.1"
   nameservers: "10.10.10.1 1.1.1.1"
 
+# =============================================================================
+# Proxmox Target Nodes - HA Distribution
+# =============================================================================
+
 kubernetes_proxmox_target_nodes:
   - pve-01
   - pve-04
   - pve-05
 
-kubernetes_control_plane:
-  count: 1
+# =============================================================================
+# Control Plane (Master) Nodes
+# =============================================================================
+
+kubernetes_master:
+  count: 1                    # Single master for dev (cost-effective)
   vmid_start: 300
   name_prefix: "k8s-dev-cp"
   cpu_cores: 4
   cpu_sockets: 1
   memory_mb: 8192
   disk_size: "100G"
+  clone_template: "debian-13-template"
+  startup_order: 10
 
-kubernetes_workers:
-  count: 2
+# Master node IP allocation (VLAN 20)
+kubernetes_master_ips:
+  - "10.10.20.11"
+
+# =============================================================================
+# Worker Nodes
+# =============================================================================
+
+kubernetes_worker:
+  count: 2                    # 2 workers for dev workloads
   vmid_start: 310
   name_prefix: "k8s-dev-wk"
   cpu_cores: 4
   cpu_sockets: 1
   memory_mb: 8192
   disk_size: "100G"
+  clone_template: "debian-13-template"
+  startup_order: 20
 
-kubernetes_nodes:
-  control_plane:
-    - name: "k8s-dev-master-01"
-      hostname: "k8s-dev-cp-01"
-      fqdn: "k8s-dev-cp-01.dev.k8s.sinlessgames.com"
-      ip: "10.10.20.11"
-      vmid: 300
-      target_node: "pve-01"
-  workers:
-    - name: "k8s-dev-worker-01"
-      hostname: "k8s-dev-wk-01"
-      fqdn: "k8s-dev-wk-01.dev.k8s.sinlessgames.com"
-      ip: "10.10.20.21"
-      vmid: 310
-      target_node: "pve-04"
-    - name: "k8s-dev-wk-02"
-      hostname: "k8s-dev-wk-02"
-      fqdn: "k8s-dev-wk-02.dev.k8s.sinlessgames.com"
-      ip: "10.10.20.22"
-      vmid: 311
-      target_node: "pve-05"
+# Worker node IP allocation (VLAN 20)
+kubernetes_worker_ips:
+  - "10.10.20.21"
+  - "10.10.20.22"
 
-kubernetes_externaldns:
-  technitium:
-    server: "http://10.10.10.11:5380"
-    zone: "dev.k8s.sinlessgames.com"
-    token: "{{ lookup('env', 'TECHNITIUM_API_TOKEN') | default('', true) }}"
-  cloudflare:
-    domain_filter: "sinlessgames.com"
-    token: "{{ lookup('env', 'CLOUDFLARE_API_TOKEN') | default('', true) }}"
+# =============================================================================
+# Kubernetes Configuration
+# =============================================================================
+
+# RKE2 install configuration
+kubernetes_rke2_version: ""               # Empty = use latest stable from channel
+kubernetes_cluster_cidr: "10.42.0.0/16"   # Pod network CIDR
+kubernetes_service_cidr: "10.43.0.0/16"   # Service network CIDR
+kubernetes_cluster_dns: "10.43.0.10"      # CoreDNS IP
+
+# =============================================================================
+# Vault and Proxmox Integration
+# =============================================================================
+
+# RKE2 cluster join token and SSH keys are fetched from Vault at deployment time
+# by deploy-kubernetes-dev.yaml playbook in pre_tasks
+
+kubernetes_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
+
+# =============================================================================
+# Deployment Role Variables (for kubernetes-deploy role)
+# =============================================================================
+
+# Deployment paths and configuration
+kubernetes_deploy_repo_root: "{{ playbook_dir | dirname | dirname }}"
+kubernetes_deploy_terraform_dir: "{{ kubernetes_deploy_repo_root }}/Terraform"
+
+# Vault configuration from environment variables
+kubernetes_deploy_vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('https://10.10.10.2:8200') }}"
+kubernetes_deploy_vault_skip_verify: "{{ lookup('env', 'VAULT_SKIP_VERIFY') | default('true') | bool }}"
+kubernetes_deploy_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('') }}"
+
+# Vault secrets (populated at deployment time)
+vault_kubernetes_development_data: {}
+vault_kubernetes_ansible_development_data: {}
+
+# Master node deployment configuration
+kubernetes_deploy_cluster_name: "{{ kubernetes_cluster_name }}"
+kubernetes_deploy_environment: "{{ kubernetes_environment }}"
+kubernetes_deploy_master_count: "{{ kubernetes_master.count }}"
+kubernetes_deploy_master_target_nodes:
+  - "pve-01"                 # Master on first node
+kubernetes_deploy_master_vm_id_start: "{{ kubernetes_master.vmid_start }}"
+kubernetes_deploy_master_cpu_cores: "{{ kubernetes_master.cpu_cores }}"
+kubernetes_deploy_master_memory_mb: "{{ kubernetes_master.memory_mb }}"
+kubernetes_deploy_master_disk_size: "{{ kubernetes_master.disk_size }}"
+kubernetes_deploy_master_ip_addresses: "{{ kubernetes_master_ips }}"
+kubernetes_deploy_master_gateway: "{{ kubernetes_network.gateway }}"
+kubernetes_deploy_master_clone_template: "{{ kubernetes_master.clone_template }}"
+kubernetes_deploy_master_startup_order: "{{ kubernetes_master.startup_order }}"
+
+# Worker node deployment configuration (distributed across nodes 4 and 5)
+kubernetes_deploy_worker_count: "{{ kubernetes_worker.count }}"
+kubernetes_deploy_worker_target_nodes:
+  - "pve-04"                 # Worker 1 on fourth node
+  - "pve-05"                 # Worker 2 on fifth node
+kubernetes_deploy_worker_vm_id_start: "{{ kubernetes_worker.vmid_start }}"
+kubernetes_deploy_worker_cpu_cores: "{{ kubernetes_worker.cpu_cores }}"
+kubernetes_deploy_worker_memory_mb: "{{ kubernetes_worker.memory_mb }}"
+kubernetes_deploy_worker_disk_size: "{{ kubernetes_worker.disk_size }}"
+kubernetes_deploy_worker_ip_addresses: "{{ kubernetes_worker_ips }}"
+kubernetes_deploy_worker_gateway: "{{ kubernetes_network.gateway }}"
+kubernetes_deploy_worker_clone_template: "{{ kubernetes_worker.clone_template }}"
+kubernetes_deploy_worker_startup_order: "{{ kubernetes_worker.startup_order }}"
+
+# Network deployment configuration
+kubernetes_deploy_network_bridge: "{{ kubernetes_network.bridge }}"
+kubernetes_deploy_network_vlan_id: "{{ kubernetes_network.vlan_id }}"
+kubernetes_deploy_network_cidr_suffix: "{{ kubernetes_network.cidr_suffix }}"
+kubernetes_deploy_network_nameservers: "{{ kubernetes_network.nameservers }}"
+
+# Kubernetes deployment configuration
+kubernetes_deploy_rke2_version: "{{ kubernetes_rke2_version }}"
+kubernetes_deploy_cluster_cidr: "{{ kubernetes_cluster_cidr }}"
+kubernetes_deploy_service_cidr: "{{ kubernetes_service_cidr }}"
+kubernetes_deploy_cluster_dns: "{{ kubernetes_cluster_dns }}"
+
+# Deployment secrets and timeouts
+kubernetes_deploy_rke2_server_token: "{{ vault_kubernetes_development_data.rke2_server_token }}"
+kubernetes_deploy_ssh_keys: "{{ vault_kubernetes_ansible_development_data.kubernetes_ssh_keys }}"
+kubernetes_deploy_wait_for_ssh_timeout: "{{ kubernetes_wait_for_ssh_timeout | default(600) }}"
+kubernetes_deploy_wait_for_kubeconfig_timeout: "{{ kubernetes_wait_for_kubeconfig_timeout }}"
+kubernetes_deploy_wait_for_api_timeout: "{{ kubernetes_wait_for_api_timeout }}"
+
+# Proxmox API deployment access
+kubernetes_deploy_proxmox_api_token_file: "{{ kubernetes_proxmox_api_token_file }}"
+kubernetes_deploy_proxmox_api_url: "https://pve-01.local.sinlessgames.com:8006"
+kubernetes_deploy_proxmox_tls_insecure: true
+
+# =============================================================================
+# Bootstrap and Timeout Configuration
+# =============================================================================
+
+# Wait timeouts
+kubernetes_wait_for_kubeconfig_timeout: 300  # Wait up to 5 minutes
+kubernetes_wait_for_ssh_timeout: 600         # Wait up to 10 minutes
+kubernetes_wait_for_api_timeout: 600         # Wait up to 10 minutes

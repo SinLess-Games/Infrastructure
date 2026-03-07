@@ -1,24 +1,24 @@
 kubernetes_dev:
   vars:
-    ansible_user: "sinless777"
+    ansible_user: "debian"
     ansible_ssh_private_key_file: "/home/sinless777/.ssh/id_ed25519"
-    ansible_python_interpreter: "/opt/miniconda/bin/python3"
+    ansible_python_interpreter: "/usr/bin/python3"
     ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
     kubernetes_environment: "dev"
   children:
     kubernetes_dev_control_plane:
       hosts:
-        k8s-dev-cp-01:
+        k8s-dev-master-01:
           ansible_host: 10.10.20.11
           node_role: control-plane
-          node_fqdn: k8s-dev-cp-01.dev.k8s.sinlessgames.com
+          node_fqdn: k8s-dev-master-01.dev.k8s.sinlessgames.com
     kubernetes_dev_workers:
       hosts:
-        k8s-dev-wk-01:
+        k8s-dev-worker-01:
           ansible_host: 10.10.20.21
           node_role: worker
-          node_fqdn: k8s-dev-wk-01.dev.k8s.sinlessgames.com
-        k8s-dev-wk-02:
+          node_fqdn: k8s-dev-worker-01.dev.k8s.sinlessgames.com
+        k8s-dev-worker-02:
           ansible_host: 10.10.20.22
           node_role: worker
-          node_fqdn: k8s-dev-wk-02.dev.k8s.sinlessgames.com
+          node_fqdn: k8s-dev-worker-02.dev.k8s.sinlessgames.com

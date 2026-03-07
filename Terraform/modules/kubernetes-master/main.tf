@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    proxmox = {
+      source  = "telmate/proxmox"
+      version = "3.0.2-rc07"
+    }
+  }
+}
+
 locals {
   common_tags = concat(
     var.tags,
@@ -29,15 +38,18 @@ resource "proxmox_vm_qemu" "control_plane" {
   clone      = var.clone_template
   full_clone = true
 
-  agent = var.agent_enabled ? 1 : 0
+  # QEMU Guest Agent
+  agent = 1
 
   cores   = var.cpu_cores
   sockets = var.cpu_sockets
   memory  = var.memory_mb
 
-  boot    = "order=scsi0;net0"
-  scsihw  = "virtio-scsi-single"
-  hotplug = "network,disk,usb"
+  # Boot configuration - boot from scsi0 (main disk)
+  boot     = "order=scsi0;net0"
+  bootdisk = "scsi0"
+  scsihw   = "virtio-scsi-single"
+  hotplug  = "network,disk,usb"
 
   disk {
     slot     = "scsi0"
@@ -48,6 +60,13 @@ resource "proxmox_vm_qemu" "control_plane" {
     backup   = true
     iothread = true
     discard  = true
+  }
+
+  # Cloud-init drive configuration
+  disk {
+    slot    = "ide2"
+    type    = "cloudinit"
+    storage = var.storage
   }
 
   network {
@@ -61,15 +80,16 @@ resource "proxmox_vm_qemu" "control_plane" {
   nameserver = var.nameservers
   cicustom   = "user=local:snippets/${var.nodes[count.index].name}-cloud-init.yaml"
 
-  # Keep VM stopped during apply; Ansible starts nodes after Terraform completes.
-  vm_state = "stopped"
+  # Start VMs immediately after creation
+  vm_state = "running"
 
   tags = join(";", local.common_tags)
 
+  # VM lifecycle is now fully managed by Terraform
   lifecycle {
-    # VM power state is controlled by Ansible after Terraform completes.
     ignore_changes = [
-      vm_state,
+      # Prevent Terraform from reverting Ansible-managed changes
+      description,
     ]
   }
 }
