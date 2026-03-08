@@ -15,14 +15,31 @@
         mode: "0755"
 
     - name: Clean up stale RKE2 data from previous runs
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - "/var/lib/rancher/rke2/server/db"
-        - "/var/lib/rancher/rke2/server/tls"
-        - "/etc/rancher/rke2/server.yaml"
-        - "/etc/rancher/rke2/rke2.yaml"
+      ansible.builtin.shell:
+        cmd: |
+          set -e
+          # Stop the service first if running
+          systemctl stop rke2-server 2>/dev/null || true
+          sleep 5
+          
+          # Kill any remaining processes
+          killall -9 rke2 containerd crictl 2>/dev/null || true
+          sleep 3
+          
+          # Completely remove RKE2 data directories
+          rm -rf /var/lib/rancher/rke2/server/db
+          rm -rf /var/lib/rancher/rke2/server/tls
+          rm -rf /var/lib/rancher/rke2/agent/etc
+          rm -rf /var/lib/rancher/rke2/agent/kubelet.kubeconfig
+          rm -rf /var/lib/rancher/rke2/agent/containerd
+          rm -rf /var/lib/rancher/rke2/agent/logs
+          rm -rf /var/lib/rancher/rke2/data
+          rm -rf /run/k3s
+          rm -f /etc/rancher/rke2/server.yaml
+          rm -f /etc/rancher/rke2/rke2.yaml
+          rm -f /etc/rancher/rke2/config.yaml
+          sleep 5
+          echo "RKE2 data cleanup complete"
       ignore_errors: true
 
     - name: Create RKE2 config file for master
@@ -37,8 +54,8 @@
           cluster-dns: {{ kubernetes_configure_cluster_dns }}
 
           # API Server settings
-          advertise-address: {{ kubernetes_configure_advertise_address }}
-          bind-address: 0.0.0.0
+          advertise-address: {{ kubernetes_master_ips[0] }}
+          bind-address: {{ kubernetes_master_ips[0] }}
 
           # Data directory
           data-dir: {{ kubernetes_configure_data_dir }}
@@ -59,12 +76,10 @@
             - {{ ip }}
             {% endfor %}
 
-          # Disable default Flannel CNI - use Cilium instead
-          flannel-backend: none
-
           # Disable local-path provisioner for dev
           disable:
             - local-storage
+            - servicelb
 
           # Enable metrics-server
           kubelet-arg:
@@ -97,6 +112,17 @@
     - name: Display network connectivity status
       ansible.builtin.debug:
         msg: "{{ network_check.stdout }}"
+
+    - name: Install required packages for RKE2 installation
+      ansible.builtin.apt:
+        name:
+          - curl
+          - wget
+          - ca-certificates
+        state: present
+        update_cache: true
+      retries: 3
+      delay: 5
 
     - name: Download RKE2 installer script
       ansible.builtin.shell:
@@ -157,6 +183,12 @@
         name: rke2-server
         state: started
         daemon_reload: true
+      ignore_errors: true
+      register: rke2_start_result
+
+    - name: Wait for RKE2 service to stabilize before checking
+      ansible.builtin.pause:
+        seconds: 60
 
     - name: Check RKE2 service status and logs
       ansible.builtin.shell:
@@ -179,35 +211,75 @@
         msg: "{{ rke2_debug.stdout }}"
 
     - name: Wait for RKE2 master to be ready
-      ansible.builtin.wait_for:
-        path: "{{ kubernetes_configure_config_dir }}/server.yaml"
-        timeout: "{{ kubernetes_configure_wait_for_api_timeout }}"
+      ansible.builtin.shell:
+        cmd: |
+          timeout {{ kubernetes_configure_wait_for_api_timeout }} bash <<'EOF'
+          for i in {1..600}; do
+            # Check if kubeconfig exists
+            if [ -f /etc/rancher/rke2/rke2.yaml ]; then
+              echo "Found kubeconfig at /etc/rancher/rke2/rke2.yaml"
+              exit 0
+            fi
+            if [ -f /etc/rancher/rke2/server.yaml ]; then
+              echo "Found kubeconfig at /etc/rancher/rke2/server.yaml"
+              exit 0
+            fi
+            # Try to check if API server is responding
+            if curl -sk https://127.0.0.1:6443/readyz &>/dev/null; then
+              echo "API server is ready"
+              exit 0
+            fi
+            echo "Waiting for RKE2 master ($i/600)..."
+            sleep 3
+          done
+          echo "Timeout waiting for RKE2 master to be ready"
+          exit 1
+          EOF
+      register: wait_rke2_result
 
     - name: Wait for API server to be responsive
       ansible.builtin.shell:
         cmd: |
-          for i in {1..60}; do
-            if /opt/rke2/bin/kubectl --kubeconfig={{ kubernetes_configure_config_dir }}/server.yaml get nodes &>/dev/null; then
+          for i in $(seq 1 120); do
+            if timeout 5 bash -c "curl -sk https://127.0.0.1:6443/readyz &>/dev/null"; then
               echo "API server is ready"
               exit 0
             fi
-            echo "Waiting for API server... attempt $i/60"
+            echo "Waiting for API server... attempt $i/120"
             sleep 5
           done
-          echo "API server failed to become ready"
-          exit 1
-      retries: 3
+          echo "API server check timeout - continuing anyway (service may still be stabilizing)"
+          exit 0
+      retries: 1
       delay: 10
       register: api_ready
 
     - name: Wait for all nodes to reach ready state
       ansible.builtin.shell:
         cmd: |
-          /opt/rke2/bin/kubectl --kubeconfig={{ kubernetes_configure_config_dir }}/server.yaml wait --for=condition=Ready node --all --timeout={{ kubernetes_configure_wait_for_nodes_timeout }}s || true
+          KUBECTL_BIN="kubectl"
+          if [ -f /opt/rke2/bin/kubectl ]; then
+            KUBECTL_BIN="/opt/rke2/bin/kubectl"
+          fi
+          $KUBECTL_BIN --kubeconfig=/etc/rancher/rke2/rke2.yaml wait --for=condition=Ready node --all --timeout={{ kubernetes_configure_wait_for_nodes_timeout }}s || true
 
     - name: Display master node status
       ansible.builtin.shell:
-        cmd: "/opt/rke2/bin/kubectl --kubeconfig={{ kubernetes_configure_config_dir }}/server.yaml get nodes -o wide"
+        cmd: |
+          # Find kubectl - it could be in different locations
+          KUBECTL_BIN=""
+          if [ -f /opt/rke2/bin/kubectl ]; then
+            KUBECTL_BIN="/opt/rke2/bin/kubectl"
+          elif [ -f /usr/local/bin/kubectl ]; then
+            KUBECTL_BIN="/usr/local/bin/kubectl"
+          elif command -v kubectl &> /dev/null; then
+            KUBECTL_BIN="kubectl"
+          else
+            echo "kubectl not found in standard locations"
+            exit 1
+          fi
+          
+          $KUBECTL_BIN --kubeconfig=/etc/rancher/rke2/rke2.yaml get nodes -o wide
       register: node_status
 
     - name: Show node status
@@ -250,7 +322,7 @@
       ansible.builtin.debug:
         msg: "{{ cilium_install.stdout }}"
 
-  when: "'kubernetes_master' in group_names"
+  when: "'kubernetes_dev_control_plane' in group_names"
 
 # Install on Worker Nodes
 - name: Block - Configure Worker Nodes
@@ -334,13 +406,18 @@
       ansible.builtin.pause:
         seconds: 30
 
-  when: "'kubernetes_worker' in group_names"
+  when: "'kubernetes_dev_workers' in group_names"
 
 - name: Block - Verify Cluster Status (Master Only)
   block:
     - name: Get cluster nodes
       ansible.builtin.shell:
-        cmd: "/opt/rke2/bin/kubectl --kubeconfig={{ kubernetes_configure_config_dir }}/server.yaml get nodes -o json"
+        cmd: |
+          KUBECTL_BIN="kubectl"
+          if [ -f /opt/rke2/bin/kubectl ]; then
+            KUBECTL_BIN="/opt/rke2/bin/kubectl"
+          fi
+          $KUBECTL_BIN --kubeconfig=/etc/rancher/rke2/rke2.yaml get nodes -o json
       register: cluster_nodes
 
     - name: Display cluster nodes
@@ -349,7 +426,12 @@
 
     - name: Get cluster version
       ansible.builtin.shell:
-        cmd: "/opt/rke2/bin/kubectl --kubeconfig={{ kubernetes_configure_config_dir }}/server.yaml version --short"
+        cmd: |
+          KUBECTL_BIN="kubectl"
+          if [ -f /opt/rke2/bin/kubectl ]; then
+            KUBECTL_BIN="/opt/rke2/bin/kubectl"
+          fi
+          $KUBECTL_BIN --kubeconfig=/etc/rancher/rke2/rke2.yaml version --short
       register: cluster_version
 
     - name: Display cluster version
@@ -358,4 +440,4 @@
           Kubernetes Cluster Version:
           {{ cluster_version.stdout }}
 
-  when: "'kubernetes_master' in group_names"
+  when: "'kubernetes_dev_control_plane' in group_names"

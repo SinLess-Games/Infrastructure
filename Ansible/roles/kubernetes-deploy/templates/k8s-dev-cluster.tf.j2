@@ -47,6 +47,10 @@ module "kubernetes_master" {
   # Tags
   tags = ["kubernetes", "rke2", "{{ kubernetes_deploy_environment }}", "control-plane"]
 
+  # SSH Configuration
+  ssh_keys     = var.kubernetes_ssh_keys
+  default_user = "sinless777"
+
   # HA and lifecycle management
   start_at_node_boot = true
   force_create       = true
@@ -94,6 +98,10 @@ module "kubernetes_worker" {
 
   # Tags
   tags = ["kubernetes", "rke2", "{{ kubernetes_deploy_environment }}", "worker"]
+
+  # SSH Configuration
+  ssh_keys     = var.kubernetes_ssh_keys
+  default_user = "sinless777"
 
   # HA and lifecycle management
   start_at_node_boot = true

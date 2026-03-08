@@ -24,3 +24,9 @@ variable "proxmox_tls_insecure" {
   type        = bool
   default     = false
 }
+
+variable "kubernetes_ssh_keys" {
+  description = "SSH public keys for Kubernetes VM authentication"
+  type        = list(string)
+  default     = []
+}

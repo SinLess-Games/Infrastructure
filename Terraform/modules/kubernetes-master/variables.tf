@@ -136,6 +136,18 @@ variable "description" {
   default     = "RKE2 control-plane node"
 }
 
+variable "ssh_keys" {
+  description = "SSH public keys for VM authentication"
+  type        = list(string)
+  default     = []
+}
+
+variable "default_user" {
+  description = "Default user for cloud-init"
+  type        = string
+  default     = "sinless777"
+}
+
 variable "proxmox_node_ssh_hosts" {
   description = "Map of Proxmox node name to SSH host/IP reachable from Terraform runner"
   type        = map(string)

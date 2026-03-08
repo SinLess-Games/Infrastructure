@@ -213,6 +213,7 @@
     - name: DNS fix
       ansible.builtin.import_role:
         name: dns-resolver
+      ignore_errors: true
         
     - name: Import kubernetes-configure role
       ansible.builtin.import_role:

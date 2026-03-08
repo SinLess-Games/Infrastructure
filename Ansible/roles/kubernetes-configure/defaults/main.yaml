@@ -36,7 +36,7 @@ kubernetes_configure_server_url: "https://{{ kubernetes_master_ips[0] | default(
 kubernetes_configure_advertise_address: "{{ inventory_hostname }}"
 
 # SSH configuration
-kubernetes_configure_ssh_user: "debian"
+kubernetes_configure_ssh_user: "sinless777"
 kubernetes_configure_ssh_key_file: "/root/.ssh/id_ed25519"
 
 # Kubeconfig output settings
@@ -44,7 +44,7 @@ kubernetes_configure_kubeconfig_output_dir: ".outputs/kubernetes/dev"
 kubernetes_configure_kubeconfig_filename: "kubeconfig"
 
 # Wait timeouts
-kubernetes_configure_wait_for_api_timeout: 300
+kubernetes_configure_wait_for_api_timeout: 1800
 kubernetes_configure_wait_for_nodes_timeout: 600
 kubernetes_configure_systemd_wait_timeout: 30
 

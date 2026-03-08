@@ -5,7 +5,7 @@
 
 - name: Include Kubernetes installation tasks
   ansible.builtin.include_tasks: install.yaml
-  when: "'kubernetes_master' in group_names or 'kubernetes_worker' in group_names"
+  when: "'kubernetes_dev_control_plane' in group_names or 'kubernetes_dev_workers' in group_names"
 
 - name: Include kubeconfig save tasks
   ansible.builtin.include_tasks: save-kubeconfig.yaml

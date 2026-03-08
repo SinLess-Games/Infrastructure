@@ -117,110 +117,44 @@
     dest: "{{ kubernetes_deploy_terraform_dir }}/k8s-dev-cluster.tf"
     mode: "0644"
 
-# DISABLED: terraform.tfvars.kubernetes-deploy generation
-# Using main.auto.tfvars instead
-
-# DISABLED: terraform.tfvars.kubernetes-worker generation
-# Using main.auto.tfvars instead
+- name: Display Kubernetes deployment SSH keys status
+  ansible.builtin.debug:
+    msg: |
+      =========================================
+      SSH Key Configuration Status
+      =========================================
+      SSH Keys Loaded: {{ vault_kubernetes_ansible_development_data.kubernetes_ssh_keys | length }}
+      {% if vault_kubernetes_ansible_development_data.kubernetes_ssh_keys | length > 0 %}
+      {% for key in vault_kubernetes_ansible_development_data.kubernetes_ssh_keys %}
+        - {{ key | regex_replace('(.{50}).*(.{16})', '\1...\2') }}
+      {% endfor %}
+      {% else %}
+      ⚠ WARNING: No SSH keys configured! VMs will use password auth only.
+      ⚠ Configure SSH keys in Vault at: ansible/kubernetes/development
+      ⚠ Required secret: kubernetes_ssh_keys: [array of public keys]
+      {% endif %}
+      Default User: sinless777
+      Authentication: SSH key-based (password-less)
+      =========================================
 
 - name: Create cloud-init snippets for master nodes on all Proxmox nodes
-  ansible.builtin.shell:
-    cmd: |
-      mkdir -p /var/lib/vz/snippets
-      cat > "/var/lib/vz/snippets/k8s-{{ kubernetes_deploy_environment }}-cp-{{ '%02d' | format(item[1] + 1) }}-cloud-init.yaml" << 'EOF'
-      #cloud-config
-      version: 2
-      # RKE2 Control Plane Node - Cloud-Init Configuration
-      
-      # Package management
-      package_update: true
-      package_upgrade: false
-      packages:
-        - qemu-guest-agent
-        - curl
-        - wget
-        - net-tools
-        - vim
-        - htop
-      
-      # Hostname configuration
-      hostname: k8s-{{ kubernetes_deploy_environment }}-cp-{{ '%02d' | format(item[1] + 1) }}
-      fqdn: k8s-{{ kubernetes_deploy_environment }}-cp-{{ '%02d' | format(item[1] + 1) }}.{{ kubernetes_deploy_environment }}.sinlessgames.local
-      
-      # System configuration
-      locale: en_US.UTF-8
-      timezone: UTC
-      
-      # OS level systemd-networkd management (if needed)
-      write_files:
-        - path: /etc/qemu-ga/client.conf
-          content: |
-            [general]
-            logfile = /var/log/qemu-ga/client.log
-      
-      # Services
-      runcmd:
-        - systemctl enable qemu-guest-agent
-        - systemctl start qemu-guest-agent
-        - systemctl enable systemd-networkd
-        - systemctl start systemd-networkd
-        - echo "Cloud-init completed at $(date)" > /var/log/cloud-init-complete.log
-      
-      # Final message
-      final_message: "Cloud-init has completed for k8s-{{ kubernetes_deploy_environment }}-cp-{{ '%02d' | format(item[1] + 1) }} at $TIMESTAMP"
-      EOF
-      chmod 644 "/var/lib/vz/snippets/k8s-{{ kubernetes_deploy_environment }}-cp-{{ '%02d' | format(item[1] + 1) }}-cloud-init.yaml"
+  ansible.builtin.template:
+    src: cloud-init-master.yaml.j2
+    dest: "/var/lib/vz/snippets/k8s-{{ kubernetes_deploy_environment }}-cp-{{ '%02d' | format(item[1] + 1) }}-cloud-init.yaml"
+    mode: '0644'
+  vars:
+    node_index: "{{ item[1] }}"
   loop: "{{ kubernetes_deploy_master_target_nodes | unique | list | product(range(0, kubernetes_deploy_master_count | int)) | list }}"
   delegate_to: "{{ item[0] }}"
   register: master_cloud_init_creation
 
 - name: Create cloud-init snippets for worker nodes on all Proxmox nodes
-  ansible.builtin.shell:
-    cmd: |
-      mkdir -p /var/lib/vz/snippets
-      cat > "/var/lib/vz/snippets/k8s-{{ kubernetes_deploy_environment }}-wk-{{ '%02d' | format(item[1] + 1) }}-cloud-init.yaml" << 'EOF'
-      #cloud-config
-      version: 2
-      # RKE2 Worker Node - Cloud-Init Configuration
-      
-      # Package management
-      package_update: true
-      package_upgrade: false
-      packages:
-        - qemu-guest-agent
-        - curl
-        - wget
-        - net-tools
-        - vim
-        - htop
-      
-      # Hostname configuration
-      hostname: k8s-{{ kubernetes_deploy_environment }}-wk-{{ '%02d' | format(item[1] + 1) }}
-      fqdn: k8s-{{ kubernetes_deploy_environment }}-wk-{{ '%02d' | format(item[1] + 1) }}.{{ kubernetes_deploy_environment }}.sinlessgames.local
-      
-      # System configuration
-      locale: en_US.UTF-8
-      timezone: UTC
-      
-      # OS level systemd-networkd management (if needed)
-      write_files:
-        - path: /etc/qemu-ga/client.conf
-          content: |
-            [general]
-            logfile = /var/log/qemu-ga/client.log
-      
-      # Services
-      runcmd:
-        - systemctl enable qemu-guest-agent
-        - systemctl start qemu-guest-agent
-        - systemctl enable systemd-networkd
-        - systemctl start systemd-networkd
-        - echo "Cloud-init completed at $(date)" > /var/log/cloud-init-complete.log
-      
-      # Final message
-      final_message: "Cloud-init has completed for k8s-{{ kubernetes_deploy_environment }}-wk-{{ '%02d' | format(item[1] + 1) }} at $TIMESTAMP"
-      EOF
-      chmod 644 "/var/lib/vz/snippets/k8s-{{ kubernetes_deploy_environment }}-wk-{{ '%02d' | format(item[1] + 1) }}-cloud-init.yaml"
+  ansible.builtin.template:
+    src: cloud-init-worker.yaml.j2
+    dest: "/var/lib/vz/snippets/k8s-{{ kubernetes_deploy_environment }}-wk-{{ '%02d' | format(item[1] + 1) }}-cloud-init.yaml"
+    mode: '0644'
+  vars:
+    node_index: "{{ item[1] }}"
   loop: "{{ kubernetes_deploy_worker_target_nodes | unique | list | product(range(0, kubernetes_deploy_worker_count | int)) | list }}"
   delegate_to: "{{ item[0] }}"
   register: worker_cloud_init_creation
@@ -255,6 +189,7 @@
     TF_VAR_proxmox_api_token_id: "{{ kubernetes_proxmox_api_token_id }}"
     TF_VAR_proxmox_api_token_secret: "{{ kubernetes_proxmox_api_token_secret }}"
     TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | ternary('true', 'false') }}"
+    TF_VAR_kubernetes_ssh_keys: "{{ vault_kubernetes_ansible_development_data.kubernetes_ssh_keys | to_json | default('[]') }}"
   register: terraform_plan
   changed_when: false
 
@@ -274,8 +209,37 @@
     TF_VAR_proxmox_api_token_id: "{{ kubernetes_proxmox_api_token_id }}"
     TF_VAR_proxmox_api_token_secret: "{{ kubernetes_proxmox_api_token_secret }}"
     TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | ternary('true', 'false') }}"
+    TF_VAR_kubernetes_ssh_keys: "{{ vault_kubernetes_ansible_development_data.kubernetes_ssh_keys | to_json | default('[]') }}"
   register: terraform_apply
   changed_when: "terraform_apply.stdout is defined and 'Apply complete' in terraform_apply.stdout"
+
+- name: Start Kubernetes master VMs
+  ansible.builtin.shell:
+    cmd: |
+      for node in pve-01; do
+        for vmid in 300; do
+          ssh -o StrictHostKeyChecking=no root@${node}.local.sinlessgames.com "qm start ${vmid}" 2>/dev/null || echo "VM ${vmid} already running or error"
+        done
+      done
+  environment:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+  register: start_master_vms
+  changed_when: true
+  failed_when: false
+
+- name: Start Kubernetes worker VMs
+  ansible.builtin.shell:
+    cmd: |
+      for node in pve-04 pve-05; do
+        for vmid in 310 311; do
+          ssh -o StrictHostKeyChecking=no root@${node}.local.sinlessgames.com "qm start ${vmid}" 2>/dev/null || echo "VM ${vmid} already running or error"
+        done
+      done
+  environment:
+    ANSIBLE_HOST_KEY_CHECKING: "False"
+  register: start_worker_vms
+  changed_when: true
+  failed_when: false
 
 - name: Wait for Kubernetes cluster deployment to complete
   ansible.builtin.pause:
@@ -333,8 +297,29 @@
         5. Deploy Kubernetes add-ons (ingress, storage, etc.)
       
       SSH Access:
-        ssh -i ~/.ssh/id_ed25519 debian@<node-ip>
+        ssh -i ~/.ssh/id_ed25519 sinless777@<node-ip>
       
       =========================================
   when: master_ssh_check is succeeded and worker_ssh_check is succeeded
+      
+- name: Display SSH access instructions
+  ansible.builtin.debug:
+    msg: |
+      =========================================
+      SSH Access Instructions
+      =========================================
+      
+      To connect to Kubernetes nodes, use the sinless777 user:
+      
+      Master Control Plane:
+        ssh -i ~/.ssh/id_ed25519 sinless777@10.10.20.11
+      
+      Worker Nodes:
+        ssh -i ~/.ssh/id_ed25519 sinless777@10.10.20.21
+        ssh -i ~/.ssh/id_ed25519 sinless777@10.10.20.22
+      
+      For passwordless SSH (key-based auth only):
+        ssh sinless777@10.10.20.11
+      
+      =========================================
 
