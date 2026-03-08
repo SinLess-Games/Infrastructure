@@ -3,23 +3,17 @@
 # Kubernetes Configure Role - Default Variables
 # =============================================================================
 
-# Kubernetes Distribution (rke2 or k3s, prefer k3s)
-kubernetes_configure_distribution: "rke2"  # Set to 'k3s' for lightweight deployment
-kubernetes_configure_version: "{{ kubernetes_rke2_version | default('v1.30.5') }}"
+# Kubernetes Distribution (rke2, using lablabs.rke2 role)
+kubernetes_configure_distribution: "rke2"
+kubernetes_configure_version: "{{ kubernetes_rke2_version | default('v1.34.4-rke2r1') }}"
 
 # Installation paths
 kubernetes_configure_install_dir: "/usr/local/bin"
 kubernetes_configure_config_dir: "/etc/rancher/rke2"
 kubernetes_configure_data_dir: "/var/lib/rancher/rke2"
 
-# RKE2 specific settings
+# RKE2 specific settings (for lablabs.rke2 role)
 kubernetes_configure_rke2_channel: "stable"
-kubernetes_configure_rke2_installer_url: "https://get.rke2.io"
-kubernetes_configure_rke2_exec: "server"
-
-# k3s specific settings (fallback)
-kubernetes_configure_k3s_installer_url: "https://get.k3s.io"
-kubernetes_configure_k3s_exec: "server"
 
 # Cluster configuration
 kubernetes_configure_cluster_cidr: "{{ kubernetes_cluster_cidr | default('10.42.0.0/16') }}"
@@ -31,9 +25,6 @@ kubernetes_configure_server_token: "{{ rke2_server_token | default('') }}"
 
 # Master node configuration
 kubernetes_configure_server_url: "https://{{ kubernetes_master_ips[0] | default('10.10.20.11') }}:6443"
-
-# API server advertise address
-kubernetes_configure_advertise_address: "{{ inventory_hostname }}"
 
 # SSH configuration
 kubernetes_configure_ssh_user: "sinless777"
@@ -47,7 +38,3 @@ kubernetes_configure_kubeconfig_filename: "kubeconfig"
 kubernetes_configure_wait_for_api_timeout: 1800
 kubernetes_configure_wait_for_nodes_timeout: 600
 kubernetes_configure_systemd_wait_timeout: 30
-
-# Retry settings
-kubernetes_configure_install_retries: 3
-kubernetes_configure_install_delay: 10
