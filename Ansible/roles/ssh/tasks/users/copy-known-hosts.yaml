@@ -12,6 +12,11 @@
 - name: Resolve home directories from passwd
   ansible.builtin.getent:
     database: passwd
+  changed_when: false
+  retries: 3
+  delay: 10
+  register: _getent_result
+  until: _getent_result is succeeded
 
 # -----------------------------------------------------------------------------
 # Read SSH CA public key (controller) — SINGLE CA: .outputs/ssh_ca
@@ -82,7 +87,7 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0700"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   when: item.name in getent_passwd
@@ -99,7 +104,7 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0644"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   when: item.name in getent_passwd

@@ -18,6 +18,11 @@
 - name: Resolve home directories from passwd
   ansible.builtin.getent:
     database: passwd
+  changed_when: false
+  retries: 3
+  delay: 10
+  register: _getent_result
+  until: _getent_result is succeeded
 
 # -----------------------------------------------------------------------------
 # Ensure ~/.ssh exists
@@ -30,7 +35,7 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0700"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   when: item.name in getent_passwd
@@ -46,7 +51,7 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0600"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   when: item.name in getent_passwd
