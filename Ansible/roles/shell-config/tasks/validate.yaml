@@ -12,16 +12,15 @@
 # Required variables
 # -----------------------------------------------------------------------------
 
-- name: Validate shell_config_users is defined and a list
+- name: Validate resolved shell users is a list
   ansible.builtin.assert:
     that:
-      - shell_config_users is defined
-      - shell_config_users is iterable
-      - shell_config_users | length > 0
+      - shell__resolved_users is defined
+      - shell__resolved_users is iterable
     fail_msg: >
-      shell_config_users must be defined as a non-empty list.
+      shell_role_users must resolve to a list.
       Example:
-        shell_config_users:
+        shell_role_users:
           - name: user
             home_directory: /home/user
 
@@ -29,7 +28,7 @@
 # Validate user structure
 # -----------------------------------------------------------------------------
 
-- name: Validate each shell_config_user entry
+- name: Validate each resolved shell user entry
   ansible.builtin.assert:
     that:
       - item.name is defined
@@ -37,10 +36,10 @@
       - item.home_directory is defined
       - item.home_directory | length > 0
     fail_msg: >
-      Each entry in shell_config_users must define:
+      Each entry in shell_role_users must define:
         - name
         - home_directory
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   loop_control:
     label: "{{ item.name | default('UNKNOWN') }}"
 
@@ -54,11 +53,11 @@
       - shell_install_oh_my_zsh | default(false) | type_debug == 'bool'
     fail_msg: "shell_install_oh_my_zsh must be a boolean"
 
-- name: Validate shell_install_starship flag
+- name: Validate shell_remove_starship flag
   ansible.builtin.assert:
     that:
-      - shell_install_starship | default(false) | type_debug == 'bool'
-    fail_msg: "shell_install_starship must be a boolean"
+      - shell_remove_starship | default(true) | type_debug == 'bool'
+    fail_msg: "shell_remove_starship must be a boolean"
 
 - name: Validate shell_set_default_shell flag
   ansible.builtin.assert:
@@ -93,7 +92,7 @@
   ansible.builtin.stat:
     path: "{{ item.home_directory }}"
   register: home_dirs
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -102,6 +101,22 @@
     msg: "Home directory does not exist for user {{ item.item.name }}: {{ item.item.home_directory }}"
   when: not item.stat.exists
   loop: "{{ home_dirs.results }}"
+
+- name: Validate shell bin command source directory
+  ansible.builtin.stat:
+    path: "{{ shell_bin_commands_src }}"
+  register: shell_bin_commands_src_stat
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: shell_bin_commands_enabled | bool
+
+- name: Fail if shell bin command source directory is missing
+  ansible.builtin.fail:
+    msg: "shell_bin_commands_src does not exist: {{ shell_bin_commands_src }}"
+  when:
+    - shell_bin_commands_enabled | bool
+    - not shell_bin_commands_src_stat.stat.exists
 
 # -----------------------------------------------------------------------------
 # Safety checks
@@ -114,6 +129,6 @@
     fail_msg: >
       User {{ item.name }} has shell '/usr/sbin/nologin'.
       Refusing to manage shell configuration.
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   loop_control:
     label: "{{ item.name }}"

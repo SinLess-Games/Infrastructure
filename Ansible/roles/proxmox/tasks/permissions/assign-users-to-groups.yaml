@@ -1,0 +1,37 @@
+---
+# Task: Assign Proxmox users to groups
+
+- name: "Assign users to groups"
+  block:
+    - name: "Check if proxmox_users is defined"
+      assert:
+        that:
+          - proxmox_users is defined
+        fail_msg: "proxmox_users must be defined in group_vars"
+
+    - name: "Add user {{ item.key }}@{{ item.value.realm }} to groups"
+      shell: |
+        userid="{{ item.key }}@{{ item.value.realm }}"
+        groups_csv="{{ item.value.groups | default([]) | join(',') }}"
+        if [ -n "$groups_csv" ]; then
+          pveum user modify "$userid" --groups "$groups_csv"
+        fi
+      register: group_assign_result
+      loop: "{{ proxmox_users | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      delegate_to: "{{ groups['pve_nodes'] | first }}"
+      become: true
+      run_once: true
+      when: not proxmox_permissions_dev_mode
+      tags:
+        - proxmox
+        - permissions
+        - groups
+        - users
+
+  tags:
+    - proxmox
+    - permissions
+    - groups
+    - users

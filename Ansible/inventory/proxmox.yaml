@@ -1,25 +1,31 @@
-all:
+---
+proxmox:
   vars:
     ansible_user: root
     ansible_python_interpreter: /usr/bin/python3
+    ansible_ssh_private_key_file: /home/sinless777/Projects/Infrastructure/.outputs/ssh/root/id_ed25519
+    ansible_ssh_common_args: >-
+      -o StrictHostKeyChecking=no
+      -o UserKnownHostsFile=/dev/null
+      -o HostKeyAlgorithms=+ssh-rsa
+      -o PubkeyAcceptedAlgorithms=+ssh-rsa
+      -o CertificateFile=/home/sinless777/Projects/Infrastructure/.outputs/ssh/root/id_ed25519-cert.pub
+      -o IdentitiesOnly=yes
     proxmox_cluster_name: Sinless-Games
     proxmox_cluster_network: 10.10.10.0/24
-    proxmox_ceph_network: 10.10.60.0/24
-
-proxmox:
   children:
     pve_nodes:
       hosts:
         pve-01:
-          ansible_host: 10.10.10.15
-        pve-02:
-          ansible_host: 10.10.10.16
+          ansible_host: 10.10.10.14
+        # pve-02:
+        #   ansible_host: 10.10.10.15
         pve-03:
-          ansible_host: 10.10.10.17
+          ansible_host: 10.10.10.16
         pve-04:
-          ansible_host: 10.10.10.18
+          ansible_host: 10.10.10.17
         pve-05:
-          ansible_host: 10.10.10.19
+          ansible_host: 10.10.10.18
 
     pve_bootstrap:
       hosts:
@@ -28,11 +34,5 @@ proxmox:
     pve_cluster_members:
       hosts:
         pve-03:
-        pve-04:
-        pve-05:
-
-    pve_ceph:
-      hosts:
-        pve-01:
         pve-04:
         pve-05:

@@ -23,13 +23,13 @@
     that:
       - ssh_output_base is defined
       - ssh_output_base | length > 0
-      - users is defined
-      - users is iterable
+      - ssh_role_users is defined
+      - ssh_role_users is iterable
       - ssh_key_type is defined
       - ssh_key_type in ['ed25519', 'rsa', 'ecdsa']
     fail_msg: >-
       Invalid SSH key generation configuration.
-      Required: ssh_output_base, users, ssh_key_type (ed25519|rsa|ecdsa).
+      Required: ssh_output_base, ssh_role_users, ssh_key_type (ed25519|rsa|ecdsa).
   delegate_to: localhost
   become: false
   run_once: true
@@ -49,7 +49,7 @@
     path: "{{ ssh_output_base }}/{{ item.name }}"
     state: directory
     mode: "0700"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
@@ -61,7 +61,7 @@
   ansible.builtin.file:
     path: "{{ ssh_output_base }}/{{ item.0.name }}/id_{{ ssh_key_type }}{{ item.1 }}"
     state: absent
-  loop: "{{ users | product(['', '.pub']) | list }}"
+  loop: "{{ ssh_role_users | product(['', '.pub']) | list }}"
   loop_control:
     label: "{{ item.0.name }}{{ item.1 }}"
   when: (ssh_force_regenerate | default(false)) | bool
@@ -83,7 +83,7 @@
       }}
   args:
     creates: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
@@ -95,7 +95,7 @@
     path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
     state: file
     mode: "{{ ssh_key_mode_private | default('0600') }}"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
@@ -107,7 +107,7 @@
     path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
     state: file
     mode: "{{ ssh_key_mode_public | default('0644') }}"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost

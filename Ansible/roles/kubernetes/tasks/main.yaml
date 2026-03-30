@@ -1,0 +1,32 @@
+---
+- name: Run Kubernetes deploy phase
+  ansible.builtin.include_tasks: deploy.yaml
+  when: "'deploy' in kubernetes_role_phases"
+  tags:
+    - kubernetes
+    - deploy
+
+- name: Run Kubernetes configure phase
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/defaults/configure.yaml"
+    name: __kubernetes_configure_defaults
+  when: "'configure' in kubernetes_role_phases"
+  tags:
+    - kubernetes
+    - configure
+
+- name: Apply Kubernetes configure defaults
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (__kubernetes_configure_defaults | default({})) | dict2items }}"
+  when: "'configure' in kubernetes_role_phases"
+  tags:
+    - kubernetes
+    - configure
+
+- name: Include Kubernetes configure tasks
+  ansible.builtin.include_tasks: configure-main.yaml
+  when: "'configure' in kubernetes_role_phases"
+  tags:
+    - kubernetes
+    - configure

@@ -1,0 +1,152 @@
+---
+# =============================================================================
+# proxmox-cluster — create
+# -----------------------------------------------------------------------------
+# Purpose:
+# - Create a new Proxmox VE cluster
+# - MUST run only on the designated init (bootstrap) node
+#
+# Design goals:
+# - Hard safety gates (no accidental re-creation)
+# - Explicit mode handling (create vs expand)
+# - Idempotent where possible
+# - Clear operator-facing diagnostics
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Hard safety checks (authoritative)
+# -----------------------------------------------------------------------------
+
+- name: Assert cluster management is enabled
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_enabled | bool
+    fail_msg: >
+      Proxmox cluster management is disabled.
+      Set proxmox_cluster_enabled: true to allow cluster creation.
+
+- name: Assert cluster mode allows creation
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_mode == "create"
+    fail_msg: >
+      Cluster creation skipped.
+      Current mode is '{{ proxmox_cluster_mode }}', not 'create'.
+
+- name: Assert this host is the designated init node
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == proxmox_cluster_init_node
+    fail_msg: >
+      This host ({{ inventory_hostname }}) is NOT the designated init node.
+      Expected init node: {{ proxmox_cluster_init_node }}.
+
+- name: Assert init node is not already clustered
+  ansible.builtin.assert:
+    that:
+      - not proxmox_cluster_is_clustered | bool
+    fail_msg: >
+      Init node {{ inventory_hostname }} is already part of a cluster.
+      Refusing to create a new cluster to prevent corruption.
+
+# -----------------------------------------------------------------------------
+# Pre-flight validation
+# -----------------------------------------------------------------------------
+
+- name: Assert required cluster variables are defined
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_name is defined
+      - proxmox_cluster_name | length > 0
+      - proxmox_cluster_bind_address is defined
+      - proxmox_cluster_bind_address | length > 0
+    fail_msg: >
+      Required cluster variables are missing.
+      Ensure proxmox_cluster_name and proxmox_cluster_bind_address are set.
+
+# -----------------------------------------------------------------------------
+# Create cluster (single authoritative operation)
+# -----------------------------------------------------------------------------
+# NOTE:
+# - Uses knet link0 explicitly
+# - pvecm create is NOT safely repeatable, so we gate via corosync.conf
+# -----------------------------------------------------------------------------
+
+- name: Create Proxmox cluster (init node)
+  ansible.builtin.command:
+    cmd: >
+      pvecm create {{ proxmox_cluster_name }}
+      --link0 {{ proxmox_cluster_bind_address }}
+  register: proxmox_cluster_create
+  args:
+    creates: /etc/pve/corosync.conf
+  changed_when: proxmox_cluster_create.rc == 0
+  failed_when: proxmox_cluster_create.rc != 0
+  when:
+    - proxmox_is_bootstrap | bool
+
+# -----------------------------------------------------------------------------
+# Post-create synchronization & verification
+# -----------------------------------------------------------------------------
+
+- name: Wait for corosync configuration to appear
+  ansible.builtin.wait_for:
+    path: /etc/pve/corosync.conf
+    timeout: 180
+  when:
+    - proxmox_is_bootstrap | bool
+
+- name: Allow corosync to stabilize
+  ansible.builtin.pause:
+    seconds: 10
+  when:
+    - proxmox_is_bootstrap | bool
+
+- name: Query cluster status after creation
+  ansible.builtin.command: pvecm status
+  register: proxmox_cluster_status_post
+  changed_when: false
+  failed_when: proxmox_cluster_status_post.rc != 0
+  when:
+    - proxmox_is_bootstrap | bool
+
+- name: Set immediate quorum state after cluster creation
+  ansible.builtin.set_fact:
+    proxmox_cluster_quorate_immediate: >-
+      {{ 'Quorate: Yes' in (proxmox_cluster_status_post.stdout | default('')) }}
+  when:
+    - proxmox_is_bootstrap | bool
+
+- name: Assert single-node cluster reports quorate immediately
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_quorate_immediate | bool
+    fail_msg: >
+      Cluster was created but is NOT quorate.
+      Investigate corosync networking before proceeding.
+  when:
+    - proxmox_is_bootstrap | bool
+    - (proxmox_cluster.expected_nodes | int) <= 1
+
+- name: Report deferred quorum validation for multi-node bootstrap
+  ansible.builtin.debug:
+    msg: >-
+      Cluster bootstrap completed on {{ inventory_hostname }}. Immediate quorum={{ proxmox_cluster_quorate_immediate }};
+      expected_nodes={{ proxmox_cluster.expected_nodes }} so final quorum validation is deferred until join phase completes.
+  when:
+    - proxmox_is_bootstrap | bool
+    - (proxmox_cluster.expected_nodes | int) > 1
+
+# -----------------------------------------------------------------------------
+# Report success
+# -----------------------------------------------------------------------------
+
+- name: Proxmox cluster created successfully
+  ansible.builtin.debug:
+    msg:
+      - "Cluster name      : {{ proxmox_cluster_name }}"
+      - "Init node         : {{ inventory_hostname }}"
+      - "Corosync link0 IP : {{ proxmox_cluster_bind_address }}"
+      - "Status            : Cluster created and quorate"
+  when:
+    - proxmox_is_bootstrap | bool

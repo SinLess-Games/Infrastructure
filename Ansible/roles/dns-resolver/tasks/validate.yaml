@@ -19,6 +19,14 @@
     fail_msg: "dns_test_domains must be defined and contain at least one test domain"
     success_msg: "DNS test domains configuration is valid"
 
+- name: Validate dns_max_nameservers range
+  ansible.builtin.assert:
+    that:
+      - (dns_max_nameservers | int) >= 1
+      - (dns_max_nameservers | int) <= 3
+    fail_msg: "dns_max_nameservers must be between 1 and 3"
+    success_msg: "DNS nameserver cap is valid"
+
 - name: Display DNS configuration
   ansible.builtin.debug:
     msg:

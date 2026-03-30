@@ -1,0 +1,318 @@
+---
+# =============================================================================
+# Kubernetes Configure Role - Main Task Orchestration
+# =============================================================================
+# Purpose:
+#   - Prepare the node OS for Kubernetes
+#   - Install and configure RKE2 using lablabs.rke2
+#   - Wait for control-plane readiness
+#   - Save kubeconfig from the first master node
+#   - Optionally configure Vault Kubernetes secrets engine
+#   - Validate cluster state from the first master node
+#
+# Notes:
+#   - This role expects rke2_server_token to already be available
+#   - prepare-node.yaml handles OS preparation
+#   - install.yaml handles RKE2 installation via lablabs.rke2
+#   - save-kubeconfig.yaml saves kubeconfig locally on the controller
+#   - add-config-to-vault.yaml configures the Vault Kubernetes secrets engine
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Runtime role detection
+# -----------------------------------------------------------------------------
+
+- name: Resolve Kubernetes node role
+  ansible.builtin.set_fact:
+    kubernetes_configure_node_role_resolved: >-
+      {{
+        kubernetes_configure_node_role
+        | default(
+            'master'
+            if (
+              'kubernetes_dev_control_plane' in group_names
+              or 'masters' in group_names
+              or 'control_plane' in group_names
+            )
+            else 'worker'
+          )
+      }}
+    kubernetes_configure_is_master: >-
+      {{
+        (
+          kubernetes_configure_node_role
+          | default(
+              'master'
+              if (
+                'kubernetes_dev_control_plane' in group_names
+                or 'masters' in group_names
+                or 'control_plane' in group_names
+              )
+              else 'worker'
+            )
+        ) == 'master'
+      }}
+  tags:
+    - kubernetes
+    - configure
+    - validate
+
+- name: Resolve first master hostname
+  ansible.builtin.set_fact:
+    kubernetes_configure_first_master_host: >-
+      {{
+        (
+          groups['kubernetes_dev_control_plane'][0]
+          if ('kubernetes_dev_control_plane' in groups and (groups['kubernetes_dev_control_plane'] | length > 0))
+          else
+          (
+            groups['masters'][0]
+            if ('masters' in groups and (groups['masters'] | length > 0))
+            else inventory_hostname
+          )
+        )
+      }}
+  tags:
+    - kubernetes
+    - configure
+    - validate
+
+- name: Determine whether this host is the first master
+  ansible.builtin.set_fact:
+    kubernetes_configure_is_first_master: "{{ inventory_hostname == kubernetes_configure_first_master_host }}"
+  tags:
+    - kubernetes
+    - configure
+    - validate
+
+# -----------------------------------------------------------------------------
+# Validate required configuration
+# -----------------------------------------------------------------------------
+
+- name: Validate required Kubernetes variables
+  ansible.builtin.assert:
+    that:
+      - kubernetes_cluster_name is defined
+      - kubernetes_cluster_name | length > 0
+      - kubernetes_environment is defined
+      - kubernetes_environment | length > 0
+      - kubernetes_configure_cluster_cidr is defined
+      - kubernetes_configure_cluster_cidr | length > 0
+      - kubernetes_configure_service_cidr is defined
+      - kubernetes_configure_service_cidr | length > 0
+      - kubernetes_configure_cluster_dns is defined
+      - kubernetes_configure_cluster_dns | length > 0
+      - kubernetes_configure_server_token is defined
+      - kubernetes_configure_server_token | length > 0
+    fail_msg: |
+      Missing required Kubernetes configuration variables.
+      Required:
+        - kubernetes_cluster_name
+        - kubernetes_environment
+        - kubernetes_configure_cluster_cidr
+        - kubernetes_configure_service_cidr
+        - kubernetes_configure_cluster_dns
+        - kubernetes_configure_server_token
+  tags:
+    - kubernetes
+    - configure
+    - validate
+
+# -----------------------------------------------------------------------------
+# Display node configuration summary
+# -----------------------------------------------------------------------------
+
+- name: Display node configuration summary
+  ansible.builtin.debug:
+    msg: |
+      ========================================================
+      Kubernetes Node Configuration
+      ========================================================
+      Host: {{ inventory_hostname }}
+      Address: {{ ansible_host | default(inventory_hostname) }}
+      Cluster: {{ kubernetes_cluster_name }}
+      Environment: {{ kubernetes_environment }}
+      Role: {{ kubernetes_configure_node_role_resolved }}
+      First Master: {{ kubernetes_configure_first_master_host }}
+      Is First Master: {{ kubernetes_configure_is_first_master }}
+      Distribution: {{ kubernetes_configure_distribution }}
+      Version: {{ kubernetes_configure_version | default('channel default') }}
+      Channel: {{ kubernetes_configure_channel }}
+      Pod CIDR: {{ kubernetes_configure_cluster_cidr }}
+      Service CIDR: {{ kubernetes_configure_service_cidr }}
+      Cluster DNS: {{ kubernetes_configure_cluster_dns }}
+      Server URL: {{ kubernetes_configure_server_url }}
+      ========================================================
+  tags:
+    - kubernetes
+    - configure
+    - summary
+
+# -----------------------------------------------------------------------------
+# Prepare node OS
+# -----------------------------------------------------------------------------
+
+- name: Prepare node for Kubernetes
+  ansible.builtin.import_tasks: prepare-node.yaml
+  tags:
+    - kubernetes
+    - prepare
+
+# -----------------------------------------------------------------------------
+# Install Kubernetes (RKE2)
+# -----------------------------------------------------------------------------
+
+- name: Install Kubernetes using lablabs.rke2
+  ansible.builtin.import_tasks: install.yaml
+  tags:
+    - kubernetes
+    - install
+    - rke2
+
+# -----------------------------------------------------------------------------
+# Wait for API server (masters only)
+# -----------------------------------------------------------------------------
+
+- name: Wait for Kubernetes API to become reachable
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host | default(inventory_hostname) }}"
+    port: "{{ kubernetes_configure_kubernetes_api_port }}"
+    delay: 10
+    timeout: "{{ kubernetes_configure_wait_for_api_timeout }}"
+    state: started
+  when: kubernetes_configure_is_master
+  tags:
+    - kubernetes
+    - wait
+    - api
+
+# -----------------------------------------------------------------------------
+# Wait for kubeconfig (masters only)
+# -----------------------------------------------------------------------------
+
+- name: Wait for kubeconfig file on master
+  ansible.builtin.wait_for:
+    path: "{{ kubernetes_configure_kubeconfig_path }}"
+    timeout: "{{ kubernetes_configure_wait_for_kubeconfig_timeout }}"
+    state: present
+  when: kubernetes_configure_is_master
+  tags:
+    - kubernetes
+    - wait
+    - kubeconfig
+
+# -----------------------------------------------------------------------------
+# Save kubeconfig locally (first master only)
+# -----------------------------------------------------------------------------
+
+- name: Save kubeconfig locally
+  ansible.builtin.import_tasks: save-kubeconfig.yaml
+  when:
+    - kubernetes_configure_is_master
+    - kubernetes_configure_is_first_master
+    - kubernetes_configure_save_kubeconfig | bool
+  tags:
+    - kubernetes
+    - kubeconfig
+    - save
+
+# -----------------------------------------------------------------------------
+# Configure Vault Kubernetes secrets engine (first master only)
+# -----------------------------------------------------------------------------
+
+- name: Configure Vault Kubernetes secrets engine
+  ansible.builtin.import_tasks: add-config-to-vault.yaml
+  tags:
+    - kubernetes
+    - vault
+    - configure
+
+# -----------------------------------------------------------------------------
+# Validate cluster readiness (first master only)
+# -----------------------------------------------------------------------------
+
+- name: Wait for local node to appear in cluster
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig
+      - "{{ kubernetes_configure_kubeconfig_path }}"
+      - get
+      - node
+      - "{{ ansible_hostname }}"
+  register: kubernetes_local_node_check
+  changed_when: false
+  retries: "{{ kubernetes_configure_wait_for_ready_retries }}"
+  delay: "{{ kubernetes_configure_wait_for_ready_delay }}"
+  until: kubernetes_local_node_check.rc == 0
+  when:
+    - kubernetes_configure_is_master
+    - kubernetes_configure_is_first_master
+    - kubernetes_configure_validate_cluster | bool
+  tags:
+    - kubernetes
+    - validate
+    - cluster
+
+- name: Wait for cluster nodes to report Ready
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig
+      - "{{ kubernetes_configure_kubeconfig_path }}"
+      - get
+      - nodes
+      - -o
+      - wide
+  register: kubernetes_nodes_output
+  changed_when: false
+  retries: "{{ kubernetes_configure_wait_for_ready_retries }}"
+  delay: "{{ kubernetes_configure_wait_for_ready_delay }}"
+  until: kubernetes_nodes_output.rc == 0
+  when:
+    - kubernetes_configure_is_master
+    - kubernetes_configure_is_first_master
+    - kubernetes_configure_validate_cluster | bool
+  tags:
+    - kubernetes
+    - validate
+    - cluster
+
+- name: Display cluster node status
+  ansible.builtin.debug:
+    var: kubernetes_nodes_output.stdout_lines
+  when:
+    - kubernetes_configure_is_master
+    - kubernetes_configure_is_first_master
+    - kubernetes_configure_validate_cluster | bool
+    - kubernetes_nodes_output is defined
+  tags:
+    - kubernetes
+    - validate
+    - cluster
+
+# -----------------------------------------------------------------------------
+# Final success message
+# -----------------------------------------------------------------------------
+
+- name: Kubernetes node configuration complete
+  ansible.builtin.debug:
+    msg: |
+      ========================================================
+      Kubernetes Configuration Complete
+      ========================================================
+      Host: {{ inventory_hostname }}
+      Address: {{ ansible_host | default(inventory_hostname) }}
+      Role: {{ kubernetes_configure_node_role_resolved }}
+      Cluster: {{ kubernetes_cluster_name }}
+      Environment: {{ kubernetes_environment }}
+      Kubeconfig Saved: {{
+        (kubernetes_configure_is_master and kubernetes_configure_is_first_master and (kubernetes_configure_save_kubeconfig | bool))
+      }}
+      Vault Configured: {{
+        (kubernetes_configure_is_master and kubernetes_configure_is_first_master and (kubernetes_configure_add_vault_config | default(false) | bool))
+      }}
+      ========================================================
+  tags:
+    - kubernetes
+    - summary

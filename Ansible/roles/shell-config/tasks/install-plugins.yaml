@@ -15,13 +15,15 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0755"
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   loop_control:
     label: "{{ item.name }}"
   when:
     - shell_install_oh_my_zsh | bool
     - plugins is defined
     - plugins | length > 0
+    - item.shell is defined
+    - item.shell.endswith('zsh')
     - not (zsh_skip_for_system_users | default(true) and item.shell == '/usr/sbin/nologin')
 
 - name: Install Zsh plugins for user
@@ -33,7 +35,7 @@
     version: "{{ item.1.version | default('HEAD') }}"
     update: false
     depth: 1
-  loop: "{{ shell_config_users | product(plugins) | list }}"
+  loop: "{{ shell__resolved_users | product(plugins) | list }}"
   loop_control:
     label: "{{ item.0.name }} -> {{ item.1.name }}"
   when:
@@ -42,4 +44,6 @@
     - plugins | length > 0
     - item.1.name is defined
     - item.1.repo is defined
+    - item.0.shell is defined
+    - item.0.shell.endswith('zsh')
     - not (zsh_skip_for_system_users | default(true) and item.0.shell == '/usr/sbin/nologin')

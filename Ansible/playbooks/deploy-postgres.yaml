@@ -2,6 +2,10 @@
 # =============================================================================
 # PostgreSQL Deployment and Configuration Playbook
 # =============================================================================
+# Purpose:
+#   - Deploy PostgreSQL VMs using the shared Proxmox VM Terraform module
+#   - Configure the PostgreSQL HA stack on the provisioned nodes
+# =============================================================================
 
 - name: Deploy PostgreSQL VMs via Terraform
   hosts: localhost
@@ -36,7 +40,9 @@
       tags: ["always"]
 
   roles:
-    - role: postgres-deploy
+    - role: postgres
+      vars:
+        postgres_role_phases: ["deploy"]
       tags: ["deploy", "terraform"]
 
 - name: Configure PostgreSQL HA stack on postgres nodes
@@ -47,6 +53,12 @@
     - ../group_vars/all/packages.yaml
     - ../group_vars/all/zsh.yaml
     - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+
+  vars:
+    packages_role_groups:
+      - production
+      - shell
 
   pre_tasks:
     - name: Load PostgreSQL shared variables
@@ -88,5 +100,7 @@
     - role: ssh
       tags: ["configure", "sshd"]
 
-    - role: postgres-setup-configure
+    - role: postgres
+      vars:
+        postgres_role_phases: ["configure"]
       tags: ["configure", "ha"]

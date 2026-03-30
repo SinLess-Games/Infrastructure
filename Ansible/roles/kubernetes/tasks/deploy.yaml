@@ -1,0 +1,710 @@
+---
+# =============================================================================
+# Kubernetes Deployment Role - Main Tasks
+# =============================================================================
+# Purpose:
+#   - Validate Kubernetes deployment prerequisites
+#   - Parse Proxmox API credentials for Terraform
+#   - Generate Terraform configuration for master and worker VMs
+#   - Render cloud-init snippets on target Proxmox nodes
+#   - Run Terraform init / plan / apply (or destroy / plan-only)
+#   - Start provisioned VMs in a data-driven way
+#   - Wait for nodes to become reachable over SSH
+#
+# Notes:
+#   - This role provisions infrastructure only
+#   - Kubernetes bootstrap/configuration is handled by kubernetes configure phases
+#   - Secrets are expected to be loaded by the calling play before this role runs
+#   - VM provisioning now uses the shared proxmox-vm-cluster Terraform module
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Preflight
+# -----------------------------------------------------------------------------
+
+- name: Set deployment runtime defaults
+  ansible.builtin.set_fact:
+    kubernetes_deploy_search_domain: "{{ kubernetes_deploy_search_domain | default(kubernetes_deploy_environment ~ '.sinlessgames.local') }}"
+    kubernetes_deploy_storage_pool: "{{ kubernetes_deploy_storage_pool | default(kubernetes_storage | default('VM_Disks')) }}"
+    kubernetes_deploy_cloudinit_cleanup_delegate_node: "{{ (groups['pve_ceph'] | default(['pve-01']))[0] }}"
+    kubernetes_deploy_tf_env_name: "{{ kubernetes_deploy_environment | regex_replace('[^A-Za-z0-9_]', '_') }}"
+    kubernetes_deploy_tf_master_module_name: "{{ 'kubernetes_' ~ (kubernetes_deploy_environment | regex_replace('[^A-Za-z0-9_]', '_')) ~ '_master' }}"
+    kubernetes_deploy_tf_worker_module_name: "{{ 'kubernetes_' ~ (kubernetes_deploy_environment | regex_replace('[^A-Za-z0-9_]', '_')) ~ '_worker' }}"
+    kubernetes_deploy_use_terraform_targeting: "{{ kubernetes_deploy_use_terraform_targeting | default(true) | bool }}"
+    kubernetes_deploy_terraform_env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_proxmox_api_url: "{{ kubernetes_deploy_proxmox_api_url }}"
+      TF_VAR_proxmox_api_token_id: "{{ kubernetes_proxmox_api_token_id | default('') }}"
+      TF_VAR_proxmox_api_token_secret: "{{ kubernetes_proxmox_api_token_secret | default('') }}"
+      TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | ternary('true', 'false') }}"
+      TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
+  tags:
+    - kubernetes
+    - deploy
+    - preflight
+
+- name: Display Kubernetes deployment information
+  ansible.builtin.debug:
+    msg: |
+      ========================================================
+      Kubernetes Deployment Configuration
+      ========================================================
+      Cluster Name: {{ kubernetes_deploy_cluster_name }}
+      Environment: {{ kubernetes_deploy_environment }}
+      RKE2 Version: {{ kubernetes_deploy_rke2_version | default('channel default / managed later') }}
+
+      Master Nodes:
+        Count: {{ kubernetes_deploy_master_count }}
+        Target Nodes: {{ kubernetes_deploy_master_target_nodes | join(', ') }}
+        IPs: {{ kubernetes_deploy_master_ip_addresses | join(', ') }}
+        Resources: {{ kubernetes_deploy_master_cpu_cores }}vCPU, {{ (kubernetes_deploy_master_memory_mb | int / 1024) | round(1) }}GB RAM
+        Template: {{ kubernetes_deploy_master_clone_template }}
+
+      Worker Nodes:
+        Count: {{ kubernetes_deploy_worker_count }}
+        Target Nodes: {{ kubernetes_deploy_worker_target_nodes | join(', ') }}
+        IPs: {{ kubernetes_deploy_worker_ip_addresses | join(', ') }}
+        Resources: {{ kubernetes_deploy_worker_cpu_cores }}vCPU, {{ (kubernetes_deploy_worker_memory_mb | int / 1024) | round(1) }}GB RAM
+        Template: {{ kubernetes_deploy_worker_clone_template }}
+
+      Network:
+        Bridge: {{ kubernetes_deploy_network_bridge }}
+        VLAN: {{ kubernetes_deploy_network_vlan_id }}
+        Gateway: {{ kubernetes_deploy_master_gateway }}
+        Nameservers: {{ kubernetes_deploy_network_nameservers }}
+        Search Domain: {{ kubernetes_deploy_search_domain }}
+
+      Kubernetes Network:
+        Pod CIDR: {{ kubernetes_deploy_cluster_cidr }}
+        Service CIDR: {{ kubernetes_deploy_service_cidr }}
+        Cluster DNS: {{ kubernetes_deploy_cluster_dns }}
+
+      Terraform Mode:
+        Plan Only: {{ kubernetes_plan_only | default(false) | bool }}
+        Destroy: {{ kubernetes_destroy | default(false) | bool }}
+        Force Apply: {{ kubernetes_force_apply | default(false) | bool }}
+        Use Targeting: {{ kubernetes_deploy_use_terraform_targeting }}
+        Target Modules: module.{{ kubernetes_deploy_tf_master_module_name }}, module.{{ kubernetes_deploy_tf_worker_module_name }}
+      ========================================================
+  tags:
+    - kubernetes
+    - deploy
+    - preflight
+
+- name: Validate Kubernetes deployment prerequisites
+  ansible.builtin.assert:
+    that:
+      - kubernetes_deploy_cluster_name is defined
+      - kubernetes_deploy_environment is defined
+      - kubernetes_deploy_repo_root is defined
+      - kubernetes_deploy_terraform_dir is defined
+      - kubernetes_deploy_master_count | int >= 1
+      - kubernetes_deploy_master_ip_addresses | length == kubernetes_deploy_master_count | int
+      - kubernetes_deploy_worker_count | int >= 1
+      - kubernetes_deploy_worker_ip_addresses | length == kubernetes_deploy_worker_count | int
+      - kubernetes_deploy_master_target_nodes | length >= 1
+      - kubernetes_deploy_worker_target_nodes | length >= 1
+      - kubernetes_deploy_network_bridge is defined
+      - kubernetes_deploy_network_vlan_id is defined
+      - kubernetes_deploy_master_gateway is defined
+      - kubernetes_deploy_cluster_cidr is defined
+      - kubernetes_deploy_service_cidr is defined
+      - kubernetes_deploy_cluster_dns is defined
+      - kubernetes_deploy_proxmox_api_url is defined
+      - kubernetes_deploy_proxmox_api_token_file is defined
+      - kubernetes_deploy_rke2_server_token is defined
+      - kubernetes_deploy_rke2_server_token | length > 0
+      - kubernetes_deploy_ssh_keys is defined
+      - kubernetes_deploy_ssh_keys | length >= 1
+      - kubernetes_deploy_search_domain is defined
+      # NOTE: SSH keys validation temporarily disabled pending Vault policy update
+      # to allow ansible token to read kubernetes/* paths.
+      # The policy has been updated in Ansible/group_vars/vault/policies.yaml
+      # but needs to be deployed to the live Vault instance.
+      # - kubernetes_deploy_ssh_keys | length >= 1
+      - kubernetes_deploy_search_domain | length > 0
+    fail_msg: |
+      Kubernetes deployment validation failed.
+      Verify:
+        - master and worker counts/IPs align
+        - target Proxmox nodes are defined
+        - network settings are set
+        - Terraform / Proxmox settings exist
+        - RKE2 bootstrap token is loaded
+        - at least one SSH public key is available
+        - search domain is defined
+  tags:
+    - kubernetes
+    - deploy
+    - preflight
+
+- name: Build node deployment metadata
+  ansible.builtin.set_fact:
+    kubernetes_deploy_master_nodes_resolved: >-
+      {%- set result = [] -%}
+      {%- for idx in range(kubernetes_deploy_master_count | int) -%}
+      {%- set _ = result.append({
+        'index': idx,
+        'name': 'k8s-' ~ kubernetes_deploy_environment ~ '-master-' ~ '%02d' | format(idx + 1),
+        'vmid': (kubernetes_deploy_master_vm_id_start | int) + idx,
+        'ip': kubernetes_deploy_master_ip_addresses[idx],
+        'target_node': kubernetes_deploy_master_target_nodes[idx % (kubernetes_deploy_master_target_nodes | length)]
+      }) -%}
+      {%- endfor -%}
+      {{ result }}
+    kubernetes_deploy_worker_nodes_resolved: >-
+      {%- set result = [] -%}
+      {%- for idx in range(kubernetes_deploy_worker_count | int) -%}
+      {%- set _ = result.append({
+        'index': idx,
+        'name': 'k8s-' ~ kubernetes_deploy_environment ~ '-worker-' ~ '%02d' | format(idx + 1),
+        'vmid': (kubernetes_deploy_worker_vm_id_start | int) + idx,
+        'ip': kubernetes_deploy_worker_ip_addresses[idx],
+        'target_node': kubernetes_deploy_worker_target_nodes[idx % (kubernetes_deploy_worker_target_nodes | length)]
+      }) -%}
+      {%- endfor -%}
+      {{ result }}
+  tags:
+    - kubernetes
+    - deploy
+    - preflight
+
+- name: Verify Proxmox API token file exists
+  ansible.builtin.stat:
+    path: "{{ kubernetes_deploy_repo_root }}/{{ kubernetes_deploy_proxmox_api_token_file }}"
+  register: proxmox_token_file_stat
+  failed_when: not proxmox_token_file_stat.stat.exists
+  no_log: true
+  tags:
+    - kubernetes
+    - deploy
+    - preflight
+
+# -----------------------------------------------------------------------------
+# Proxmox API credentials
+# -----------------------------------------------------------------------------
+
+- name: Read Proxmox API token file for Terraform
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_deploy_repo_root }}/{{ kubernetes_deploy_proxmox_api_token_file }}"
+  register: kubernetes_proxmox_token_file
+  no_log: true
+  tags:
+    - kubernetes
+    - deploy
+    - secrets
+
+- name: Parse Proxmox API token file content
+  ansible.builtin.set_fact:
+    kubernetes_proxmox_token_text: "{{ kubernetes_proxmox_token_file.content | b64decode | string }}"
+  no_log: true
+  tags:
+    - kubernetes
+    - deploy
+    - secrets
+
+- name: Extract Proxmox API token ID and secret
+  ansible.builtin.set_fact:
+    kubernetes_proxmox_api_token_id: >-
+      {{
+        (kubernetes_proxmox_token_text | regex_findall('(?m)^FULL_TOKENID=([^\\n]+)'))
+        | first
+        | default('')
+      }}
+    kubernetes_proxmox_api_token_secret: >-
+      {{
+        (kubernetes_proxmox_token_text | regex_findall('(?m)^TOKEN_SECRET=([^\\n]+)'))
+        | first
+        | default('')
+      }}
+  no_log: true
+  tags:
+    - kubernetes
+    - deploy
+    - secrets
+
+- name: Verify Proxmox API credentials were parsed
+  ansible.builtin.assert:
+    that:
+      - kubernetes_proxmox_api_token_id | length > 0
+      - kubernetes_proxmox_api_token_secret | length > 0
+    fail_msg: "Failed to parse Proxmox API token ID or secret from token file."
+  tags:
+    - kubernetes
+    - deploy
+    - secrets
+
+- name: Refresh Terraform environment with parsed Proxmox credentials
+  ansible.builtin.set_fact:
+    kubernetes_deploy_terraform_env:
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_proxmox_api_url: "{{ kubernetes_deploy_proxmox_api_url }}"
+      TF_VAR_proxmox_api_token_id: "{{ kubernetes_proxmox_api_token_id }}"
+      TF_VAR_proxmox_api_token_secret: "{{ kubernetes_proxmox_api_token_secret }}"
+      TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | ternary('true', 'false') }}"
+      TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
+  no_log: true
+  tags:
+    - kubernetes
+    - deploy
+    - secrets
+
+# -----------------------------------------------------------------------------
+# Terraform + snippets preparation
+# -----------------------------------------------------------------------------
+
+- name: Ensure Terraform directory exists
+  ansible.builtin.file:
+    path: "{{ kubernetes_deploy_terraform_dir }}"
+    state: directory
+    mode: "0755"
+  tags:
+    - kubernetes
+    - deploy
+    - terraform
+
+- name: Generate Kubernetes cluster Terraform configuration
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/kubernetes/k8s-dev-cluster.tf.j2"
+    dest: "{{ kubernetes_deploy_terraform_dir }}/k8s-{{ kubernetes_deploy_environment }}-cluster.tf"
+    mode: "0644"
+  tags:
+    - kubernetes
+    - deploy
+    - terraform
+
+- name: Display Kubernetes deployment SSH key summary
+  ansible.builtin.debug:
+    msg: |
+      ========================================================
+      SSH Key Configuration
+      ========================================================
+      SSH Keys Loaded: {{ kubernetes_deploy_ssh_keys | length }}
+      {% for key in kubernetes_deploy_ssh_keys %}
+        - {{ key | regex_replace('(.{42}).*(.{18})', '\1...\2') }}
+      {% endfor %}
+      Default User: {{ kubernetes_default_user | default('sinless777') }}
+      Authentication: SSH public key
+      ========================================================
+  tags:
+    - kubernetes
+    - deploy
+    - ssh
+
+- name: Ensure Proxmox snippets directory exists on master target nodes
+  ansible.builtin.file:
+    path: /var/lib/vz/snippets
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ item }}"
+  loop: "{{ kubernetes_deploy_master_target_nodes | unique | list }}"
+  loop_control:
+    label: "{{ item }}"
+  tags:
+    - kubernetes
+    - deploy
+    - cloud-init
+
+- name: Ensure Proxmox snippets directory exists on worker target nodes
+  ansible.builtin.file:
+    path: /var/lib/vz/snippets
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ item }}"
+  loop: "{{ kubernetes_deploy_worker_target_nodes | unique | list }}"
+  loop_control:
+    label: "{{ item }}"
+  tags:
+    - kubernetes
+    - deploy
+    - cloud-init
+
+- name: Create cloud-init snippets for master nodes on target Proxmox nodes
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/kubernetes/cloud-init-master.yaml.j2"
+    dest: "/var/lib/vz/snippets/{{ item.name }}-cloud-init.yaml"
+    mode: "0644"
+  vars:
+    node_index: "{{ item.index }}"
+  loop: "{{ kubernetes_deploy_master_nodes_resolved }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.target_node }}"
+  delegate_to: "{{ item.target_node }}"
+  tags:
+    - kubernetes
+    - deploy
+    - cloud-init
+
+- name: Create cloud-init snippets for worker nodes on target Proxmox nodes
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/kubernetes/cloud-init-worker.yaml.j2"
+    dest: "/var/lib/vz/snippets/{{ item.name }}-cloud-init.yaml"
+    mode: "0644"
+  vars:
+    node_index: "{{ item.index }}"
+  loop: "{{ kubernetes_deploy_worker_nodes_resolved }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.target_node }}"
+  delegate_to: "{{ item.target_node }}"
+  tags:
+    - kubernetes
+    - deploy
+    - cloud-init
+
+# -----------------------------------------------------------------------------
+# Terraform execution
+# -----------------------------------------------------------------------------
+
+- name: Initialize Terraform for Kubernetes deployment
+  ansible.builtin.command:
+    argv:
+      - terraform
+      - init
+      - -input=false
+      - -reconfigure
+  args:
+    chdir: "{{ kubernetes_deploy_terraform_dir }}"
+  environment: "{{ kubernetes_deploy_terraform_env }}"
+  register: terraform_init
+  changed_when: >
+    'Terraform has been successfully initialized' in terraform_init.stdout
+    or 'Terraform has been successfully configured' in terraform_init.stdout
+  retries: 3
+  delay: 5
+  tags:
+    - kubernetes
+    - deploy
+    - terraform
+
+- name: Plan Terraform deployment for Kubernetes cluster
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['terraform', 'plan', '-input=false']
+        + (
+          [
+            '-target=module.' ~ kubernetes_deploy_tf_master_module_name,
+            '-target=module.' ~ kubernetes_deploy_tf_worker_module_name
+          ]
+          if kubernetes_deploy_use_terraform_targeting else []
+        )
+      }}
+  args:
+    chdir: "{{ kubernetes_deploy_terraform_dir }}"
+  environment: "{{ kubernetes_deploy_terraform_env }}"
+  register: terraform_plan
+  changed_when: false
+  tags:
+    - kubernetes
+    - deploy
+    - terraform
+
+- name: Display Terraform plan summary
+  ansible.builtin.debug:
+    msg: |
+      ========================================================
+      Terraform Plan Completed
+      ========================================================
+      {{ terraform_plan.stdout | default('No stdout returned by terraform plan.') }}
+      ========================================================
+  when: kubernetes_plan_only | default(false) | bool
+  tags:
+    - kubernetes
+    - deploy
+    - terraform
+
+- name: Check whether desired Proxmox VMs exist on their target nodes
+  ansible.builtin.command:
+    argv:
+      - qm
+      - status
+      - "{{ item.vmid }}"
+  delegate_to: "{{ item.target_node }}"
+  loop: "{{ kubernetes_deploy_master_nodes_resolved + kubernetes_deploy_worker_nodes_resolved }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.vmid }}) on {{ item.target_node }}"
+  register: kubernetes_deploy_target_vm_status
+  failed_when: false
+  changed_when: false
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+  tags:
+    - kubernetes
+    - deploy
+    - terraform
+    - cleanup
+
+- name: Remove orphaned cloud-init volumes for absent Proxmox VMs
+  ansible.builtin.shell: |
+    set -o errexit
+    set -o nounset
+    set -o pipefail
+
+    storage_pool="{{ kubernetes_deploy_storage_pool }}"
+    vmid="{{ item.item.vmid }}"
+    image_name="vm-${vmid}-cloudinit"
+
+    if rbd info "${storage_pool}/${image_name}" >/dev/null 2>&1; then
+      rbd rm "${storage_pool}/${image_name}" >/dev/null
+      echo "removed-orphan-cloudinit:${vmid}"
+      exit 0
+    fi
+
+    echo "no-orphan-cloudinit:${vmid}"
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ kubernetes_deploy_cloudinit_cleanup_delegate_node }}"
+  loop: "{{ kubernetes_deploy_target_vm_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }} ({{ item.item.vmid }}) via {{ kubernetes_deploy_cloudinit_cleanup_delegate_node }}"
+  register: kubernetes_deploy_orphan_cloudinit_cleanup
+  changed_when: "'removed-orphan-cloudinit:' in (kubernetes_deploy_orphan_cloudinit_cleanup.stdout | default(''))"
+  retries: 6
+  delay: 10
+  until: kubernetes_deploy_orphan_cloudinit_cleanup.rc == 0
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+    - item.rc != 0
+  tags:
+    - kubernetes
+    - deploy
+    - terraform
+    - cleanup
+
+- name: Apply Terraform configuration for Kubernetes cluster
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['terraform', 'apply', '-auto-approve', '-input=false']
+        + (
+          [
+            '-target=module.' ~ kubernetes_deploy_tf_master_module_name,
+            '-target=module.' ~ kubernetes_deploy_tf_worker_module_name
+          ]
+          if kubernetes_deploy_use_terraform_targeting else []
+        )
+      }}
+  args:
+    chdir: "{{ kubernetes_deploy_terraform_dir }}"
+  environment: "{{ kubernetes_deploy_terraform_env }}"
+  register: terraform_apply
+  changed_when: >
+    terraform_apply.stdout is defined and
+    ('Apply complete!' in terraform_apply.stdout or 'Apply complete' in terraform_apply.stdout)
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+  tags:
+    - kubernetes
+    - deploy
+    - terraform
+
+- name: Destroy Terraform configuration for Kubernetes cluster
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['terraform', 'destroy', '-auto-approve', '-input=false']
+        + (
+          [
+            '-target=module.' ~ kubernetes_deploy_tf_master_module_name,
+            '-target=module.' ~ kubernetes_deploy_tf_worker_module_name
+          ]
+          if kubernetes_deploy_use_terraform_targeting else []
+        )
+      }}
+  args:
+    chdir: "{{ kubernetes_deploy_terraform_dir }}"
+  environment: "{{ kubernetes_deploy_terraform_env }}"
+  register: terraform_destroy
+  changed_when: >
+    terraform_destroy.stdout is defined and
+    ('Destroy complete!' in terraform_destroy.stdout or 'Destroy complete' in terraform_destroy.stdout)
+  when: kubernetes_destroy | default(false) | bool
+  tags:
+    - kubernetes
+    - deploy
+    - terraform
+
+# -----------------------------------------------------------------------------
+# VM startup
+# -----------------------------------------------------------------------------
+
+- name: Start Kubernetes master VMs
+  ansible.builtin.command:
+    argv:
+      - qm
+      - start
+      - "{{ item.vmid }}"
+  delegate_to: "{{ item.target_node }}"
+  loop: "{{ kubernetes_deploy_master_nodes_resolved }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.vmid }}) on {{ item.target_node }}"
+  register: start_master_vms
+  failed_when: false
+  changed_when: >
+    (start_master_vms.rc | default(0)) == 0 and
+    (
+      'started' in (start_master_vms.stdout | default('') | lower)
+      or (start_master_vms.stderr | default('') | lower) == ''
+    )
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+  tags:
+    - kubernetes
+    - deploy
+    - start
+
+- name: Start Kubernetes worker VMs
+  ansible.builtin.command:
+    argv:
+      - qm
+      - start
+      - "{{ item.vmid }}"
+  delegate_to: "{{ item.target_node }}"
+  loop: "{{ kubernetes_deploy_worker_nodes_resolved }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.vmid }}) on {{ item.target_node }}"
+  register: start_worker_vms
+  failed_when: false
+  changed_when: >
+    (start_worker_vms.rc | default(0)) == 0 and
+    (
+      'started' in (start_worker_vms.stdout | default('') | lower)
+      or (start_worker_vms.stderr | default('') | lower) == ''
+    )
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+  tags:
+    - kubernetes
+    - deploy
+    - start
+
+- name: Pause briefly after VM start
+  ansible.builtin.pause:
+    seconds: 30
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+  tags:
+    - kubernetes
+    - deploy
+    - start
+
+# -----------------------------------------------------------------------------
+# Connectivity checks
+# -----------------------------------------------------------------------------
+
+- name: Wait for SSH connectivity on master nodes
+  ansible.builtin.wait_for:
+    host: "{{ item.ip }}"
+    port: 22
+    delay: 10
+    timeout: "{{ kubernetes_deploy_wait_for_ssh_timeout | default(600) }}"
+    state: present
+  loop: "{{ kubernetes_deploy_master_nodes_resolved }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.ip }}"
+  register: master_ssh_check
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+  tags:
+    - kubernetes
+    - deploy
+    - wait
+
+- name: Wait for SSH connectivity on worker nodes
+  ansible.builtin.wait_for:
+    host: "{{ item.ip }}"
+    port: 22
+    delay: 10
+    timeout: "{{ kubernetes_deploy_wait_for_ssh_timeout | default(600) }}"
+    state: present
+  loop: "{{ kubernetes_deploy_worker_nodes_resolved }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.ip }}"
+  register: worker_ssh_check
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+  tags:
+    - kubernetes
+    - deploy
+    - wait
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Display Kubernetes cluster deployment summary
+  ansible.builtin.debug:
+    msg: |
+      ========================================================
+      Kubernetes VM Deployment Complete
+      ========================================================
+
+      Master Nodes:
+      {% for node in kubernetes_deploy_master_nodes_resolved %}
+        - {{ node.name }} | {{ node.ip }} | target={{ node.target_node }} | ssh={{ master_ssh_check.results[loop.index0].state | default('unknown') }}
+      {% endfor %}
+
+      Worker Nodes:
+      {% for node in kubernetes_deploy_worker_nodes_resolved %}
+        - {{ node.name }} | {{ node.ip }} | target={{ node.target_node }} | ssh={{ worker_ssh_check.results[loop.index0].state | default('unknown') }}
+      {% endfor %}
+
+      Cluster Configuration:
+        Cluster Name: {{ kubernetes_deploy_cluster_name }}
+        Environment: {{ kubernetes_deploy_environment }}
+        RKE2 Version: {{ kubernetes_deploy_rke2_version | default('channel default / managed later') }}
+        Pod CIDR: {{ kubernetes_deploy_cluster_cidr }}
+        Service CIDR: {{ kubernetes_deploy_service_cidr }}
+        Cluster DNS: {{ kubernetes_deploy_cluster_dns }}
+        Search Domain: {{ kubernetes_deploy_search_domain }}
+
+      Next Steps:
+        1. Run kubernetes-configure against master nodes
+        2. Bootstrap RKE2 on the first master node
+        3. Join remaining masters and worker nodes
+        4. Save kubeconfig locally
+        5. Deploy cluster add-ons and GitOps components
+      ========================================================
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+    - master_ssh_check is defined
+    - worker_ssh_check is defined
+  tags:
+    - kubernetes
+    - deploy
+    - summary
+
+- name: Display SSH access instructions
+  ansible.builtin.debug:
+    msg: |
+      ========================================================
+      SSH Access Instructions
+      ========================================================
+      Default User: {{ kubernetes_default_user | default('sinless777') }}
+
+      Masters:
+      {% for node in kubernetes_deploy_master_nodes_resolved %}
+        ssh -i ~/.ssh/id_ed25519 {{ kubernetes_default_user | default('sinless777') }}@{{ node.ip }}
+      {% endfor %}
+
+      Workers:
+      {% for node in kubernetes_deploy_worker_nodes_resolved %}
+        ssh -i ~/.ssh/id_ed25519 {{ kubernetes_default_user | default('sinless777') }}@{{ node.ip }}
+      {% endfor %}
+      ========================================================
+  when:
+    - not (kubernetes_plan_only | default(false) | bool)
+    - not (kubernetes_destroy | default(false) | bool)
+  tags:
+    - kubernetes
+    - deploy
+    - summary

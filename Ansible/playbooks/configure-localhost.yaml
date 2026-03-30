@@ -19,12 +19,22 @@
     - ../group_vars/all/packages.yaml
     - ../group_vars/all/ssh.yaml
 
+  vars:
+    infrastructure_repo_root: "{{ playbook_dir | dirname | dirname }}"
+    packages_install_homebrew: true
+    packages_role_brew_packages: "{{ shell_brew_packages }}"
+
+  pre_tasks:
+    - name: Ensure repo root .env exists for local Terraform secrets
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/env/root.env.j2"
+        dest: "{{ infrastructure_repo_root }}/.env"
+        owner: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
+        group: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
+        mode: "0600"
+
   roles:
     - users
     - ssh
     - shell-config
     - packages
-
-  tasks:
-    - name: Ensure SSH host keys are present in inventory
-      import_tasks: ../tasks/ssh-hostkeys.yaml

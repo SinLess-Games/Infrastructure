@@ -1,0 +1,12 @@
+---
+# =============================================================================
+# Kubernetes Production Cluster Variables - Worker Nodes
+# =============================================================================
+
+kubernetes_rke2_cluster_group_name: "kubernetes_prod"
+kubernetes_rke2_servers_group_name: "kubernetes_prod_control_plane"
+kubernetes_rke2_agents_group_name: "kubernetes_prod_workers"
+
+kubernetes_rke2_agent_node_labels:
+  - "node-role.kubernetes.io/worker=true"
+  - "topology.kubernetes.io/environment=prod"

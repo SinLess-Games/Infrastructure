@@ -1,0 +1,46 @@
+---
+# =============================================================================
+# Technitium DNS – Main Role Entrypoint
+# -----------------------------------------------------------------------------
+# This task list orchestrates:
+#   * OS preparation
+#   * Technitium installation
+#   * Waiting for API to be ready
+#   * Password detection (stores in technitium_actual_password fact)
+#   * DNS server settings (forwarders, block lists, recursion ACLs)
+#   * Zone creation (on primary or standalone)
+#   * Records creation (A, AAAA, CNAME, TXT - on primary or standalone)
+#   * Cluster initialization and join (if enabled)
+#   * Reverse zones / PTR records
+#   * Firewall setup
+# =============================================================================
+
+- import_tasks: os.yaml
+- import_tasks: install.yaml
+- import_tasks: wait_for_api.yaml
+- import_tasks: init_admin.yaml
+- import_tasks: server_settings.yaml
+
+- import_tasks: zones.yaml
+  when: not (technitium_cluster_enabled | default(false) | bool)
+        or inventory_hostname == technitium_cluster_primary_host
+
+- import_tasks: records.yaml
+  when: not (technitium_cluster_enabled | default(false) | bool)
+        or inventory_hostname == technitium_cluster_primary_host
+
+- import_tasks: cluster.yaml
+  when: technitium_cluster_enabled | default(false) | bool
+
+- import_tasks: reverse_zones.yaml
+  when:
+    - technitium_reverse_zones is defined
+    - technitium_reverse_zones | length > 0
+    - not (technitium_cluster_enabled | default(false) | bool)
+      or inventory_hostname == technitium_cluster_primary_host
+
+- import_tasks: block-lists.yaml
+  when: not (technitium_cluster_enabled | default(false) | bool)
+        or inventory_hostname == technitium_cluster_primary_host
+
+- import_tasks: firewall.yaml

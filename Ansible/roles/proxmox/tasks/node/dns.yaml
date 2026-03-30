@@ -1,0 +1,108 @@
+---
+# Configure node-level DNS settings and repair broken resolvers
+
+- name: Build effective DNS resolver list for Proxmox nodes
+  ansible.builtin.set_fact:
+    proxmox_dns_primary_servers: >-
+      {{
+        (proxmox_cluster_dns_servers | default([]))
+        | map('string')
+        | map('trim')
+        | reject('equalto', '')
+        | list
+      }}
+    proxmox_dns_fallback_servers: >-
+      {{
+        (proxmox_cluster_dns_fallback_servers | default([]))
+        | map('string')
+        | map('trim')
+        | reject('equalto', '')
+        | list
+      }}
+
+- name: Build ordered DNS resolver strategy for Proxmox nodes
+  ansible.builtin.set_fact:
+    proxmox_dns_effective_servers: >-
+      {{
+        (
+          (proxmox_dns_primary_servers[0:2])
+          + (proxmox_dns_fallback_servers[0:1])
+          + (proxmox_dns_primary_servers[2:])
+          + (proxmox_dns_fallback_servers[1:])
+        )
+        | unique
+        | list
+      }}
+
+- name: Build resolver limits for Proxmox nodes
+  ansible.builtin.set_fact:
+    proxmox_dns_resolver_max_servers: "{{ proxmox_cluster_dns_resolver_max_servers | default(3) | int }}"
+    proxmox_dns_resolv_servers: >-
+      {{ proxmox_dns_effective_servers[:(proxmox_cluster_dns_resolver_max_servers | default(3) | int)] }}
+    proxmox_dns_effective_search_domains: >-
+      {{
+        ([proxmox_cluster_dns_search_domain] if (proxmox_cluster_dns_search_domain | default('') | length > 0) else [])
+      }}
+
+- name: Repair node resolver configuration with dns-resolver role
+  ansible.builtin.include_role:
+    name: dns-resolver
+  vars:
+    dns_servers: "{{ proxmox_dns_resolv_servers }}"
+    dns_max_nameservers: "{{ proxmox_dns_resolver_max_servers }}"
+    dns_query_timeout: "{{ proxmox_cluster_dns_query_timeout | default(10) | int }}"
+    dns_verify_attempts: "{{ proxmox_cluster_dns_verify_attempts | default(2) | int }}"
+    dns_fail_on_verification: false
+    dns_search_domains: "{{ proxmox_dns_effective_search_domains }}"
+    dns_test_domains:
+      - deb.debian.org
+      - security.debian.org
+      - download.proxmox.com
+    dns_force_reconfigure: true
+  when:
+    - proxmox_cluster_dns_enabled | default(false)
+    - proxmox_dns_resolv_servers | length > 0
+
+- name: Check current node DNS settings in Proxmox
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ inventory_hostname }}/dns"
+      - --output-format
+      - json
+  register: proxmox_dns_current
+  changed_when: false
+  failed_when: false
+
+- name: Build desired Proxmox DNS args
+  ansible.builtin.set_fact:
+    proxmox_dns_args: >-
+      {%- set args = [] -%}
+      {%- for s in proxmox_dns_resolv_servers -%}
+      {%- set _ = args.extend(['-dns' ~ (loop.index), s]) -%}
+      {%- endfor -%}
+      {{ args }}
+
+- name: Apply node DNS settings in Proxmox
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pvesh', 'set', '/nodes/' ~ inventory_hostname ~ '/dns']
+         + ((proxmox_cluster_dns_search_domain | default('') | length > 0)
+            | ternary(['-search', proxmox_cluster_dns_search_domain], []))
+         + (proxmox_dns_args | default([])) }}
+  register: proxmox_dns_set
+  changed_when: proxmox_dns_set.rc == 0
+  failed_when: false
+  when: proxmox_cluster_dns_enabled | default(false)
+
+- name: Report node DNS configuration status
+  ansible.builtin.debug:
+    msg: >-
+      DNS update for {{ inventory_hostname }}:
+      {{
+        'Applied via dns-resolver role and Proxmox API'
+        if (proxmox_dns_set is defined and proxmox_dns_set.rc == 0)
+        else 'Applied via dns-resolver role only or skipped'
+      }}
+  when: proxmox_cluster_dns_enabled | default(false)

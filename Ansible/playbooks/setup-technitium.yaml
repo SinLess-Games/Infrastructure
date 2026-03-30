@@ -3,7 +3,7 @@
 # Playbook: Deploy and Configure Technitium DNS Cluster
 #
 # This playbook:
-#   1. Deploys Technitium VMs using Terraform (localhost)
+#   1. Deploys Technitium VMs using the shared Proxmox VM Terraform module
 #   2. Configures Technitium DNS servers and cluster (dns hosts)
 #
 # It assumes:
@@ -31,13 +31,15 @@
     - ../group_vars/technitium/technitium-vms.yaml
 
   roles:
-    - role: technitium-deploy
+    - role: technitium
+      vars:
+        technitium_role_phases: ["deploy"]
       tags: ["deploy", "terraform"]
 
 - name: "Configure Technitium DNS Appliance"
   hosts: dns
   become: true
-  gather_facts: false
+  gather_facts: true
   timeout: 300
 
   vars:
@@ -46,6 +48,9 @@
     technitium_api_delay: 5
     ansible_timeout: 300
     ansible_connection_timeout: 30
+    packages_role_groups:
+      - production
+      - shell
   
   vars_files:
     - ../group_vars/technitium/cluster.yaml
@@ -58,6 +63,7 @@
     - ../group_vars/all/packages.yaml
     - ../group_vars/all/zsh.yaml
     - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
 
   roles:
     - role: dns-resolver
@@ -76,4 +82,6 @@
       tags: ["configure", "sshd"]
 
     - role: technitium
+      vars:
+        technitium_role_phases: ["configure"]
       tags: ["configure", "cluster"]

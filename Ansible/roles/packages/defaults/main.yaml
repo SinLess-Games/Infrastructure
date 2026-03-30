@@ -6,8 +6,16 @@
 # =============================================================================
 
 packages_enabled_groups:
-  - base
-  - cli
-  - dev
-  - net
-  - system
+  - production
+  - development
+  - shell
+
+packages_role_catalog: "{{ apt_packages | default({}, true) }}"
+packages_role_groups: "{{ packages_enabled_groups | default([], true) }}"
+
+packages_install_homebrew: false
+packages_role_brew_packages: "{{ brew_packages | default([], true) }}"
+
+packages_homebrew_user: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
+packages_homebrew_prefix: /home/linuxbrew/.linuxbrew
+packages_homebrew_bin: "{{ packages_homebrew_prefix }}/bin/brew"

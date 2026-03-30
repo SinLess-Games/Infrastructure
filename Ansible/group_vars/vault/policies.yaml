@@ -10,6 +10,15 @@ vault_user_policies:
       capabilities = ["read", "list"]
     }
 
+    # Read and write to kubernetes secrets for deployment
+    path "secrets/data/kubernetes/*" {
+      capabilities = ["read", "list"]
+    }
+
+    path "secrets/metadata/kubernetes/*" {
+      capabilities = ["read", "list"]
+    }
+
     # Allow listing top-level secrets paths for UI navigation
     path "secrets/metadata/*" {
       capabilities = ["list"]

@@ -4,12 +4,17 @@
 # =============================================================================
 
 - name: Validate package configuration
-  import_tasks: validate.yaml
+  ansible.builtin.import_tasks: validate.yaml
 
 - name: Install packages
-  import_tasks: install.yaml
+  ansible.builtin.import_tasks: install.yaml
 
 - name: Install Homebrew (Linuxbrew)
   ansible.builtin.import_tasks: install-homebrew.yaml
   when: packages_install_homebrew | default(false)
 
+- name: Install Homebrew packages
+  ansible.builtin.import_tasks: install-brew-packages.yaml
+  when:
+    - packages_install_homebrew | default(false)
+    - (packages_role_brew_packages | default([])) | length > 0

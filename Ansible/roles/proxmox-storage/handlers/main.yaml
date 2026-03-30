@@ -1,7 +1,0 @@
----
-# Storage role handlers
-
-- name: Reload Proxmox storage
-  ansible.builtin.shell: pvesm scan pve
-  become: true
-  listen: reload storage

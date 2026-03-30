@@ -1,0 +1,43 @@
+---
+# =============================================================================
+# MinIO Configure Role - Keepalived Configuration Tasks
+# =============================================================================
+
+- name: Install Keepalived
+  ansible.builtin.apt:
+    name: keepalived
+    state: present
+    update_cache: true
+
+- name: Determine Keepalived priority
+  ansible.builtin.set_fact:
+    keepalived_priority: >-
+      {{ keepalived_priority_master if inventory_hostname == groups['minio'][0]
+         else keepalived_priority_backup - (groups['minio'].index(inventory_hostname) * 10) }}
+
+- name: Render Keepalived configuration
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/haproxy/keepalived.conf.j2"
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    routing_profile: "minio"
+  notify: Restart Keepalived
+
+- name: Create Keepalived check script
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/haproxy/health-check.sh.j2"
+    dest: /etc/keepalived/check_haproxy.sh
+    owner: root
+    group: root
+    mode: "0755"
+  vars:
+    routing_profile: "minio"
+
+- name: Enable and start Keepalived service
+  ansible.builtin.systemd:
+    name: keepalived
+    enabled: true
+    state: started

@@ -3,8 +3,8 @@
 # MinIO Deployment Playbook
 # =============================================================================
 # Purpose:
-#   - Deploy MinIO VMs using Terraform module
-#   - Render Terraform configuration from group_vars/minio
+#   - Deploy MinIO VMs using the shared Proxmox VM Terraform module
+#   - Render service-specific Terraform configuration from group_vars/minio
 #   - Configure MinIO cluster, buckets, and HA
 # =============================================================================
 
@@ -22,7 +22,9 @@
     - ../group_vars/minio/main.yaml
 
   roles:
-    - role: minio-deploy
+    - role: minio
+      vars:
+        minio_role_phases: ["deploy"]
       tags: ["deploy"]
 
 - name: Configure MinIO nodes
@@ -39,11 +41,9 @@
 
   vars:
     # Only install essential packages for MinIO nodes
-    packages_enabled_groups:
-      - base
-      - cli
-      - net
-      - system
+    packages_role_groups:
+      - production
+      - shell
 
   pre_tasks:
     - name: Load MinIO vault secrets
@@ -56,7 +56,7 @@
       tags: ["always"]
 
     - name: Ensure DNS nameservers are configured
-      copy:
+      ansible.builtin.copy:
         content: |
           nameserver {{ minio_dns_primary | default('10.10.10.1') }}
           nameserver {{ minio_dns_secondary | default('1.1.1.1') }}
@@ -67,7 +67,7 @@
       tags: ["dns"]
 
     - name: Refresh APT cache
-      apt:
+      ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
       register: apt_cache_result
@@ -92,5 +92,7 @@
     - role: ssh
       tags: ["ssh"]
 
-    - role: minio-configure
+    - role: minio
+      vars:
+        minio_role_phases: ["configure"]
       tags: ["minio", "configure"]

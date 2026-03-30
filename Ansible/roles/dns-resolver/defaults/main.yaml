@@ -35,6 +35,16 @@ dns_test_retries: 3
 # Timeout for DNS tests (seconds)
 dns_test_timeout: 5
 
+# Per-query execution timeout for DNS lookups (seconds)
+dns_query_timeout: 10
+
+# Maximum nameservers to render in /etc/resolv.conf.
+# Most resolvers only honor first 3 entries.
+dns_max_nameservers: 3
+
+# Number of verification attempts per domain after reconfiguration
+dns_verify_attempts: 2
+
 # Whether to backup existing DNS configuration
 dns_backup_config: true
 
@@ -46,6 +56,9 @@ dns_restart_services: true
 
 # Force reconfiguration even if DNS appears to be working
 dns_force_reconfigure: false
+
+# Fail role if verification cannot resolve all test domains
+dns_fail_on_verification: true
 
 # Configure systemd-resolved (if present)
 dns_configure_systemd_resolved: true

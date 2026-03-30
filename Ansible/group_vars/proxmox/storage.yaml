@@ -1,216 +1,51 @@
 ---
 # =============================================================================
-# Storage Configuration for Proxmox Nodes (Non-Ceph)
-# File: Ansible/group_vars/proxmox/storage.yaml
-#
-# Purpose:
-#   Configure local storage on Proxmox nodes NOT part of Ceph cluster.
-#   Supports LVM, ZFS, and directory-based storage.
-#
-# Usage:
-#   - Define storage pools in proxmox_storage_pools
-#   - Role auto-discovers free disks
-#   - Supports auto-registration with Proxmox
-#
+# Storage Configuration for Proxmox Nodes
 # =============================================================================
 
-# =============================================================================
-# STORAGE ROLE CONFIGURATION
-# =============================================================================
-
-# Enable/disable storage configuration
 proxmox_storage_enabled: true
-
-# Automatically discover free disks on target nodes
 proxmox_storage_auto_discover_disks: true
+proxmox_storage_clean_all_disks: true
+proxmox_storage_clean_disk_patterns:
+  - "/dev/sd[b-z]"
+  - "/dev/nvme[0-9]n1"
 
-# Skip nodes that are already part of Ceph cluster
-proxmox_storage_skip_ceph_nodes: true
+# Disks reserved from Proxmox storage automation (cleaning/discovery/assignment).
+# Use this for passthrough targets, e.g. TrueNAS data disks.
+proxmox_storage_reserved_disks:
+  pve-01:
+    - "/dev/sde"
 
-# Nodes to configure storage on
-# (defaults to all nodes in 'proxmox' group if not specified)
-# proxmox_storage_nodes:
-#   - pve-02
-#   - pve-03
-
-# =============================================================================
-# STORAGE POOL DEFINITIONS
-# =============================================================================
-#
-# Each pool requires:
-#   - name: Storage identifier in Proxmox (lowercase, no spaces)
-#   - type: Storage backend (lvmthin, zfspool, dir)
-#   - content: Content types (images, rootdir, iso, backup)
-#
-# LVM Thin Pool:
-#   - name: Storage name
-#   - type: "lvmthin"
-#   - device: Physical device (e.g., /dev/sdb)
-#   - content: Content types
-#
-# ZFS Pool:
-#   - name: Storage name
-#   - type: "zfspool"
-#   - device: Physical device (e.g., /dev/sdb)
-#   - content: Content types
-#
-# Directory Storage:
-#   - name: Storage name
-#   - type: "dir"
-#   - path: Mount point (e.g., /mnt/storage)
-#   - content: Content types
-#
-# =============================================================================
-
+# Limit destructive disk cleaning and storage provisioning to the nodes that
+# are meant to host local VM storage.
 proxmox_storage_nodes:
-  - pve-02
+  - pve-01
   - pve-03
+  - pve-04
+  - pve-05
 
-proxmox_storage_pools:
-  # VM disk storage - automatically use all available disks
-  # When multiple disks exist, they'll be grouped into a single LVM thin pool
-  - name: "vmdisks"
-    type: "lvmthin"
-    devices: []  # Will be populated by role with auto-discovered disks
-    content: "images,rootdir"
-    auto_discover: true
-    min_disk_size: 1099511627776  # 1TB minimum (can be smaller)
+# List of pools to create.
+proxmox_storage_pool_names:
+  - "VM_Disks"
+  - "Backups"
 
-  # ISO and backup storage - directory based
-  - name: "iso-backup"
-    type: "dir"
-    path: "/mnt/iso-backup"
-    content: "iso,backup"
+# Weighted split for disk assignment.
+# Higher weight receives more disks.
+proxmox_storage_pool_weights:
+  VM_Disks: 3
+  Backups: 1
 
-# =============================================================================
-# NODE-SPECIFIC OVERRIDES
-# =============================================================================
-# pve-02: Use sdb explicitly for vmdisks (currently in local-lvm, will be repurposed)
-# pve-03: Auto-discover the 3 free disks (sdc, sdd, sde)
-proxmox_storage_node_overrides:
-  pve-02:
-    pools:
-      - name: "vmdisks"
-        type: "lvmthin"
-        devices: ["/dev/sdb"]
-        content: "images,rootdir"
-      - name: "iso-backup"
-        type: "dir"
-        path: "/mnt/iso-backup"
-        content: "iso,backup"
-  
-  pve-03:
-    pools:
-      - name: "vmdisks"
-        type: "lvmthin"
-        devices: []  # Auto-discover sdc, sdd, sde
-        content: "images,rootdir"
-        auto_discover: true
-        min_disk_size: 1099511627776
-      - name: "iso-backup"
-        type: "dir"
-        path: "/mnt/iso-backup"
-        content: "iso,backup"
+# Pool placement preferences.
+# Backups should stay on a single smaller disk, while VM_Disks should consume
+# the remaining larger capacity.
+proxmox_storage_pool_max_disks:
+  Backups: 1
 
-# =============================================================================
-# ADVANCED OPTIONS
-# =============================================================================
+proxmox_storage_pool_prefer:
+  VM_Disks: largest
+  Backups: smallest
 
-# Disk discovery options
-# These are used by the auto-discovery task
-proxmox_storage_disk_discovery:
-  # Skip these disk patterns (regex)
-  skip_patterns:
-    - "^loop"
-    - "^dm-"
-    - "^md"
-    - "^nvme.*n1p"  # Skip NVMe partitions
-  
-  # Minimum disk size (bytes)
-  min_size: 1099511627776  # 1TB
-
-# LVM Configuration
-proxmox_storage_lvm:
-  # Extent size (default: 4m)
-  extent_size: "4m"
-  
-  # Thin pool metadata size percentage (default: 5%)
-  metadata_size_percent: 5
-
-# ZFS Configuration
-proxmox_storage_zfs:
-  # Compression algorithm (lz4, zstd, gzip-9, off)
-  compression: "lz4"
-  
-  # Record size (512B to 1M)
-  recordsize: "128k"
-  
-  # ARC cache size (if needed)
-  # arc_max: "8589934592"  # 8GB
-
-# Directory Storage
-proxmox_storage_dir:
-  # Default permissions for created directories
-  mode: "0700"
-  
-  # Create parent directories if needed
-  create_parents: true
-
-# =============================================================================
-# NODE-SPECIFIC CONFIGURATION
-# =============================================================================
-#
-# Example: Override storage pools for specific nodes
-# 
-# proxmox_storage_node_overrides:
-#   pve-02:
-#     pools:
-#       - name: "pve2-lvm"
-#         type: "lvmthin"
-#         device: "/dev/sdb"
-#         content: "images,rootdir"
-#   
-#   pve-03:
-#     pools:
-#       - name: "pve3-zfs"
-#         type: "zfspool"
-#         device: "/dev/sdb"
-#         content: "images,rootdir"
-
-# =============================================================================
-# STORAGE POOL EXAMPLES
-# =============================================================================
-#
-# Production Setup (Distributed Storage):
-#
-# pve-02: LVM thin pool on /dev/sdb (1TB) + Directory storage on /mnt/iso
-# pve-03: ZFS pool on /dev/sdb (1TB) + LVM thin pool on /dev/sdc
-#
-# Example configuration:
-#
-# proxmox_storage_pools:
-#   # pve-02 LVM
-#   - name: "pve2-vm-storage"
-#     type: "lvmthin"
-#     device: "/dev/sdb"
-#     content: "images,rootdir"
-#   
-#   # pve-02 ISO storage
-#   - name: "pve2-iso"
-#     type: "dir"
-#     path: "/mnt/iso"
-#     content: "iso,backup"
-#   
-#   # pve-03 ZFS (high-performance)
-#   - name: "pve3-fast"
-#     type: "zfspool"
-#     device: "/dev/sdb"
-#     content: "images,rootdir"
-#   
-#   # pve-03 LVM (capacity)
-#   - name: "pve3-capacity"
-#     type: "lvmthin"
-#     device: "/dev/sdc"
-#     content: "images,rootdir"
-#
-# =============================================================================
+# Optional per-pool content override (default is images,rootdir).
+proxmox_storage_pool_contents:
+  VM_Disks: "images,rootdir"
+  Backups: "backup"

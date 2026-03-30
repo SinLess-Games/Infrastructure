@@ -1,0 +1,37 @@
+---
+kubernetes_prod:
+  vars:
+    ansible_user: "sinless777"
+    ansible_ssh_private_key_file: "/home/sinless777/.ssh/id_ed25519"
+    ansible_python_interpreter: "/usr/bin/python3"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=yes -o PasswordAuthentication=no"
+    kubernetes_environment: "prod"
+  children:
+    kubernetes_prod_control_plane:
+      hosts:
+        k8s-prod-master-01:
+          ansible_host: "10.10.40.11"
+          node_role: control-plane
+          node_fqdn: "k8s-prod-master-01.prod.k8s.sinlessgames.com"
+        k8s-prod-master-02:
+          ansible_host: "10.10.40.12"
+          node_role: control-plane
+          node_fqdn: "k8s-prod-master-02.prod.k8s.sinlessgames.com"
+        k8s-prod-master-03:
+          ansible_host: "10.10.40.13"
+          node_role: control-plane
+          node_fqdn: "k8s-prod-master-03.prod.k8s.sinlessgames.com"
+    kubernetes_prod_workers:
+      hosts:
+        k8s-prod-worker-01:
+          ansible_host: "10.10.40.20"
+          node_role: worker
+          node_fqdn: "k8s-prod-worker-01.prod.k8s.sinlessgames.com"
+        k8s-prod-worker-02:
+          ansible_host: "10.10.40.21"
+          node_role: worker
+          node_fqdn: "k8s-prod-worker-02.prod.k8s.sinlessgames.com"
+        k8s-prod-worker-03:
+          ansible_host: "10.10.40.22"
+          node_role: worker
+          node_fqdn: "k8s-prod-worker-03.prod.k8s.sinlessgames.com"

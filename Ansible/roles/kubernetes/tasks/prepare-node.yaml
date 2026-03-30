@@ -1,0 +1,424 @@
+---
+# =============================================================================
+# Prepare node for Kubernetes / RKE2
+# =============================================================================
+# Purpose:
+#   - Apply baseline OS preparation for Kubernetes nodes
+#   - Disable swap
+#   - Load required kernel modules
+#   - Configure sysctl networking settings
+#   - Install required base packages
+#   - Ensure time sync and useful tooling are present
+#   - Configure hostname and /etc/hosts entry
+#   - Prepare filesystem locations commonly needed by RKE2
+#
+# Notes:
+#   - Designed primarily for Debian/Ubuntu style systems
+#   - Safe to run multiple times
+#   - Intended to run before lablabs.rke2
+# =============================================================================
+
+- name: Define prepare-node defaults
+  ansible.builtin.set_fact:
+    kubernetes_prepare_packages_default:
+      - curl
+      - wget
+      - vim
+      - nano
+      - sudo
+      - bash-completion
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - jq
+      - unzip
+      - tar
+      - socat
+      - conntrack
+      - iptables
+      - arptables
+      - ebtables
+      - ethtool
+      - ipset
+      - iproute2
+      - net-tools
+      - nfs-common
+      - open-iscsi
+      - cryptsetup
+      - apt-transport-https
+      - python3
+      - python3-apt
+      - python3-pip
+      - python3-setuptools
+      - rsync
+      - chrony
+    kubernetes_prepare_sysctl_default:
+      net.bridge.bridge-nf-call-iptables: "1"
+      net.bridge.bridge-nf-call-ip6tables: "1"
+      net.ipv4.ip_forward: "1"
+      net.ipv6.conf.all.forwarding: "1"
+      net.ipv4.conf.all.rp_filter: "0"
+      net.ipv4.conf.default.rp_filter: "0"
+      vm.swappiness: "0"
+      fs.inotify.max_user_instances: "8192"
+      fs.inotify.max_user_watches: "1048576"
+      kernel.panic: "10"
+      kernel.panic_on_oops: "1"
+    kubernetes_prepare_kernel_modules_default:
+      - overlay
+      - br_netfilter
+      - ip_tables
+      - ip6table_nat
+      - iptable_nat
+      - nf_conntrack
+    kubernetes_prepare_disable_firewall_default: true
+    kubernetes_prepare_manage_hosts_file_default: true
+    kubernetes_prepare_reboot_if_required_default: false
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+
+- name: Assert supported OS family
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family in ['Debian', 'RedHat']
+    fail_msg: "prepare-node.yaml currently supports Debian and RedHat families."
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+
+# -----------------------------------------------------------------------------
+# Host identity
+# -----------------------------------------------------------------------------
+
+- name: Set hostname to inventory hostname
+  ansible.builtin.hostname:
+    name: "{{ node_fqdn | default(inventory_hostname) }}"
+  when: node_fqdn is defined or inventory_hostname is defined
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - hostname
+
+- name: Ensure hostname entry exists in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^{{ (ansible_default_ipv4.address | regex_escape) }}\s+'
+    line: "{{ ansible_default_ipv4.address }} {{ node_fqdn | default(inventory_hostname) }} {{ inventory_hostname_short | default(inventory_hostname) }}"
+    state: present
+    create: true
+    backup: false
+  when:
+    - (kubernetes_prepare_manage_hosts_file | default(kubernetes_prepare_manage_hosts_file_default)) | bool
+    - ansible_default_ipv4 is defined
+    - ansible_default_ipv4.address is defined
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - hostname
+
+# -----------------------------------------------------------------------------
+# Package management
+# -----------------------------------------------------------------------------
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == 'Debian'
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - packages
+
+- name: Install required packages on Debian
+  ansible.builtin.apt:
+    name: "{{ kubernetes_prepare_packages | default(kubernetes_prepare_packages_default) }}"
+    state: present
+  when: ansible_os_family == 'Debian'
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - packages
+
+- name: Install required packages on RedHat
+  ansible.builtin.package:
+    name: "{{ kubernetes_prepare_packages | default(kubernetes_prepare_packages_default) }}"
+    state: present
+  when: ansible_os_family == 'RedHat'
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - packages
+
+# -----------------------------------------------------------------------------
+# Time synchronization
+# -----------------------------------------------------------------------------
+
+- name: Ensure chrony is enabled and started
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+  when: "'chrony.service' in ansible_facts.services or 'chronyd.service' in ansible_facts.services"
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - time
+
+- name: Ensure chronyd is enabled and started
+  ansible.builtin.service:
+    name: chronyd
+    state: started
+    enabled: true
+  when: "'chronyd.service' in ansible_facts.services"
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - time
+
+# -----------------------------------------------------------------------------
+# Swap
+# -----------------------------------------------------------------------------
+
+- name: Disable swap immediately
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb | default(0) | int > 0
+  changed_when: ansible_swaptotal_mb | default(0) | int > 0
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - swap
+
+- name: Remove swap entries from /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\s+swap\s+.*)$'
+    replace: '# \1'
+    backup: false
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - swap
+
+# -----------------------------------------------------------------------------
+# Kernel modules
+# -----------------------------------------------------------------------------
+
+- name: Persist required kernel modules
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/kubernetes.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {% for module in (kubernetes_prepare_kernel_modules | default(kubernetes_prepare_kernel_modules_default)) %}
+      {{ module }}
+      {% endfor %}
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - kernel
+
+- name: Load required kernel modules now
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ kubernetes_prepare_kernel_modules | default(kubernetes_prepare_kernel_modules_default) }}"
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - kernel
+
+# -----------------------------------------------------------------------------
+# Sysctl
+# -----------------------------------------------------------------------------
+
+- name: Configure Kubernetes sysctl settings
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-kubernetes.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {% for key, value in (kubernetes_prepare_sysctl | default(kubernetes_prepare_sysctl_default)).items() %}
+      {{ key }} = {{ value }}
+      {% endfor %}
+  register: kubernetes_prepare_sysctl_file
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - sysctl
+
+- name: Apply sysctl settings
+  ansible.builtin.command: sysctl --system
+  when: kubernetes_prepare_sysctl_file.changed
+  changed_when: true
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - sysctl
+
+# -----------------------------------------------------------------------------
+# Firewall
+# -----------------------------------------------------------------------------
+
+- name: Disable ufw if present
+  ansible.builtin.service:
+    name: ufw
+    state: stopped
+    enabled: false
+  when:
+    - (kubernetes_prepare_disable_firewall | default(kubernetes_prepare_disable_firewall_default)) | bool
+    - "'ufw.service' in ansible_facts.services"
+  failed_when: false
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - firewall
+
+- name: Disable firewalld if present
+  ansible.builtin.service:
+    name: firewalld
+    state: stopped
+    enabled: false
+  when:
+    - (kubernetes_prepare_disable_firewall | default(kubernetes_prepare_disable_firewall_default)) | bool
+    - "'firewalld.service' in ansible_facts.services"
+  failed_when: false
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - firewall
+
+# -----------------------------------------------------------------------------
+# SELinux
+# -----------------------------------------------------------------------------
+
+- name: Set SELinux to permissive immediately
+  ansible.posix.selinux:
+    policy: targeted
+    state: permissive
+  when: ansible_os_family == 'RedHat'
+  failed_when: false
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - selinux
+
+# -----------------------------------------------------------------------------
+# RKE2 / Kubernetes filesystem prep
+# -----------------------------------------------------------------------------
+
+- name: Create required Kubernetes directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: /etc/rancher, mode: "0755" }
+    - { path: /etc/rancher/rke2, mode: "0755" }
+    - { path: /var/lib/rancher, mode: "0755" }
+    - { path: /var/lib/rancher/rke2, mode: "0755" }
+    - { path: /var/lib/kubelet, mode: "0755" }
+    - { path: /etc/kubernetes, mode: "0755" }
+    - { path: /etc/cni/net.d, mode: "0755" }
+    - { path: /opt/cni/bin, mode: "0755" }
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - filesystem
+
+# -----------------------------------------------------------------------------
+# Optional resolver hardening / sanity
+# -----------------------------------------------------------------------------
+
+- name: Ensure systemd-resolved resolv.conf is not immutable
+  ansible.builtin.command: chattr -i /etc/resolv.conf
+  register: kubernetes_prepare_resolv_unprotect
+  failed_when: false
+  changed_when: kubernetes_prepare_resolv_unprotect.rc == 0
+  when: ansible_os_family in ['Debian', 'RedHat']
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - dns
+
+# -----------------------------------------------------------------------------
+# Final checks
+# -----------------------------------------------------------------------------
+
+- name: Verify swap is disabled
+  ansible.builtin.command: swapon --show --noheadings
+  register: kubernetes_prepare_swapon_check
+  changed_when: false
+  failed_when: kubernetes_prepare_swapon_check.stdout | trim != ""
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - validate
+
+- name: Verify br_netfilter is loaded
+  ansible.builtin.command: lsmod
+  register: kubernetes_prepare_lsmod
+  changed_when: false
+  failed_when: "'br_netfilter' not in kubernetes_prepare_lsmod.stdout"
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - validate
+
+- name: Verify IPv4 forwarding is enabled
+  ansible.builtin.command: sysctl -n net.ipv4.ip_forward
+  register: kubernetes_prepare_ip_forward
+  changed_when: false
+  failed_when: kubernetes_prepare_ip_forward.stdout | trim != "1"
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - validate
+
+- name: Reboot if explicitly requested
+  ansible.builtin.reboot:
+    msg: "Reboot initiated by kubernetes-configure prepare-node task"
+    reboot_timeout: 900
+    connect_timeout: 10
+    post_reboot_delay: 15
+  when: (kubernetes_prepare_reboot_if_required | default(kubernetes_prepare_reboot_if_required_default)) | bool
+  tags:
+    - kubernetes
+    - prepare
+    - prepare-node
+    - reboot

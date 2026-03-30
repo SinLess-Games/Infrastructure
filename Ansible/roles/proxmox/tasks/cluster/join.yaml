@@ -1,0 +1,174 @@
+---
+# =============================================================================
+# proxmox-cluster — join
+# -----------------------------------------------------------------------------
+# Idempotent Proxmox cluster join logic.
+# Safely joins a node only if it is not already clustered.
+# =============================================================================
+
+- name: Assert this node is not the init node
+  ansible.builtin.assert:
+    that:
+      - not proxmox_cluster_is_init_node | bool
+    fail_msg: >
+      Node {{ inventory_hostname }} is the cluster init node.
+      Join logic must not run on the init node.
+
+# -----------------------------------------------------------------------------
+# Skip join entirely if node is already clustered
+# -----------------------------------------------------------------------------
+
+- name: Skip cluster join when node is already clustered
+  ansible.builtin.debug:
+    msg: >
+      Node {{ inventory_hostname }} is already a member of the Proxmox cluster.
+      Skipping join operation.
+  when: proxmox_cluster_is_clustered | bool
+
+# -----------------------------------------------------------------------------
+# Validate join parameters (only when joining)
+# -----------------------------------------------------------------------------
+
+- name: Assert join parameters are defined
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_join_address is defined
+      - proxmox_cluster_bind_address is defined
+      - proxmox_cluster_join_password is defined
+    fail_msg: >
+      Cluster join parameters are missing. Cannot join Proxmox cluster.
+  when: not proxmox_cluster_is_clustered | bool
+
+# -----------------------------------------------------------------------------
+# Perform cluster join
+# -----------------------------------------------------------------------------
+
+# First, backup and replace the joining node's CA with the init node's CA
+- name: Backup local CA on joining node
+  ansible.builtin.command: mv /etc/pve/pve-root-ca.pem /etc/pve/pve-root-ca.pem.bak
+  args:
+    removes: /etc/pve/pve-root-ca.pem
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Copy init node CA to joining node
+  ansible.builtin.command: >
+    scp -o StrictHostKeyChecking=no
+    root@{{ proxmox_cluster_join_address }}:/etc/pve/pve-root-ca.pem
+    /etc/pve/pve-root-ca.pem
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Ensure CA has correct permissions
+  ansible.builtin.command: chmod 644 /etc/pve/pve-root-ca.pem
+  failed_when: false
+  changed_when: false
+  when: not proxmox_cluster_is_clustered | bool
+
+# Get the fingerprint from the init node's API certificate (not CA)
+- name: Get init node API certificate fingerprint
+  ansible.builtin.shell: |
+    openssl s_client -connect {{ proxmox_cluster_join_address }}:8006 < /dev/null 2>/dev/null | \
+    openssl x509 -fingerprint -sha256 -noout | \
+    cut -d'=' -f2
+  delegate_to: localhost
+  register: init_node_fingerprint
+  changed_when: false
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Set fingerprint variable
+  ansible.builtin.set_fact:
+    proxmox_ca_fingerprint: "{{ init_node_fingerprint.stdout | trim }}"
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Join Proxmox cluster with password and fingerprint
+  ansible.builtin.command: >
+    bash -c "echo {{ proxmox_cluster_join_password | quote }} |
+    pvecm add {{ proxmox_cluster_join_address }}
+    --link0 {{ proxmox_cluster_bind_address }}
+    --fingerprint {{ proxmox_ca_fingerprint }}"
+  register: proxmox_join
+  throttle: 1
+  retries: 3
+  delay: 15
+  until: >-
+    (
+      proxmox_join.rc == 0 and
+      (
+        'successfully added node' in (proxmox_join.stdout | default('') | lower) or
+        'already contains node' in ((proxmox_join.stdout | default('')) ~ ' ' ~ (proxmox_join.stderr | default('')) | lower)
+      )
+    )
+  changed_when: "'successfully added node' in (proxmox_join.stdout | default('') | lower)"
+  failed_when:
+    - proxmox_join.rc != 0
+    - "'already contains node' not in ((proxmox_join.stdout | default('')) ~ ' ' ~ (proxmox_join.stderr | default('')) | lower)"
+    - "'cluster join aborted' in (proxmox_join.stderr | default('') | lower)"
+    - "'an error occurred' in (proxmox_join.stdout | default('') | lower)"
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Display join command output
+  ansible.builtin.debug:
+    msg: "{{ proxmox_join }}"
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Restart corosync service after join
+  ansible.builtin.service:
+    name: corosync
+    state: restarted
+    enabled: true
+  when: proxmox_join is changed
+
+- name: Allow corosync to stabilize after restart
+  ansible.builtin.pause:
+    seconds: 30
+  when: proxmox_join is changed
+
+- name: Ensure pvedaemon is running after cluster join
+  ansible.builtin.service:
+    name: pvedaemon
+    state: restarted
+    enabled: true
+  when: proxmox_join is changed
+
+- name: Wait for cluster filesystem to mount
+  ansible.builtin.wait_for:
+    path: /etc/pve
+    timeout: 120
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Allow additional stabilization time
+  ansible.builtin.pause:
+    seconds: 10
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Check if node appears in cluster membership from init node
+  ansible.builtin.command: pvecm nodes
+  delegate_to: "{{ proxmox_cluster_init_node }}"
+  register: cluster_membership_check
+  retries: 20
+  delay: 5
+  until: >
+    (inventory_hostname in cluster_membership_check.stdout) or
+    (ansible_host in cluster_membership_check.stdout)
+  failed_when: false
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Display cluster membership check
+  ansible.builtin.debug:
+    msg: "{{ cluster_membership_check.stdout_lines }}"
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Wait for this node to appear in init node membership
+  ansible.builtin.command: pvecm nodes
+  delegate_to: "{{ proxmox_cluster_init_node }}"
+  register: proxmox_nodes_now
+  retries: 30
+  delay: 5
+  until: >
+    inventory_hostname in proxmox_nodes_now.stdout or
+    ansible_host in proxmox_nodes_now.stdout
+  when: not proxmox_cluster_is_clustered | bool
+
+- name: Display authoritative cluster nodes
+  ansible.builtin.debug:
+    msg: "{{ proxmox_nodes_now.stdout }}"
+  when: not proxmox_cluster_is_clustered | bool

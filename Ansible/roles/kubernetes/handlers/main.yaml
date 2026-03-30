@@ -1,0 +1,59 @@
+---
+# =============================================================================
+# Kubernetes Configure Role - Handlers
+# =============================================================================
+# Purpose:
+#   - Restart RKE2 services when configuration changes
+#   - Reload systemd when new unit files or configs are written
+#   - Automatically detect server vs agent node roles
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Restart RKE2 (auto-detect server or agent)
+# -----------------------------------------------------------------------------
+
+- name: Restart RKE2
+  ansible.builtin.systemd:
+    name: "{{ 'rke2-server' if kubernetes_configure_node_role == 'master' else 'rke2-agent' }}"
+    state: restarted
+    enabled: true
+    daemon_reload: true
+  listen:
+    - restart rke2
+    - restart kubernetes
+    - restart rke2 service
+
+
+# -----------------------------------------------------------------------------
+# Explicit restart handlers (optional direct use)
+# -----------------------------------------------------------------------------
+
+- name: Restart RKE2 server
+  ansible.builtin.systemd:
+    name: rke2-server
+    state: restarted
+    enabled: true
+    daemon_reload: true
+  listen: restart rke2 server
+
+
+- name: Restart RKE2 agent
+  ansible.builtin.systemd:
+    name: rke2-agent
+    state: restarted
+    enabled: true
+    daemon_reload: true
+  listen: restart rke2 agent
+
+
+# -----------------------------------------------------------------------------
+# Reload systemd daemon
+# -----------------------------------------------------------------------------
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen:
+    - reload systemd
+    - systemd reload

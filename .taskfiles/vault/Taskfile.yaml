@@ -47,7 +47,7 @@ tasks:
           {{.CLI_ARGS}}
 
   configure:
-    desc: "Run only vault-configure role tags from deploy playbook"
+    desc: "Run only Vault configure phase tags from deploy playbook"
     cmds:
       - |
         set -e
@@ -86,7 +86,7 @@ tasks:
           {{.CLI_ARGS}}
 
   setup:
-    desc: "Run vault-setup role (auth methods + engines + secrets setup)"
+    desc: "Run Vault setup phase (auth methods + engines + secrets setup)"
     cmds:
       - |
         set -e
@@ -99,7 +99,7 @@ tasks:
           {{.CLI_ARGS}}
 
   users:
-    desc: "Run vault-users role"
+    desc: "Run Vault users phase"
     cmds:
       - |
         set -e
@@ -264,7 +264,7 @@ tasks:
           -o
 
   unseal:
-    desc: "Unseal Vault nodes using the vault-configure unseal tasks"
+    desc: "Unseal Vault nodes using the Vault configure phase unseal tasks"
     cmds:
       - |
         set -e
@@ -289,7 +289,7 @@ tasks:
           {{.CLI_ARGS}}
   
   update:secrets:
-    desc: "Run only vault-secrets role to update secrets/config in Vault"
+    desc: "Run only Vault secrets phase to update secrets/config in Vault"
     cmds:
       - |
         set -e

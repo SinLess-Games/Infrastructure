@@ -1,103 +1,32 @@
 ---
-# =============================================================================
-# Technitium DNS – Main Role Entrypoint
-# -----------------------------------------------------------------------------
-# This task list orchestrates:
-#   * OS preparation
-#   * Technitium installation
-#   * Waiting for API to be ready
-#   * Password detection (stores in technitium_actual_password fact)
-#   * DNS server settings (forwarders, block lists, recursion ACLs)
-#   * Zone creation (on primary or standalone)
-#   * Records creation (A, AAAA, CNAME, TXT - on primary or standalone)
-#   * Cluster initialization and join (if enabled):
-#       - Initialize cluster on primary node
-#       - Prepare host resolution for all nodes
-#       - Ensure cluster domain zone exists with A records
-#       - Join secondary nodes to cluster
-#   * Reverse zones / PTR records
-#   * Firewall setup
-#
-# Required group_vars (example):
-#   group_vars/technitium/main.yaml         (API URL + password + forwarders)
-#   group_vars/technitium/cluster.yaml      (cluster config)
-#   group_vars/technitium/domains.yaml      (domain list)
-#   group_vars/technitium/domain-records.yaml
-#   group_vars/technitium/block-lists.yaml
-#   group_vars/technitium/reverse-zones.yaml (optional)
-#
-# Password Handling:
-#   - init_admin.yaml detects and sets technitium_actual_password fact
-#   - This fact is reused throughout all subsequent tasks
-#   - No password re-entry required; uses hostvars for cluster operations
-# =============================================================================
+- name: Run Technitium deploy phase
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/defaults/deploy.yaml"
+    name: __technitium_deploy_defaults
+  when: "'deploy' in technitium_role_phases"
+  tags:
+    - technitium
+    - deploy
 
-# ---------------------------------------------------------------------------
-# 1) OS Prep / Package Dependencies
-# ---------------------------------------------------------------------------
-- import_tasks: os.yaml
+- name: Apply Technitium deploy defaults
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (__technitium_deploy_defaults | default({})) | dict2items }}"
+  when: "'deploy' in technitium_role_phases"
+  tags:
+    - technitium
+    - deploy
 
-# ---------------------------------------------------------------------------
-# 2) Install Technitium DNS Server
-# ---------------------------------------------------------------------------
-- import_tasks: install.yaml
+- name: Include Technitium deploy tasks
+  ansible.builtin.include_tasks: deploy.yaml
+  when: "'deploy' in technitium_role_phases"
+  tags:
+    - technitium
+    - deploy
 
-# ---------------------------------------------------------------------------
-# 3) Wait for the API to come up before pushing config
-# ---------------------------------------------------------------------------
-- import_tasks: wait_for_api.yaml
-
-# ---------------------------------------------------------------------------
-# 3.5) Initialize admin password on new instances
-# ---------------------------------------------------------------------------
-- import_tasks: init_admin.yaml
-
-# ---------------------------------------------------------------------------
-# 4) Global Server Settings (forwarders / blocking / recursion ACLs)
-# ---------------------------------------------------------------------------
-- import_tasks: server_settings.yaml
-
-# ---------------------------------------------------------------------------
-# 5) Create DNS Zones (must be BEFORE cluster join on primary)
-# ---------------------------------------------------------------------------
-- import_tasks: zones.yaml
-  when: not (technitium_cluster_enabled | default(false) | bool)
-        or inventory_hostname == technitium_cluster_primary_host
-
-# ---------------------------------------------------------------------------
-# 6) Create DNS Records (must be BEFORE cluster join on primary)
-# ---------------------------------------------------------------------------
-- import_tasks: records.yaml
-  when: not (technitium_cluster_enabled | default(false) | bool)
-        or inventory_hostname == technitium_cluster_primary_host
-
-# ---------------------------------------------------------------------------
-# 7) Cluster Initialization & Join (optional)
-# ---------------------------------------------------------------------------
-# Includes: cluster init, host resolution prep, zone creation, secondary join
-# All cluster operations use technitium_actual_password from init_admin.yaml
-# ---------------------------------------------------------------------------
-- import_tasks: cluster.yaml
-  when: technitium_cluster_enabled | default(false) | bool
-
-# ---------------------------------------------------------------------------
-# 8) Reverse DNS Zones & PTR Records (optional; only if defined)
-# ---------------------------------------------------------------------------
-- import_tasks: reverse_zones.yaml
-  when:
-    - technitium_reverse_zones is defined
-    - technitium_reverse_zones | length > 0
-    - not (technitium_cluster_enabled | default(false) | bool)
-      or inventory_hostname == technitium_cluster_primary_host
-
-# ---------------------------------------------------------------------------
-# 9) Blocklists
-# ---------------------------------------------------------------------------
-- import_tasks: block-lists.yaml
-  when: not (technitium_cluster_enabled | default(false) | bool)
-        or inventory_hostname == technitium_cluster_primary_host
-
-# ---------------------------------------------------------------------------
-# 10) Firewall (allow only selected CIDRs to query DNS)
-# ---------------------------------------------------------------------------
-- import_tasks: firewall.yaml
+- name: Run Technitium configure phase
+  ansible.builtin.include_tasks: configure-main.yaml
+  when: "'configure' in technitium_role_phases"
+  tags:
+    - technitium
+    - configure

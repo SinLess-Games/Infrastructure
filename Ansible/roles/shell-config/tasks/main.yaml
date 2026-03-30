@@ -3,41 +3,40 @@
 # shell-config — main task dispatcher
 # -----------------------------------------------------------------------------
 # Execution order is intentional:
-#   0. derive users     → normalize inputs from global users.yaml
+#   0. derive users     → normalize role inputs
 #   1. validate        → fail fast, no mutation
-#   2. install         → system + core tooling
+#   2. install         → system + shell tooling cleanup
 #   3. install-plugins → Oh My Zsh / Zsh plugins
-#   4. configure       → dotfiles, starship, aliases
+#   4. configure       → dotfiles, aliases, ~/bin commands
 #   5. set-default-shell → optional, explicit shell change
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Derive shell_config_users from global users.yaml
+# Normalize shell role users
 # -----------------------------------------------------------------------------
-# Rules:
-# - Source of truth: group_vars/all/users.yaml
-# - Only users with real interactive shells
-# - home_directory is derived, never stored in group_vars
+# - Accept explicit role inputs first
+# - Fall back to existing shell_config_users / users for compatibility
+# - home_directory is derived when omitted
 # -----------------------------------------------------------------------------
 
-- name: Initialize shell_config_users
+- name: Initialize resolved shell users
   ansible.builtin.set_fact:
-    shell_config_users: []
+    shell__resolved_users: []
 
-- name: Build shell_config_users from global users
+- name: Build resolved shell users from role input
   ansible.builtin.set_fact:
-    shell_config_users: >-
+    shell__resolved_users: >-
       {{
-        shell_config_users + [
+        shell__resolved_users + [
           item | combine({
             'home_directory': item.home_directory | default('/home/' ~ item.name)
           })
         ]
       }}
-  loop: "{{ users }}"
+  loop: "{{ shell_role_users }}"
   when:
-    - item.shell is defined
-    - item.shell is not search('nologin')
+    - item.name is defined
+    - item.shell is not defined or item.shell is not search('nologin')
 
 # -----------------------------------------------------------------------------
 # Validation (fail fast)
@@ -50,7 +49,7 @@
 # Installation
 # -----------------------------------------------------------------------------
 
-- name: Install shell tooling (zsh, oh-my-zsh, starship)
+- name: Install shell tooling and remove starship
   ansible.builtin.import_tasks: install.yaml
 
 - name: Install Zsh / Oh My Zsh plugins

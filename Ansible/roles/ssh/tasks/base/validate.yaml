@@ -26,23 +26,22 @@
   delegate_to: localhost
   run_once: true
 
-- name: Validate users variable structure
+- name: Validate ssh_role_users structure
   ansible.builtin.assert:
     that:
-      - users is defined
-      - users | length > 0
-      - users is iterable
-    fail_msg: "users must be a non-empty list of user definitions"
+      - ssh_role_users is defined
+      - ssh_role_users is iterable
+    fail_msg: "ssh_role_users must be a list of user definitions"
   delegate_to: localhost
   run_once: true
 
-- name: Validate each user entry
+- name: Validate each ssh_role_users entry
   ansible.builtin.assert:
     that:
       - item.name is defined
       - item.name | length > 0
     fail_msg: "Each user entry must define a non-empty 'name' field"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name | default('undefined') }}"
   delegate_to: localhost

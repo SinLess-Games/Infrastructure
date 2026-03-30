@@ -7,7 +7,17 @@ proxmox_cluster_dns_servers:
   - "10.10.10.13"
   - "10.10.10.9"
   - "10.10.10.20"
-  # - "1.1.1.1"
+
+proxmox_cluster_dns_fallback_servers:
+  - "1.1.1.1"
+  - "1.0.0.1"
+  - "8.8.8.8"
+  - "9.9.9.9"
+
+# Most libc resolvers effectively use only first 3 nameservers.
+proxmox_cluster_dns_resolver_max_servers: 3
+proxmox_cluster_dns_query_timeout: 20
+proxmox_cluster_dns_verify_attempts: 3
 
 # DNS search domain applied to node resolver config
 proxmox_cluster_dns_search_domain: "local.sinlessgamesllc.com"

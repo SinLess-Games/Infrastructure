@@ -41,7 +41,7 @@
   ansible.builtin.user:
     name: "{{ item.name }}"
     shell: /usr/bin/zsh
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   loop_control:
     label: "{{ item.name }}"
   when:

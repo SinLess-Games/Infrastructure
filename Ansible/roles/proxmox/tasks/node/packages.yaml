@@ -1,0 +1,54 @@
+---
+- name: Pin Proxmox packages over Debian
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/proxmox
+    mode: "0644"
+    content: |
+      Package: *
+      Pin: origin download.proxmox.com
+      Pin-Priority: 1001
+
+      Package: *
+      Pin: release o=Debian
+      Pin-Priority: 500
+
+# =============================================================================
+# proxmox-node — packages (FINAL, PROXMOX-CORRECT)
+# =============================================================================
+
+- name: Assert Proxmox VE environment
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Debian"
+      - ansible_distribution_major_version | int >= 11
+    fail_msg: >
+      proxmox-node:packages must run on Debian 11+ (Proxmox VE base OS).
+
+# -----------------------------------------------------------------------------
+# Proxmox meta-package (single source of truth)
+# -----------------------------------------------------------------------------
+
+- name: Ensure Proxmox VE meta-package is installed
+  ansible.builtin.apt:
+    name: proxmox-ve
+    state: present
+    update_cache: true
+
+# -----------------------------------------------------------------------------
+# One and ONLY one upgrade path
+# -----------------------------------------------------------------------------
+
+- name: Perform Proxmox-safe full upgrade
+  ansible.builtin.apt:
+    upgrade: full
+    update_cache: false
+  async: 1800
+  poll: 10
+
+# -----------------------------------------------------------------------------
+# Cleanup
+# -----------------------------------------------------------------------------
+
+- name: Remove obsolete packages
+  ansible.builtin.apt:
+    autoremove: true

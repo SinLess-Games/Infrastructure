@@ -1,0 +1,63 @@
+---
+- name: Run Proxmox node phase
+  ansible.builtin.include_tasks: node/main.yaml
+  when: "'node' in proxmox_role_phases"
+  tags:
+    - proxmox
+    - node
+    - baseline
+
+- name: Run Proxmox cluster phase
+  ansible.builtin.include_tasks: cluster/main.yaml
+  when: "'cluster' in proxmox_role_phases"
+  tags:
+    - proxmox
+    - cluster
+
+- name: Run Proxmox hardware inventory phase
+  ansible.builtin.include_tasks: hardware/main.yaml
+  when: "'hardware' in proxmox_role_phases"
+  tags:
+    - proxmox
+    - hardware
+    - inventory
+
+- name: Run Proxmox certificates phase
+  ansible.builtin.include_tasks: certs/main.yaml
+  when: "'certs' in proxmox_role_phases"
+  tags:
+    - proxmox
+    - certs
+    - certificates
+
+- name: Run Proxmox networking phase
+  ansible.builtin.include_tasks:
+    file: networking/main.yaml
+    apply:
+      tags:
+        - proxmox
+        - networking
+        - network
+        - bridges
+  when: "'networking' in proxmox_role_phases"
+  tags:
+    - proxmox
+    - networking
+    - network
+    - bridges
+
+- name: Run Proxmox storage phase
+  ansible.builtin.include_tasks: storage/main.yaml
+  when:
+    - "'storage' in proxmox_role_phases"
+    - "'storage' in ansible_run_tags or 'all' in ansible_run_tags"
+  tags:
+    - proxmox
+    - storage
+
+- name: Run Proxmox permissions phase
+  ansible.builtin.include_tasks: permissions/main.yaml
+  when: "'permissions' in proxmox_role_phases"
+  tags:
+    - proxmox
+    - permissions

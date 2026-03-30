@@ -1,27 +1,58 @@
 ---
+# =============================================================================
+# Shared Kubernetes defaults
+# =============================================================================
+
 kubernetes_repo_root: "{{ playbook_dir | dirname | dirname }}"
 kubernetes_terraform_dir: "{{ kubernetes_repo_root }}/Terraform"
 kubernetes_templates_dir: "{{ kubernetes_repo_root }}/Ansible/templates/kubernetes"
 kubernetes_generated_dir: "{{ kubernetes_repo_root }}/.outputs/kubernetes"
+kubernetes_generated_env_dir: "{{ kubernetes_generated_dir }}/{{ kubernetes_environment }}"
+kubernetes_kubeconfig_local_path: "{{ kubernetes_generated_env_dir }}/kubeconfig"
 
-kubernetes_proxmox_api_url: "https://10.10.10.15:8006/api2/json"
-kubernetes_proxmox_tls_insecure: true
-kubernetes_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
+kubernetes_paths:
+  repo_root: "{{ kubernetes_repo_root }}"
+  terraform_dir: "{{ kubernetes_terraform_dir }}"
+  templates_dir: "{{ kubernetes_templates_dir }}"
+  generated_dir: "{{ kubernetes_generated_dir }}"
+  generated_env_dir: "{{ kubernetes_generated_env_dir }}"
 
-kubernetes_flatcar_template: "flatcar-template"
-kubernetes_enable_ignition_fw_cfg: true
-kubernetes_force_create: false
-kubernetes_storage: "VM_Disks"
+kubernetes_proxmox:
+  api_url: "{{ infra_proxmox_api_url }}"
+  deploy_api_url: "https://pve-01.local.sinlessgames.com:8006"
+  tls_insecure: "{{ infra_proxmox_tls_insecure }}"
+  api_token_file: "{{ infra_proxmox_api_token_file }}"
+  storage: "VM_Disks"
+  node_ssh_hosts:
+    pve-01: "10.10.10.15"
+    pve-02: "10.10.10.16"
+    pve-03: "10.10.10.17"
+    pve-04: "10.10.10.18"
+    pve-05: "10.10.10.19"
 
-kubernetes_default_user: "sinless777"
-kubernetes_ansible_user: "sinless777"
-kubernetes_ssh_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519"
-kubernetes_python_interpreter: "/opt/miniconda/bin/python3"
-kubernetes_miniconda_installer_url: "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
-kubernetes_miniconda_prefix: "/opt/miniconda"
+kubernetes_node_defaults:
+  template: "flatcar-template"
+  clone_template: "debian-13-template"
+  enable_ignition_fw_cfg: false
+  force_create: true
+  startup_up_delay: 30
+  startup_down_delay: 30
+
+kubernetes_ansible:
+  default_user: "{{ infra_bootstrap_default_user }}"
+  user: "{{ infra_bootstrap_ansible_user }}"
+  ssh_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519"
+  python_interpreter: "{{ ansible_python_interpreter }}"
+  become: true
+  become_method: sudo
+
+kubernetes_miniconda:
+  installer_url: "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+  prefix: "/opt/miniconda"
 
 kubernetes_versions:
   rke2: "v1.31.5+rke2r1"
+  flux: "2.4.0"
   cilium_chart: "1.16.5"
   ingress_nginx_chart: "4.11.3"
   cert_manager_chart: "v1.16.2"
@@ -31,29 +62,140 @@ kubernetes_versions:
   promtail_chart: "6.16.6"
   beyla_chart: "1.8.9"
   istio_chart: "1.24.2"
-  flux: "2.4.0"
 
-kubernetes_plan_only: false
-kubernetes_destroy: false
-kubernetes_force_apply: false
-kubernetes_wait_for_ssh_timeout: 900
+kubernetes_network_defaults:
+  cluster_cidr: "10.42.0.0/16"
+  service_cidr: "10.43.0.0/16"
+  cluster_dns: "10.43.0.10"
 
-kubernetes_proxmox_node_ssh_hosts:
-  pve-01: "10.10.10.15"
-  pve-02: "10.10.10.16"
-  pve-03: "10.10.10.17"
-  pve-04: "10.10.10.18"
-  pve-05: "10.10.10.19"
+kubernetes_operation:
+  plan_only: false
+  destroy: false
+  force_apply: false
+  wait_for_ssh_timeout: 600
+  wait_for_kubeconfig_timeout: 300
+  wait_for_api_timeout: 600
 
-kubernetes_vault_addr: "https://vault.service.sinlessgames.com"
-kubernetes_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
-kubernetes_vault_kv_path: "secret/data/kubernetes/dev"
-kubernetes_vault_eso_mount: "kv"
-kubernetes_vault_eso_secret_path: "kubernetes/dev"
+kubernetes_vault:
+  addr: "https://10.10.10.180:443"
+  skip_verify: true
+  token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
+  kv_mount: "secret"
+  kv_path: "kubernetes/{{ kubernetes_environment }}"
+  eso_mount: "kv"
+  eso_secret_path: "kubernetes/{{ kubernetes_environment }}"
 
-kubernetes_mimir_remote_write_url: "https://mimir.service.sinlessgames.com/api/v1/push"
-kubernetes_loki_push_url: "https://loki.service.sinlessgames.com/loki/api/v1/push"
+kubernetes_observability:
+  mimir_remote_write_url: "https://mimir.service.sinlessgames.com/api/v1/push"
+  loki_push_url: "https://loki.service.sinlessgames.com/loki/api/v1/push"
 
-kubernetes_flux_git_url: "https://github.com/Sinless777/Infrastructure.git"
-kubernetes_flux_git_branch: "main"
-kubernetes_flux_path: "./Kubernetes/clusters/dev"
+kubernetes_flux:
+  git_url: "https://github.com/Sinless777/Infrastructure.git"
+  git_branch: "main"
+  path: "./Kubernetes/clusters/{{ kubernetes_environment }}"
+
+kubernetes_enable_ignition_fw_cfg: "{{ kubernetes_node_defaults.enable_ignition_fw_cfg }}"
+kubernetes_force_create: "{{ kubernetes_node_defaults.force_create }}"
+
+kubernetes_rke2_version: "{{ kubernetes_versions.rke2 }}"
+kubernetes_cluster_cidr: "{{ kubernetes_network_defaults.cluster_cidr }}"
+kubernetes_service_cidr: "{{ kubernetes_network_defaults.service_cidr }}"
+kubernetes_cluster_dns: "{{ kubernetes_network_defaults.cluster_dns }}"
+
+kubernetes_wait_for_ssh_timeout: "{{ kubernetes_operation.wait_for_ssh_timeout }}"
+kubernetes_wait_for_kubeconfig_timeout: "{{ kubernetes_operation.wait_for_kubeconfig_timeout }}"
+kubernetes_wait_for_api_timeout: "{{ kubernetes_operation.wait_for_api_timeout }}"
+
+kubernetes_proxmox_api_token_file: "{{ kubernetes_proxmox.api_token_file }}"
+
+kubernetes_deploy_repo_root: "{{ kubernetes_repo_root }}"
+kubernetes_deploy_terraform_dir: "{{ kubernetes_terraform_dir }}"
+kubernetes_deploy_cluster_name: "{{ kubernetes_cluster_name }}"
+kubernetes_deploy_environment: "{{ kubernetes_environment }}"
+kubernetes_deploy_network_bridge: "{{ kubernetes_network.bridge }}"
+kubernetes_deploy_network_vlan_id: "{{ kubernetes_network.vlan_id }}"
+kubernetes_deploy_network_cidr_suffix: "{{ kubernetes_network.cidr_suffix }}"
+kubernetes_deploy_network_nameservers: "{{ kubernetes_network.nameservers }}"
+kubernetes_deploy_search_domain: "{{ kubernetes_search_domain | default(kubernetes_domain_suffix) }}"
+kubernetes_deploy_cluster_cidr: "{{ kubernetes_cluster_cidr }}"
+kubernetes_deploy_service_cidr: "{{ kubernetes_service_cidr }}"
+kubernetes_deploy_cluster_dns: "{{ kubernetes_cluster_dns }}"
+kubernetes_deploy_rke2_version: "{{ kubernetes_rke2_version }}"
+kubernetes_deploy_wait_for_ssh_timeout: "{{ kubernetes_wait_for_ssh_timeout }}"
+kubernetes_deploy_wait_for_kubeconfig_timeout: "{{ kubernetes_wait_for_kubeconfig_timeout }}"
+kubernetes_deploy_wait_for_api_timeout: "{{ kubernetes_wait_for_api_timeout }}"
+kubernetes_deploy_proxmox_api_token_file: "{{ kubernetes_proxmox.api_token_file }}"
+kubernetes_deploy_proxmox_api_url: "{{ kubernetes_proxmox.deploy_api_url }}"
+kubernetes_deploy_proxmox_tls_insecure: "{{ kubernetes_proxmox.tls_insecure }}"
+kubernetes_deploy_vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default(kubernetes_vault.addr, true) }}"
+kubernetes_deploy_vault_skip_verify: "{{ lookup('env', 'VAULT_SKIP_VERIFY') | default(kubernetes_vault.skip_verify | ternary('true', 'false'), true) | bool }}"
+kubernetes_deploy_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default(kubernetes_vault.token, true) }}"
+
+kubernetes_deploy_master_count: "{{ kubernetes_master.count }}"
+kubernetes_deploy_master_vmid_start: "{{ kubernetes_master.vmid_start }}"
+kubernetes_deploy_master_vm_id_start: "{{ kubernetes_master.vmid_start }}"
+kubernetes_deploy_master_name_prefix: "{{ kubernetes_master.name_prefix }}"
+kubernetes_deploy_master_cpu_cores: "{{ kubernetes_master.cpu_cores }}"
+kubernetes_deploy_master_cpu_sockets: "{{ kubernetes_master.cpu_sockets }}"
+kubernetes_deploy_master_memory_mb: "{{ kubernetes_master.memory_mb }}"
+kubernetes_deploy_master_disk_size: "{{ kubernetes_master.disk_size }}"
+kubernetes_deploy_master_clone_template: "{{ kubernetes_master.clone_template }}"
+kubernetes_deploy_master_target_nodes: "{{ kubernetes_master.target_nodes }}"
+kubernetes_deploy_master_ips: "{{ kubernetes_master_ips }}"
+kubernetes_deploy_master_ip_addresses: "{{ kubernetes_master_ips }}"
+kubernetes_deploy_master_gateway: "{{ kubernetes_network.gateway }}"
+kubernetes_deploy_master_bridge: "{{ kubernetes_network.bridge }}"
+kubernetes_deploy_master_vlan_id: "{{ kubernetes_network.vlan_id }}"
+kubernetes_deploy_master_cidr_suffix: "{{ kubernetes_network.cidr_suffix }}"
+kubernetes_deploy_master_nameservers: "{{ kubernetes_network.nameservers }}"
+kubernetes_deploy_master_search_domain: "{{ kubernetes_domain_suffix }}"
+kubernetes_deploy_master_startup_order: "{{ kubernetes_master.startup_order | default(10) }}"
+kubernetes_deploy_master_startup_up_delay: "{{ kubernetes_node_defaults.startup_up_delay }}"
+kubernetes_deploy_master_startup_down_delay: "{{ kubernetes_node_defaults.startup_down_delay }}"
+
+kubernetes_deploy_worker_count: "{{ kubernetes_worker.count }}"
+kubernetes_deploy_worker_vmid_start: "{{ kubernetes_worker.vmid_start }}"
+kubernetes_deploy_worker_vm_id_start: "{{ kubernetes_worker.vmid_start }}"
+kubernetes_deploy_worker_name_prefix: "{{ kubernetes_worker.name_prefix }}"
+kubernetes_deploy_worker_cpu_cores: "{{ kubernetes_worker.cpu_cores }}"
+kubernetes_deploy_worker_cpu_sockets: "{{ kubernetes_worker.cpu_sockets }}"
+kubernetes_deploy_worker_memory_mb: "{{ kubernetes_worker.memory_mb }}"
+kubernetes_deploy_worker_disk_size: "{{ kubernetes_worker.disk_size }}"
+kubernetes_deploy_worker_clone_template: "{{ kubernetes_worker.clone_template }}"
+kubernetes_deploy_worker_target_nodes: "{{ kubernetes_worker.target_nodes }}"
+kubernetes_deploy_worker_ips: "{{ kubernetes_worker_ips }}"
+kubernetes_deploy_worker_ip_addresses: "{{ kubernetes_worker_ips }}"
+kubernetes_deploy_worker_gateway: "{{ kubernetes_network.gateway }}"
+kubernetes_deploy_worker_bridge: "{{ kubernetes_network.bridge }}"
+kubernetes_deploy_worker_vlan_id: "{{ kubernetes_network.vlan_id }}"
+kubernetes_deploy_worker_cidr_suffix: "{{ kubernetes_network.cidr_suffix }}"
+kubernetes_deploy_worker_nameservers: "{{ kubernetes_network.nameservers }}"
+kubernetes_deploy_worker_search_domain: "{{ kubernetes_domain_suffix }}"
+kubernetes_deploy_worker_startup_order: "{{ kubernetes_worker.startup_order | default(20) }}"
+kubernetes_deploy_worker_startup_up_delay: "{{ kubernetes_node_defaults.startup_up_delay }}"
+kubernetes_deploy_worker_startup_down_delay: "{{ kubernetes_node_defaults.startup_down_delay }}"
+
+kubernetes_configure_distribution: "rke2"
+kubernetes_configure_version: "{{ kubernetes_rke2_version }}"
+kubernetes_configure_channel: "stable"
+kubernetes_configure_cluster_cidr: "{{ kubernetes_cluster_cidr }}"
+kubernetes_configure_service_cidr: "{{ kubernetes_service_cidr }}"
+kubernetes_configure_cluster_dns: "{{ kubernetes_cluster_dns }}"
+
+kubernetes_rke2_api_ip: "{{ kubernetes_control_plane_first_ip }}"
+kubernetes_rke2_api_private_port: 9345
+kubernetes_server_url: "https://{{ kubernetes_rke2_api_ip }}:{{ kubernetes_rke2_api_private_port }}"
+kubernetes_rke2_cni:
+  - cilium
+kubernetes_rke2_ingress_controller: "none"
+kubernetes_rke2_disable:
+  - rke2-ingress-nginx
+kubernetes_rke2_write_kubeconfig_mode: "0644"
+kubernetes_rke2_additional_sans:
+  - "{{ kubernetes_rke2_api_ip }}"
+  - "{{ kubernetes_control_plane_first_host }}"
+  - "{{ kubernetes_domain_suffix }}"
+kubernetes_rke2_kubelet_arg: []
+kubernetes_rke2_kube_proxy_arg: []
+kubernetes_rke2_server_node_taints: []
+kubernetes_rke2_agent_node_taints: []

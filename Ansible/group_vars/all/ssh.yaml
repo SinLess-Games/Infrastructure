@@ -76,7 +76,7 @@ ssh:
     x11_forwarding: false
     client_alive_interval: 300
     client_alive_count_max: 2
-    use_dns: true
+    use_dns: false
     max_auth_tries: 10
 
   principals:

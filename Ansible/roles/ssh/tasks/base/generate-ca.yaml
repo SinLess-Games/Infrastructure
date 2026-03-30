@@ -15,8 +15,11 @@
   ansible.builtin.file:
     path: "{{ ssh_ca_output_dir }}"
     state: directory
+    owner: "{{ ssh_controller_local_user }}"
+    group: "{{ ssh_controller_local_group }}"
     mode: "0700"
   delegate_to: localhost
+  become: true
   run_once: true
 
 - name: Generate SSH CA keypair (idempotent)
@@ -30,6 +33,7 @@
   args:
     creates: "{{ ssh_ca_output_dir }}/ssh_ca"
   delegate_to: localhost
+  become: false
   run_once: true
   when: not ssh_ca_force_regenerate
 
@@ -42,6 +46,7 @@
     -f {{ ssh_ca_output_dir }}/ssh_ca
     -N ""
   delegate_to: localhost
+  become: false
   run_once: true
   when: ssh_ca_force_regenerate
 
@@ -49,14 +54,20 @@
   ansible.builtin.file:
     path: "{{ ssh_ca_output_dir }}/ssh_ca"
     state: file
+    owner: "{{ ssh_controller_local_user }}"
+    group: "{{ ssh_controller_local_group }}"
     mode: "{{ ssh_ca_key_mode_private }}"
   delegate_to: localhost
+  become: true
   run_once: true
 
 - name: Set permissions on SSH CA public key
   ansible.builtin.file:
     path: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
     state: file
+    owner: "{{ ssh_controller_local_user }}"
+    group: "{{ ssh_controller_local_group }}"
     mode: "{{ ssh_ca_key_mode_public }}"
   delegate_to: localhost
+  become: true
   run_once: true

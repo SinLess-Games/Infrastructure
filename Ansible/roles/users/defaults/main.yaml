@@ -4,6 +4,7 @@
 # =============================================================================
 
 users: []
+users_role_entries: "{{ users | default([]) }}"
 
 users_manage_home: true
 users_create_home: true

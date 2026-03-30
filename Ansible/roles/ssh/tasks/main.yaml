@@ -23,20 +23,26 @@
 - name: Check for existing SSH user private keys (controller)
   ansible.builtin.stat:
     path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   delegate_to: localhost
   register: ssh__user_privkey_stats
   changed_when: false
   run_once: true
+  when:
+    - ssh_role_manage_user_materials | bool
+    - ssh_role_users | length > 0
 
 - name: Check for existing SSH user public keys (controller)
   ansible.builtin.stat:
     path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   delegate_to: localhost
   register: ssh__user_pubkey_stats
   changed_when: false
   run_once: true
+  when:
+    - ssh_role_manage_user_materials | bool
+    - ssh_role_users | length > 0
 
 - name: Determine if SSH user key generation is required
   ansible.builtin.set_fact:
@@ -52,6 +58,16 @@
       }}
   run_once: true
   changed_when: false
+  when:
+    - ssh_role_manage_user_materials | bool
+    - ssh_role_users | length > 0
+
+- name: Default user key generation flag when user materials are disabled
+  ansible.builtin.set_fact:
+    ssh__generate_user_keys: false
+  run_once: true
+  changed_when: false
+  when: not (ssh_role_manage_user_materials | bool and ssh_role_users | length > 0)
 
 # -----------------------------------------------------------------------------
 # Phase 2A: Canonical CA paths + candidate resolution (controller-side)
@@ -152,9 +168,24 @@
   ansible.builtin.file:
     path: "{{ ssh__ca_canonical_dir }}"
     state: directory
-    mode: "0755"
+    owner: "{{ ssh_controller_local_user }}"
+    group: "{{ ssh_controller_local_group }}"
+    mode: "0700"
   when: ssh_ca_enabled | default(false) | bool
   delegate_to: localhost
+  become: true
+  run_once: true
+
+- name: Normalize canonical CA directory ownership (controller)
+  ansible.builtin.file:
+    path: "{{ ssh__ca_canonical_dir }}"
+    state: directory
+    owner: "{{ ssh_controller_local_user }}"
+    group: "{{ ssh_controller_local_group }}"
+    mode: "0700"
+  when: ssh_ca_enabled | default(false) | bool
+  delegate_to: localhost
+  become: true
   run_once: true
 
 - name: Determine if SSH CA generation is required
@@ -222,8 +253,8 @@
     src: "{{ ssh__ca_source_pub }}"
     dest: "{{ ssh__ca_canonical_pub }}"
     remote_src: true
-    owner: root
-    group: root
+    owner: "{{ ssh_controller_local_user }}"
+    group: "{{ ssh_controller_local_group }}"
     mode: "0644"
   when:
     - ssh_ca_enabled | default(false) | bool
@@ -239,8 +270,8 @@
     src: "{{ ssh__ca_source_priv }}"
     dest: "{{ ssh__ca_canonical_priv }}"
     remote_src: true
-    owner: root
-    group: root
+    owner: "{{ ssh_controller_local_user }}"
+    group: "{{ ssh_controller_local_group }}"
     mode: "0600"
   when:
     - ssh_ca_enabled | default(false) | bool
@@ -274,8 +305,8 @@
   ansible.builtin.file:
     path: "{{ ssh__ca_resolved_pub }}"
     state: file
-    owner: root
-    group: root
+    owner: "{{ ssh_controller_local_user }}"
+    group: "{{ ssh_controller_local_group }}"
     mode: "0644"
   when:
     - ssh_ca_enabled | default(false) | bool
@@ -288,8 +319,8 @@
   ansible.builtin.file:
     path: "{{ ssh__ca_resolved_priv }}"
     state: file
-    owner: root
-    group: root
+    owner: "{{ ssh_controller_local_user }}"
+    group: "{{ ssh_controller_local_group }}"
     mode: "0600"
   when:
     - ssh_ca_enabled | default(false) | bool
@@ -411,11 +442,14 @@
 - name: Check for existing SSH user certificates (controller)
   ansible.builtin.stat:
     path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}-cert.pub"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   delegate_to: localhost
   register: ssh__user_cert_stats
   changed_when: false
   run_once: true
+  when:
+    - ssh_role_manage_user_materials | bool
+    - ssh_role_users | length > 0
 
 - name: Determine if SSH user cert signing is required
   ansible.builtin.set_fact:
@@ -430,6 +464,16 @@
       }}
   run_once: true
   changed_when: false
+  when:
+    - ssh_role_manage_user_materials | bool
+    - ssh_role_users | length > 0
+
+- name: Default user certificate signing flag when user materials are disabled
+  ansible.builtin.set_fact:
+    ssh__sign_user_certs: false
+  run_once: true
+  changed_when: false
+  when: not (ssh_role_manage_user_materials | bool and ssh_role_users | length > 0)
 
 - name: Sign SSH user keys with CA (controller)
   ansible.builtin.import_tasks: base/sign.yaml
@@ -442,7 +486,9 @@
 # -----------------------------------------------------------------------------
 
 - name: User SSH configuration
-  when: users is defined and users | length > 0
+  when:
+    - ssh_role_manage_user_materials | bool
+    - ssh_role_users | length > 0
   block:
 
     - name: Install authorized_keys for users

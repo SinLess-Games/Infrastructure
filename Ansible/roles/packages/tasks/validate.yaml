@@ -3,27 +3,56 @@
 # packages — validation
 # =============================================================================
 
-- name: Validate apt_packages is defined
+- name: Validate package catalog is defined
   ansible.builtin.assert:
     that:
-      - apt_packages is defined
-      - apt_packages is mapping
-    fail_msg: "apt_packages must be defined as a dictionary"
+      - packages_role_catalog is defined
+      - packages_role_catalog is mapping
+    fail_msg: "packages_role_catalog must be defined as a dictionary"
+
+- name: Validate selected package groups is a list
+  ansible.builtin.assert:
+    that:
+      - packages_role_groups is defined
+      - packages_role_groups is iterable
+    fail_msg: "packages_role_groups must be defined as a list"
 
 - name: Validate enabled package groups exist
   ansible.builtin.assert:
     that:
-      - item in apt_packages
-    fail_msg: "Package group '{{ item }}' is not defined in apt_packages"
-  loop: "{{ packages_enabled_groups }}"
+      - item in packages_role_catalog
+    fail_msg: "Package group '{{ item }}' is not defined in packages_role_catalog"
+  loop: "{{ packages_role_groups }}"
 
 - name: Validate each package group is a list
   ansible.builtin.assert:
     that:
-      - apt_packages[item] is iterable
-    fail_msg: "apt_packages['{{ item }}'] must be a list"
-  loop: "{{ packages_enabled_groups }}"
+      - packages_role_catalog[item] is iterable
+    fail_msg: "packages_role_catalog['{{ item }}'] must be a list"
+  loop: "{{ packages_role_groups }}"
 
-- name: Install Homebrew (Linuxbrew)
-  import_tasks: install-homebrew.yaml
-  when: packages_install_homebrew | default(false)
+- name: Validate packages_install_homebrew flag
+  ansible.builtin.assert:
+    that:
+      - packages_install_homebrew | default(false) | type_debug == 'bool'
+    fail_msg: "packages_install_homebrew must be a boolean"
+
+- name: Validate Homebrew package list
+  ansible.builtin.assert:
+    that:
+      - packages_role_brew_packages is iterable
+    fail_msg: "packages_role_brew_packages must be a list"
+
+- name: Validate Homebrew prefix
+  ansible.builtin.assert:
+    that:
+      - packages_homebrew_prefix is string
+      - packages_homebrew_prefix | length > 0
+    fail_msg: "packages_homebrew_prefix must be a non-empty string"
+
+- name: Validate Homebrew user
+  ansible.builtin.assert:
+    that:
+      - packages_homebrew_user is string
+      - packages_homebrew_user | length > 0
+    fail_msg: "packages_homebrew_user must be a non-empty string"

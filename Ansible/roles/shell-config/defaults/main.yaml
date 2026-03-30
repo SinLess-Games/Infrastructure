@@ -7,13 +7,13 @@ shell_config_enabled: true
 
 shell_default: zsh
 
-shell_config_users: "{{ users }}"
+shell_role_users: "{{ shell_config_users | default(users | default([]), true) }}"
 
-shell_install_starship: true
 shell_install_oh_my_zsh: true
+shell_remove_starship: true
 
 shell_zsh_theme: robbyrussell
 
-# Where config files live (XDG-compliant)
-shell_starship_config_dir: ".config/starship"
-shell_starship_config_file: "config.toml"
+shell_bin_commands_enabled: true
+shell_bin_commands_src: "{{ playbook_dir }}/../files/bin_commands"
+shell_bin_commands_dest: "bin"

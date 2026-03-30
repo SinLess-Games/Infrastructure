@@ -9,7 +9,7 @@
 
 - name: Resolve passwd entries via getent (safe)
   ansible.builtin.command: "getent passwd {{ item.name }}"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   register: ssh__getent_passwd
   changed_when: false
   failed_when: false

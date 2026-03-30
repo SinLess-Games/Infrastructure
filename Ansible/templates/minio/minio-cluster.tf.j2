@@ -11,17 +11,26 @@ module "minio_cluster" {
   # Cluster configuration
   cluster_name     = "{{ minio_cluster_name }}"
   environment      = "{{ minio_environment }}"
-  node_count       = {{ minio_node_count }}
-  node_name_prefix = "{{ minio_node_name_prefix }}"
-  vm_id_start      = {{ minio_vm_id_start }}
+  service_name     = "minio"
+  node_role        = "storage"
 
   # Proxmox placement (HA distribution)
-  target_nodes   = {{ minio_target_nodes | to_json }}
+  nodes = [
+  {%- for node in minio_nodes %}
+    {
+      name        = "{{ node.name }}"
+      vmid        = {{ node.vmid }}
+      target_node = "{{ node.target_node }}"
+      ip_address  = "{{ node.ip }}"
+      hostname    = "{{ node.name }}"
+      fqdn        = "{{ node.name }}.{{ local_domain | default('local') }}"
+    }{{ "," if not loop.last else "" }}
+  {%- endfor %}
+  ]
   clone_template = "{{ minio_clone_template }}"
   force_create   = {{ minio_force_create | ternary('true', 'false') }}
 
   # Network configuration (VLAN 40, Storage network)
-  ip_addresses   = {{ minio_nodes | map(attribute='ip') | list | to_json }}
   gateway        = "{{ minio_gateway }}"
   cidr_subnet    = "{{ minio_cidr_subnet }}"
   vlan_id        = {{ minio_vlan_id }}
@@ -31,21 +40,15 @@ module "minio_cluster" {
   # Resource allocation
   cpu_cores   = {{ minio_cpu_cores }}
   cpu_sockets = {{ minio_cpu_sockets }}
-  memory_mb   = {{ minio_memory_mb }}
+  memory_mb         = {{ minio_memory_mb }}
   memory_balloon_mb = {{ minio_memory_balloon_mb }}
   disk_size   = "{{ minio_disk_size }}"
   storage     = "{{ minio_storage }}"
 
   # Access configuration
   default_user = "{{ minio_default_user }}"
-  ansible_user = "{{ minio_ansible_user }}"
   ssh_keys     = {{ minio_ssh_keys | to_json }}
-
-  # HA and backup
-  ha_enabled      = {{ minio_ha_enabled | ternary('true', 'false') }}
-  ha_group        = "{{ minio_ha_group }}"
-  backup_enabled  = {{ minio_backup_enabled | ternary('true', 'false') }}
-  backup_schedule = "{{ minio_backup_schedule }}"
+  backup_enabled = {{ minio_backup_enabled | ternary('true', 'false') }}
 
   # VM options
   start_at_node_boot = {{ minio_start_at_node_boot | ternary('true', 'false') }}

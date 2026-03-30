@@ -6,11 +6,23 @@
 - name: Validate users configuration
   ansible.builtin.import_tasks: validate.yaml
 
+- name: Build users role group list
+  ansible.builtin.set_fact:
+    users_role_groups: >-
+      {{
+        users_role_entries
+        | selectattr('groups', 'defined')
+        | map(attribute='groups')
+        | flatten
+        | unique
+        | list
+      }}
+
 - name: Ensure groups exist
   ansible.builtin.group:
     name: "{{ item }}"
     state: present
-  loop: "{{ users | map(attribute='groups') | flatten | unique | list }}"
+  loop: "{{ users_role_groups }}"
   when:
     - item is defined
     - item | length > 0
@@ -21,20 +33,19 @@
     comment: "{{ item.comment | default(omit) }}"
     shell: "{{ item.shell | default(users_default_shell) }}"
     system: "{{ item.system | default(false) }}"
-    create_home: "{{ users_create_home }}"
+    create_home: "{{ item.create_home | default(users_create_home) }}"
+    move_home: "{{ item.move_home | default(omit) }}"
+    home: "{{ item.home_directory | default(omit) }}"
+    uid: "{{ item.uid | default(omit) }}"
+    group: "{{ item.primary_group | default(omit) }}"
     groups: "{{ item.groups | default(omit) }}"
     append: true
-    state: present
-  loop: "{{ users }}"
-  loop_control:
-    label: "{{ item.name }}"
-
-- name: Lock password if requested
-  ansible.builtin.user:
-    name: "{{ item.name }}"
-    password_lock: true
-  when: item.password_lock | default(false)
-  loop: "{{ users }}"
+    password: "{{ item.password | default(omit) }}"
+    password_lock: "{{ item.password_lock | default(omit) }}"
+    expires: "{{ item.expires | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+    remove: "{{ item.remove | default(omit) }}"
+  loop: "{{ users_role_entries }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -46,15 +57,19 @@
     owner: root
     group: root
     mode: "0440"
-  when: item.sudo | default(false)
-  loop: "{{ users }}"
+  when:
+    - item.state | default('present') == 'present'
+    - item.sudo | default(false)
+  loop: "{{ users_role_entries }}"
   loop_control:
     label: "{{ item.name }}"
 
-- name: Configure the default shell for users
-  ansible.builtin.user:
-    name: "{{ item.name }}"
-    shell: "{{ users_default_shell }}"
-  loop: "{{ users }}"
+- name: Remove sudoers entries for users without sudo access
+  ansible.builtin.file:
+    path: "{{ users_sudoers_dir }}/{{ item.name }}"
+    state: absent
+  when:
+    - item.state | default('present') != 'present' or not (item.sudo | default(false))
+  loop: "{{ users_role_entries }}"
   loop_control:
     label: "{{ item.name }}"

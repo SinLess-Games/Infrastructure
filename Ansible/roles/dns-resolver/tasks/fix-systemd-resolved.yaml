@@ -5,7 +5,7 @@
 
 - name: Configure systemd-resolved
   ansible.builtin.template:
-    src: resolved.conf.j2
+    src: "{{ playbook_dir }}/../templates/dns/resolved.conf.j2"
     dest: /etc/systemd/resolved.conf
     owner: root
     group: root

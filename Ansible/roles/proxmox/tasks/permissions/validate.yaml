@@ -1,0 +1,98 @@
+---
+# Task: Validate Proxmox permissions setup
+
+- name: "Validate permissions setup"
+  block:
+    - name: "List all custom roles"
+      shell: |
+        pveum role list | grep -E "^(ReadOnly|TerraformProv|AnsibleProv)" || echo "No custom roles found"
+      register: roles_list
+      delegate_to: "{{ groups['pve_nodes'] | first }}"
+      become: true
+      ignore_unreachable: true
+      ignore_errors: true
+      when: not proxmox_permissions_dev_mode
+
+    - name: "[DEV MODE] Display roles (simulated)"
+      set_fact:
+        roles_list:
+          stdout_lines: "{{ proxmox_roles.keys() | list }}"
+      when: proxmox_permissions_dev_mode
+
+    - name: "Display roles"
+      debug:
+        msg: "{{ roles_list.stdout_lines | default(['Error: Could not list roles - Proxmox cluster unavailable']) }}"
+      ignore_errors: true
+
+    - name: "List all groups"
+      shell: |
+        pveum group list | grep -E "^(automation|operators|readonly)" || echo "No groups found"
+      register: groups_list
+      delegate_to: "{{ groups['pve_nodes'] | first }}"
+      become: true
+      ignore_unreachable: true
+      ignore_errors: true
+      when: not proxmox_permissions_dev_mode
+
+    - name: "[DEV MODE] Display groups (simulated)"
+      set_fact:
+        groups_list:
+          stdout_lines: "{{ proxmox_groups.keys() | list }}"
+      when: proxmox_permissions_dev_mode
+
+    - name: "Display groups"
+      debug:
+        msg: "{{ groups_list.stdout_lines | default(['Error: Could not list groups - Proxmox cluster unavailable']) }}"
+      ignore_errors: true
+
+    - name: "List all users"
+      shell: |
+        pveum user list | grep "@pve" || echo "No users found"
+      register: users_list
+      delegate_to: "{{ groups['pve_nodes'] | first }}"
+      become: true
+      ignore_unreachable: true
+      ignore_errors: true
+      when: not proxmox_permissions_dev_mode
+
+    - name: "[DEV MODE] Display users (simulated)"
+      set_fact:
+        users_list:
+          stdout_lines: "{{ proxmox_users.keys() | map('regex_replace', '^', 'pve:system:') | list }}"
+      when: proxmox_permissions_dev_mode
+
+    - name: "Display users"
+      debug:
+        msg: "{{ users_list.stdout_lines | default(['Error: Could not list users - Proxmox cluster unavailable']) }}"
+      ignore_errors: true
+
+    - name: "List ACL configurations"
+      shell: |
+        pveum acl list | head -20
+      register: acl_list
+      delegate_to: "{{ groups['pve_nodes'] | first }}"
+      become: true
+      ignore_unreachable: true
+      ignore_errors: true
+
+    - name: "Display ACLs (first 20 lines)"
+      debug:
+        msg: "{{ acl_list.stdout_lines | default(['Error: Could not list ACLs - Proxmox cluster unavailable']) }}"
+      ignore_errors: true
+
+    - name: "Check if API tokens were generated"
+      find:
+        path: "{{ proxmox_api_token_output_dir }}"
+        patterns: "*-api-token.txt"
+      register: api_token_files
+      delegate_to: localhost
+      become: false
+
+    - name: "Display API token files"
+      debug:
+        msg: "Generated {{ api_token_files.files | length }} API token file(s): {{ api_token_files.files | map(attribute='path') | list }}"
+
+  tags:
+    - proxmox
+    - permissions
+    - validate

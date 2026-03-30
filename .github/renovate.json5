@@ -1,0 +1,130 @@
+{
+  // JSON schema for editor validation and autocomplete.
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+
+  // Start from Renovate's safe defaults, then layer in repo-specific behavior.
+  extends: [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":rebaseStalePrs",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+  ],
+
+  // Keep Renovate timestamps aligned with the repo owner's local timezone.
+  timezone: "America/Boise",
+
+  // Standard labels make dependency PRs easy to filter and triage.
+  labels: ["dependencies", "renovate"],
+
+  // This repo is primarily infrastructure code, so we explicitly enable the
+  // managers that match the files we keep under version control.
+  enabledManagers: [
+    "ansible-galaxy",
+    "flux",
+    "github-actions",
+    "helm-values",
+    "kubernetes",
+    "kustomize",
+    "packer",
+    "terraform",
+  ],
+
+  // The repo keeps Ansible Galaxy dependencies in a single canonical file.
+  "ansible-galaxy": {
+    fileMatch: ["(^|/)Ansible/requirements\\.ya?ml$"],
+  },
+
+  // Flux, Kustomize, Helm values, and plain Kubernetes manifests all live
+  // under the Kubernetes/ tree.
+  flux: {
+    fileMatch: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+  },
+
+  "helm-values": {
+    fileMatch: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+  },
+
+  kubernetes: {
+    fileMatch: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+  },
+
+  kustomize: {
+    fileMatch: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+  },
+
+  // Only scan the root Terraform configuration checked into the repo.
+  // Local state, generated modules, and vendored provider directories are
+  // intentionally excluded below.
+  terraform: {
+    fileMatch: ["(^|/)Terraform/.+\\.tf$"],
+  },
+
+  // Limit Packer updates to the actual template definitions.
+  packer: {
+    fileMatch: ["(^|/)Packer/.+\\.pkr\\.hcl$"],
+  },
+
+  // Ignore generated, vendored, and secret-bearing paths so Renovate focuses
+  // on source files that we actually review and maintain.
+  ignorePaths: [
+    "**/.ansible/**",
+    "**/.collections/**",
+    "**/.terraform/**",
+    "**/.venv/**",
+    "**/build.log",
+    "**/*.auto.tfvars",
+    "**/*.pkvars.hcl",
+    "**/*.tfstate",
+    "**/*.tfstate.*",
+    "**/terraform.tfstate",
+    "**/terraform.tfstate.*",
+    ".secrets/**",
+  ],
+
+  // Keep lock file maintenance on so Terraform lock files can be refreshed when
+  // the manager starts tracking them in future commits.
+  lockFileMaintenance: {
+    enabled: true,
+  },
+
+  packageRules: [
+    {
+      // Ansible collection and role bumps are easiest to validate together.
+      matchManagers: ["ansible-galaxy"],
+      groupName: "ansible galaxy dependencies",
+      commitMessageTopic: "Ansible Galaxy dependencies",
+    },
+    {
+      // Group Flux and Kubernetes repo changes so GitOps updates arrive in a
+      // smaller number of reviewable PRs.
+      matchManagers: ["flux", "helm-values", "kubernetes", "kustomize"],
+      matchPaths: ["Kubernetes/**"],
+      groupName: "flux kubernetes manifests",
+      commitMessageTopic: "Flux Kubernetes manifests",
+    },
+    {
+      // Provider bumps can interact, so grouping them reduces noisy PR churn.
+      matchManagers: ["terraform"],
+      groupName: "terraform providers",
+      commitMessageTopic: "Terraform providers",
+    },
+    {
+      // Packer plugin updates are relatively low volume and fit well together.
+      matchManagers: ["packer"],
+      groupName: "packer plugins",
+      commitMessageTopic: "Packer plugins",
+    },
+    {
+      // GitHub Actions updates are grouped for simpler workflow maintenance.
+      matchManagers: ["github-actions"],
+      groupName: "github actions",
+      commitMessageTopic: "GitHub Actions",
+    },
+    {
+      // Surface breaking changes clearly so they stand out during review.
+      matchUpdateTypes: ["major"],
+      labels: ["dependencies", "major-update", "renovate"],
+    },
+  ],
+}

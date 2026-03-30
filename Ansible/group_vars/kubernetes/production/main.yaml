@@ -1,0 +1,135 @@
+---
+# =============================================================================
+# Kubernetes Production Cluster Variables - Shared
+# =============================================================================
+
+kubernetes_default_environment: "prod"
+kubernetes_environment: "prod"
+kubernetes_cluster_name: "k8s-prod"
+kubernetes_resource_pool: "prod"
+kubernetes_domain_suffix: "prod.k8s.sinlessgames.com"
+kubernetes_search_domain: "{{ kubernetes_domain_suffix }}"
+
+kubernetes_network:
+  bridge: "vmbr40"
+  vlan_id: 40
+  subnet: "10.10.40.0/24"
+  cidr_suffix: "/24"
+  gateway: "10.10.40.1"
+  nameservers: "10.10.10.1 1.1.1.1"
+
+kubernetes_proxmox_target_nodes:
+  - pve-01
+  - pve-04
+  - pve-05
+
+kubernetes_control_plane:
+  count: 3
+  vmid_start: 400
+  name_prefix: "k8s-prod-master"
+  cpu_cores: 4
+  cpu_sockets: 1
+  memory_mb: 8192
+  disk_size: "100G"
+  clone_template: "debian-13-template"
+  target_nodes:
+    - pve-01
+    - pve-04
+    - pve-05
+  startup_order: 10
+
+kubernetes_workers:
+  count: 3
+  vmid_start: 410
+  name_prefix: "k8s-prod-worker"
+  cpu_cores: 4
+  cpu_sockets: 1
+  memory_mb: 8192
+  disk_size: "100G"
+  clone_template: "debian-13-template"
+  target_nodes:
+    - pve-05
+    - pve-01
+    - pve-04
+  startup_order: 20
+
+kubernetes_master: "{{ kubernetes_control_plane }}"
+kubernetes_worker: "{{ kubernetes_workers }}"
+
+kubernetes_master_ips:
+  - "10.10.40.11"
+  - "10.10.40.12"
+  - "10.10.40.13"
+
+kubernetes_worker_ips:
+  - "10.10.40.20"
+  - "10.10.40.21"
+  - "10.10.40.22"
+
+kubernetes_nodes:
+  control_plane:
+    - name: "k8s-prod-master-01"
+      hostname: "k8s-prod-master-01"
+      fqdn: "k8s-prod-master-01.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.11"
+      vmid: 400
+      target_node: "pve-01"
+    - name: "k8s-prod-master-02"
+      hostname: "k8s-prod-master-02"
+      fqdn: "k8s-prod-master-02.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.12"
+      vmid: 401
+      target_node: "pve-04"
+    - name: "k8s-prod-master-03"
+      hostname: "k8s-prod-master-03"
+      fqdn: "k8s-prod-master-03.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.13"
+      vmid: 402
+      target_node: "pve-05"
+  workers:
+    - name: "k8s-prod-worker-01"
+      hostname: "k8s-prod-worker-01"
+      fqdn: "k8s-prod-worker-01.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.20"
+      vmid: 410
+      target_node: "pve-05"
+    - name: "k8s-prod-worker-02"
+      hostname: "k8s-prod-worker-02"
+      fqdn: "k8s-prod-worker-02.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.21"
+      vmid: 411
+      target_node: "pve-01"
+    - name: "k8s-prod-worker-03"
+      hostname: "k8s-prod-worker-03"
+      fqdn: "k8s-prod-worker-03.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.22"
+      vmid: 412
+      target_node: "pve-04"
+
+vault_kubernetes_prod_data: {}
+vault_kubernetes_ansible_prod_data: {}
+
+kubernetes_deploy_rke2_server_token: "{{ vault_kubernetes_prod_data.rke2_server_token | default('') }}"
+kubernetes_deploy_ssh_keys: "{{ vault_kubernetes_ansible_prod_data.kubernetes_ssh_keys | default([]) }}"
+
+kubernetes_externaldns:
+  technitium:
+    server: "http://10.10.10.11:5380"
+    zone: "prod.k8s.sinlessgames.com"
+    token: "{{ lookup('env', 'TECHNITIUM_API_TOKEN') | default('', true) }}"
+  cloudflare:
+    domain_filter: "sinlessgames.com"
+    token: "{{ lookup('env', 'CLOUDFLARE_API_TOKEN') | default('', true) }}"
+
+kubernetes_flux_path: "./Kubernetes/clusters/prod"
+kubernetes_vault_kv_path: "secret/data/kubernetes/prod"
+kubernetes_vault_eso_secret_path: "kubernetes/prod"
+kubernetes_externaldns_technitium_enabled: false
+
+kubernetes_operation:
+  plan_only: false
+  destroy: false
+  force_apply: false
+  wait_for_ssh_timeout: 1200
+  wait_for_kubeconfig_timeout: 300
+  wait_for_api_timeout: 600

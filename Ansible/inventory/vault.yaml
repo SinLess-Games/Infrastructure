@@ -1,11 +1,14 @@
 vault:
+  vars:
+    ansible_user: "sinless777"
+    ansible_password: "Shellshocker93!"
+    ansible_ssh_private_key_file: "/home/sinless777/.ssh/id_ed25519"
+    ansible_python_interpreter: "/usr/bin/python3"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=yes -o PreferredAuthentications=publickey,password -o PasswordAuthentication=yes"
   hosts:
     vault-01:
-      ansible_host: "10.10.10.2"
-      ansible_user: "sinless777"
+      ansible_host: "10.10.10.6"
     vault-02:
-      ansible_host: "10.10.10.3"
-      ansible_user: "sinless777"
+      ansible_host: "10.10.10.7"
     vault-03:
-      ansible_host: "10.10.10.4"
-      ansible_user: "sinless777"
+      ansible_host: "10.10.10.8"

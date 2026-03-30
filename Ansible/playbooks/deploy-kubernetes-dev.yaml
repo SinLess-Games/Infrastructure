@@ -1,196 +1,196 @@
 ---
 # =============================================================================
-# Kubernetes Development Deployment Playbook
+# Load Kubernetes Development Runtime Cache on Localhost + Deploy Infrastructure
 # =============================================================================
-# Purpose:
-#   - Deploy Kubernetes RKE2 cluster to development environment
-#   - Provision master and worker nodes via Terraform + Proxmox
-#   - Configure nodes via Ansible with Vault integration
-#   - Bootstrap RKE2 control plane and worker agents
-#   - Wait for cluster to be ready for workloads
-#
-# Dependencies:
-#   - .outputs/api-tokens/terraform-prov-api-token.txt (Proxmox API token)
-#   - VAULT_ADDR, VAULT_TOKEN environment variables (Vault access)
-#   - debian-13-template VM template in Proxmox
-#
-# Usage:
-#   task ansible:deploy-kubernetes-dev
-#   OR manually:
-#   export VAULT_ADDR=https://vault.sinlessgames.com:8200
-#   export VAULT_TOKEN=<your-token>
-#   ansible-playbook -i Ansible/inventory Ansible/playbooks/deploy-kubernetes-dev.yaml \
-#     --extra-vars "kubernetes_wait_for_ssh_timeout=1200"
-#
-# =============================================================================
-
-- name: Deploy Kubernetes Development Cluster
+- name: Load Kubernetes development runtime secrets into localhost cache and deploy VMs
   hosts: localhost
-  gather_facts: true
+  gather_facts: false
+  any_errors_fatal: true
   vars_files:
+    - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/development/main.yaml
+    - ../group_vars/kubernetes/development/master.yaml
+    - ../group_vars/kubernetes/development/worker.yaml
 
-  pre_tasks:
-    - name: Display Kubernetes deployment information
-      ansible.builtin.debug:
-        msg: |
-          ========================================================
-          Kubernetes Development Cluster Deployment
-          ========================================================
-          
-          Cluster Name: {{ kubernetes_cluster_name }}
-          Environment: {{ kubernetes_environment }}
-          Vault Address: {{ kubernetes_deploy_vault_addr }}
-          
-          Control Plane:
-            Count: {{ kubernetes_master.count }}
-            IPs: {{ kubernetes_master_ips | join(', ') }}
-            Resources: {{ kubernetes_master.cpu_cores }}vCPU, {{ kubernetes_master.memory_mb }}MB RAM
-            Template: {{ kubernetes_master.clone_template }}
-          
-          Workers:
-            Count: {{ kubernetes_worker.count }}
-            IPs: {{ kubernetes_worker_ips | join(', ') }}
-            Resources: {{ kubernetes_worker.cpu_cores }}vCPU, {{ kubernetes_worker.memory_mb }}MB RAM
-            Template: {{ kubernetes_worker.clone_template }}
-          
-          Network:
-            VLAN: {{ kubernetes_network.vlan_id }}
-            Subnet: {{ kubernetes_network.subnet }}
-            Gateway: {{ kubernetes_network.gateway }}
-          
-          RKE2 Version: {{ kubernetes_rke2_version }}
-          ========================================================
+  vars:
+    kubernetes_vault_kv_mount: "secrets"
+    kubernetes_vault_kv_paths:
+      - "kubernetes/common/access"
+      - "kubernetes/development/bootstrap"
+      - "kubernetes/development/integrations"
+      - "kubernetes/development/cluster"
 
-    - name: Verify Proxmox API token file exists
-      ansible.builtin.stat:
-        path: "{{ kubernetes_deploy_repo_root }}/{{ kubernetes_proxmox_api_token_file }}"
-      register: proxmox_token_stat
-      failed_when: not proxmox_token_stat.stat.exists
-      no_log: true
-
-    - name: Verify Vault connection
-      ansible.builtin.command:
-        cmd: "curl -sk {{ kubernetes_deploy_vault_addr }}/v1/sys/health -H 'X-Vault-Token: {{ kubernetes_deploy_vault_token }}'"
-      register: vault_health
-      failed_when: vault_health.rc != 0
-      changed_when: false
-      # no_log: true
-
-    # =========================================================================
-    # Load all Kubernetes development configuration from Vault
-    # This includes: RKE2 token, SSH keys, Vault config
-    # =========================================================================
-    - name: Load all Kubernetes development secrets from Vault
+  tasks:
+    - name: Load Kubernetes development secrets from Vault
       ansible.builtin.include_tasks: ../tasks/vault.yaml
       vars:
         vault_addr: "{{ kubernetes_deploy_vault_addr }}"
-        vault_kv_mount: "secrets"
-        vault_kv_path: "ansible/kubernetes/development"
+        vault_kv_mount: "{{ kubernetes_vault_kv_mount }}"
+        vault_kv_paths: "{{ kubernetes_vault_kv_paths }}"
         vault_skip_verify: "{{ kubernetes_deploy_vault_skip_verify }}"
         vault_token: "{{ kubernetes_deploy_vault_token }}"
+      tags:
+        - preflight
+        - vault
 
-    - name: Set Kubernetes development secrets (from ansible/kubernetes/development)
+    - name: Cache Vault documents and merged secrets for later plays
       ansible.builtin.set_fact:
-        vault_kubernetes_development_data: "{{ vault_runtime_secrets | default({}) }}"
-        vault_kubernetes_ansible_development_data: "{{ vault_runtime_secrets | default({}) }}"
+        kubernetes_vault_documents: "{{ vault_runtime_documents | default({}) }}"
+        kubernetes_vault_data: "{{ vault_runtime_secrets | default({}) }}"
       no_log: true
+      tags:
+        - preflight
+        - vault
 
-    - name: Validate Kubernetes secrets loaded
+    - name: Build runtime SSH key list from shared access document
+      ansible.builtin.set_fact:
+        kubernetes_runtime_ssh_keys: >-
+          {{
+            (
+              vault_runtime_documents['kubernetes/common/access'].ssh_authorized_keys
+              | default({})
+              | dict2items
+              | selectattr('value.enabled', 'defined')
+              | selectattr('value.enabled')
+              | map(attribute='value.public_key')
+              | list
+            )
+          }}
+      no_log: true
+      tags:
+        - preflight
+        - vault
+
+    - name: Build runtime bootstrap values from Vault
+      ansible.builtin.set_fact:
+        kubernetes_runtime_rke2_server_token: >-
+          {{
+            vault_runtime_documents['kubernetes/development/bootstrap'].rke2_server_token
+            | default(vault_runtime_secrets.rke2_server_token | default(''))
+          }}
+      no_log: true
+      tags:
+        - preflight
+        - vault
+
+    - name: Validate cached runtime values
       ansible.builtin.assert:
         that:
-          - vault_kubernetes_development_data is defined
-          - vault_kubernetes_development_data | length > 0
-          - vault_kubernetes_development_data.rke2_server_token is defined
-          - vault_kubernetes_ansible_development_data.kubernetes_ssh_keys is defined
-          - vault_kubernetes_ansible_development_data.kubernetes_ssh_keys | length >= 1
-        fail_msg: |
-          Failed to load Kubernetes development secrets from Vault at ansible/kubernetes/development.
-          Required structure:
-            rke2_server_token: <token>
-            vault_addr: <address>
-            vault_kv_path: <path>
-            kubernetes_ssh_keys:
-              - ssh-rsa AAAAB3... (SSH public key 1)
-              - ssh-rsa AAAAB3... (SSH public key 2)
+          - kubernetes_runtime_rke2_server_token is defined
+          - kubernetes_runtime_rke2_server_token | length > 0
+          - kubernetes_runtime_ssh_keys is defined
+          - kubernetes_runtime_ssh_keys | length >= 1
+        fail_msg: "Failed to populate localhost runtime cache from Vault."
+      tags:
+        - preflight
+        - vault
+        - validate
 
-    - name: Display fetched Vault secrets summary
-      ansible.builtin.debug:
-        msg: |
-          ✓ Successfully loaded Vault secrets from ansible/kubernetes/development:
-          
-          Configuration:
-            - RKE2 Server Token: ***REDACTED***
-            - Vault Address: {{ vault_kubernetes_development_data.vault_addr }}
-            - Vault KV Path: {{ vault_kubernetes_development_data.vault_kv_path }}
-          
-          SSH Keys:
-            - Count: {{ vault_kubernetes_ansible_development_data.kubernetes_ssh_keys | length }} key(s)
-            - Available keys: {{ vault_kubernetes_ansible_development_data.keys() | list | join(', ') }}
+    - name: Deploy Kubernetes development infrastructure
+      ansible.builtin.import_role:
+        name: kubernetes
+      vars:
+        kubernetes_role_phases: ["deploy"]
+        kubernetes_deploy_rke2_server_token: "{{ kubernetes_runtime_rke2_server_token }}"
+        kubernetes_deploy_ssh_keys: "{{ kubernetes_runtime_ssh_keys }}"
+      tags:
+        - deploy
+        - infrastructure
+
+
+# =============================================================================
+# Wait for All Kubernetes Development Nodes
+# =============================================================================
+- name: Wait for Kubernetes development nodes
+  hosts: kubernetes_dev
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/development/main.yaml
+    - ../group_vars/kubernetes/development/master.yaml
+    - ../group_vars/kubernetes/development/worker.yaml
 
   tasks:
-    - name: Import kubernetes-deploy role
-      ansible.builtin.import_role:
-        name: kubernetes-deploy
-      tags: [deploy]
-
-# =============================================================================
-# Configure Kubernetes Cluster - Run on the deployed nodes
-# =============================================================================
-- name: Configure Kubernetes Development Cluster
-  hosts: kubernetes_dev
-  gather_facts: true
-  vars_files:
-    - ../group_vars/kubernetes/development/main.yaml
-
-  pre_tasks:
-    - name: Wait for SSH on each node (max {{ kubernetes_wait_for_ssh_timeout | default(900) }}s)
+    - name: Wait for SSH on Kubernetes nodes
       ansible.builtin.wait_for_connection:
         delay: 10
         timeout: "{{ kubernetes_wait_for_ssh_timeout | default(900) }}"
         connect_timeout: 10
-      ignore_errors: true
-      register: ssh_wait_result
+      tags:
+        - wait
+        - kubernetes
 
-    - name: Skip worker configuration if SSH failed
+    - name: Gather facts after SSH is available
+      ansible.builtin.setup:
+      tags:
+        - wait
+        - kubernetes
+
+
+# =============================================================================
+# Configure All Kubernetes Development Nodes
+# =============================================================================
+- name: Configure Kubernetes development nodes
+  hosts: kubernetes_dev
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/development/main.yaml
+    - ../group_vars/kubernetes/development/master.yaml
+    - ../group_vars/kubernetes/development/worker.yaml
+
+  pre_tasks:
+    - name: Validate localhost runtime cache exists
+      ansible.builtin.assert:
+        that:
+          - "'localhost' in hostvars"
+          - hostvars['localhost'].kubernetes_runtime_rke2_server_token is defined
+          - hostvars['localhost'].kubernetes_runtime_rke2_server_token | length > 0
+          - hostvars['localhost'].kubernetes_runtime_ssh_keys is defined
+          - hostvars['localhost'].kubernetes_runtime_ssh_keys | length >= 1
+        fail_msg: |
+          Required localhost runtime cache is missing.
+          Ensure the localhost Vault/bootstrap/deploy play ran before this play.
+      tags:
+        - configure
+        - kubernetes
+        - validate
+
+    - name: Set runtime secrets from localhost cache
       ansible.builtin.set_fact:
-        skip_node_configuration: true
-      when:
-        - ssh_wait_result is failed
-        - "'kubernetes_worker' in group_names"
-
-    - name: Display node status
-      ansible.builtin.debug:
-        msg: |
-          {% if ssh_wait_result is succeeded %}
-          ✓ Node {{ inventory_hostname }} ({{ ansible_host }}) is ready
-          {% else %}
-          ⚠ Node {{ inventory_hostname }} ({{ ansible_host }}) not yet responsive (will retry after master is ready)
-          {% endif %}
-
-    # Load Vault secrets for RKE2 token
-    - name: Load Kubernetes development secrets from Vault for configuration
-      ansible.builtin.include_tasks: ../tasks/vault.yaml
-      vars:
-        vault_addr: "{{ kubernetes_deploy_vault_addr }}"
-        vault_kv_mount: "secrets"
-        vault_kv_path: "ansible/kubernetes/development"
-        vault_skip_verify: "{{ kubernetes_deploy_vault_skip_verify }}"
-        vault_token: "{{ kubernetes_deploy_vault_token }}"
-
-    - name: Set RKE2 server token from Vault
-      ansible.builtin.set_fact:
-        rke2_server_token: "{{ vault_runtime_secrets.rke2_server_token | default('') }}"
+        rke2_server_token: "{{ hostvars['localhost'].kubernetes_runtime_rke2_server_token }}"
+        kubernetes_deploy_ssh_keys: "{{ hostvars['localhost'].kubernetes_runtime_ssh_keys }}"
       no_log: true
+      tags:
+        - configure
+        - kubernetes
 
-    - name: Validate RKE2 token is available
+    - name: Validate runtime secrets
       ansible.builtin.assert:
         that:
           - rke2_server_token is defined
           - rke2_server_token | length > 0
-        fail_msg: |
-          Failed to load RKE2 server token from Vault
-          Required secret: ansible/kubernetes/development:rke2_server_token
+          - kubernetes_deploy_ssh_keys is defined
+          - kubernetes_deploy_ssh_keys | length >= 1
+        fail_msg: "Failed to obtain runtime secrets from localhost Vault cache."
+      tags:
+        - configure
+        - kubernetes
+        - validate
+
+    - name: Resolve node role
+      ansible.builtin.set_fact:
+        kubernetes_configure_node_role: >-
+          {{
+            'master'
+            if inventory_hostname in groups['kubernetes_dev_control_plane']
+            else 'worker'
+          }}
+      tags:
+        - configure
+        - kubernetes
 
     - name: Display node configuration information
       ansible.builtin.debug:
@@ -198,32 +198,39 @@
           ========================================================
           Configuring Kubernetes Node
           ========================================================
-          
           Hostname: {{ inventory_hostname }}
-          IP Address: {{ ansible_host }}
+          IP Address: {{ ansible_host | default(inventory_hostname) }}
           FQDN: {{ node_fqdn | default('Not set') }}
-          Role: {{ node_role | default('Not set') }}
-          Group(s): {{ group_names | join(', ') }}
-          
-          RKE2 Distribution: {{ kubernetes_configure_distribution | default('rke2') }}
-          RKE2 Version: {{ kubernetes_configure_version | default(kubernetes_rke2_version) }}
+          Groups: {{ group_names | join(', ') }}
+          Role: {{ kubernetes_configure_node_role }}
+
+          Distribution: {{ kubernetes_configure_distribution | default('rke2') }}
+          Version: {{ kubernetes_configure_version | default(kubernetes_rke2_version) }}
           ========================================================
+      tags:
+        - configure
+        - kubernetes
+        - summary
 
   tasks:
-    - name: DNS fix
+    - name: Apply DNS resolver role
+      become: true
       ansible.builtin.import_role:
         name: dns-resolver
-      ignore_errors: true
-        
-    - name: Import kubernetes-configure role
-      ansible.builtin.import_role:
-        name: kubernetes-configure
-      when: skip_node_configuration is not defined or not skip_node_configuration
+      failed_when: false
+      tags:
+        - dns
+        - kubernetes
 
-    - name: Skip configuration for unavailable worker node
-      ansible.builtin.debug:
-        msg: |
-          ⚠ Worker node {{ inventory_hostname }} ({{ ansible_host }}) not yet responsive.
-          This node will be configured after it completes booting.
-      when: skip_node_configuration is defined and skip_node_configuration
-  
+    - name: Configure Kubernetes node
+      become: true
+      ansible.builtin.import_role:
+        name: kubernetes
+      vars:
+        kubernetes_role_phases: ["configure"]
+        kubernetes_rke2_cluster_group_name: "kubernetes_dev"
+        kubernetes_rke2_servers_group_name: "kubernetes_dev_control_plane"
+        kubernetes_rke2_agents_group_name: "kubernetes_dev_workers"
+      tags:
+        - configure
+        - kubernetes

@@ -30,17 +30,35 @@
   changed_when: false
 
 # -----------------------------------------------------------------------------
-# Resolve user home directories safely
+# Resolve home directories from /etc/passwd (NSS-independent)
 # -----------------------------------------------------------------------------
 
-- name: Resolve home directories from passwd
-  ansible.builtin.getent:
-    database: passwd
+- name: Read user home from /etc/passwd for SSH users
+  ansible.builtin.command: "awk -F: '$1==\"{{ item.name }}\" {print $6}' /etc/passwd"
+  loop: "{{ ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: ssh__passwd_home_lookup
   changed_when: false
-  retries: 3
-  delay: 10
-  register: _getent_result
-  until: _getent_result is succeeded
+  failed_when: false
+  timeout: 10
+  ignore_errors: true
+
+- name: Initialize SSH user home directory map
+  ansible.builtin.set_fact:
+    ssh__home_by_user: "{{ ssh__home_by_user | default({}) }}"
+  changed_when: false
+
+- name: Build SSH user home directory map from existing local users
+  ansible.builtin.set_fact:
+    ssh__home_by_user: "{{ ssh__home_by_user | default({}) | combine({ item.item.name: item.stdout }) }}"
+  loop: "{{ ssh__passwd_home_lookup.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name | default('unknown') }}"
+  when:
+    - (item.rc | default(1)) == 0
+    - (item.stdout | default('') | length) > 0
+  changed_when: false
 
 # -----------------------------------------------------------------------------
 # Ensure ~/.ssh exists
@@ -48,7 +66,7 @@
 
 - name: Ensure ~/.ssh directory exists for users
   ansible.builtin.file:
-    path: "{{ getent_passwd[item.name][4] }}/.ssh"
+    path: "{{ ssh__home_by_user[item.name] }}/.ssh"
     state: directory
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
@@ -56,7 +74,7 @@
   loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
-  when: item.name in getent_passwd
+  when: item.name in ssh__home_by_user
   become: true
 
 # -----------------------------------------------------------------------------
@@ -160,7 +178,7 @@
 - name: Render authorized_keys for users
   ansible.builtin.template:
     src: "{{ playbook_dir }}/../templates/ssh/authorized_keys.j2"
-    dest: "{{ getent_passwd[item.name][4] }}/.ssh/authorized_keys"
+    dest: "{{ ssh__home_by_user[item.name] }}/.ssh/authorized_keys"
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0600"
@@ -168,7 +186,7 @@
   loop_control:
     label: "{{ item.name }}"
   when:
-    - item.name in getent_passwd
+    - item.name in ssh__home_by_user
     - hostvars['localhost'].ssh__authorized_keys_map is defined
   become: true
   vars:
@@ -216,7 +234,7 @@
 - name: Copy per-user private key to ~/.ssh
   ansible.builtin.copy:
     src: "{{ _ssh_output_base }}/{{ item.name }}/id_{{ _ssh_key_type }}"
-    dest: "{{ getent_passwd[item.name][4] }}/.ssh/id_{{ _ssh_key_type }}"
+    dest: "{{ ssh__home_by_user[item.name] }}/.ssh/id_{{ _ssh_key_type }}"
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0600"
@@ -226,13 +244,13 @@
     label: "{{ item.name }}"
   when:
     - _ssh_install_identity_keys | bool
-    - item.name in getent_passwd
+    - item.name in ssh__home_by_user
   become: true
 
 - name: Copy per-user public key to ~/.ssh
   ansible.builtin.copy:
     src: "{{ _ssh_output_base }}/{{ item.name }}/id_{{ _ssh_key_type }}.pub"
-    dest: "{{ getent_passwd[item.name][4] }}/.ssh/id_{{ _ssh_key_type }}.pub"
+    dest: "{{ ssh__home_by_user[item.name] }}/.ssh/id_{{ _ssh_key_type }}.pub"
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0644"
@@ -242,7 +260,7 @@
     label: "{{ item.name }}"
   when:
     - _ssh_install_identity_keys | bool
-    - item.name in getent_passwd
+    - item.name in ssh__home_by_user
   become: true
 
 - name: Stat per-user certificate on controller (no-follow)
@@ -263,7 +281,7 @@
 - name: Copy per-user certificate to ~/.ssh (if present)
   ansible.builtin.copy:
     src: "{{ _ssh_output_base }}/{{ item.item.name }}/id_{{ _ssh_key_type }}-cert.pub"
-    dest: "{{ getent_passwd[item.item.name][4] }}/.ssh/id_{{ _ssh_key_type }}-cert.pub"
+    dest: "{{ ssh__home_by_user[item.item.name] }}/.ssh/id_{{ _ssh_key_type }}-cert.pub"
     owner: "{{ item.item.name }}"
     group: "{{ item.item.name }}"
     mode: "0644"
@@ -275,5 +293,5 @@
     - _ssh_install_identity_keys | bool
     - _ssh_ca_enabled | bool
     - (item.stat.exists | default(false)) | bool
-    - item.item.name in getent_passwd
+    - item.item.name in ssh__home_by_user
   become: true

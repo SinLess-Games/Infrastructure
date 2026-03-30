@@ -1,0 +1,4 @@
+---
+minio_role_phases:
+  - deploy
+  - configure

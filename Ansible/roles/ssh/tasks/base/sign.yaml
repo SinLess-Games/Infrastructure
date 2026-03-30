@@ -34,7 +34,7 @@
     {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub
   args:
     creates: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}-cert.pub"
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
@@ -54,7 +54,7 @@
     -O {{ ssh_ca_cert_extensions | join(' -O ') }}
     {% endif %}
     {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub
-  loop: "{{ users }}"
+  loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost

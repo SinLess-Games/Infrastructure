@@ -1,0 +1,5 @@
+global_defs {
+    router_id {{ keepalived_router_id_value }}
+    enable_script_security
+    script_user {{ keepalived_script_user | default('root') }}
+}

@@ -3,6 +3,11 @@
 # DNS Resolver Role – Fix Static /etc/resolv.conf
 # =============================================================================
 
+- name: Remove immutable attribute from /etc/resolv.conf when present
+  ansible.builtin.command: chattr -i /etc/resolv.conf
+  changed_when: false
+  failed_when: false
+
 - name: Remove symlink if /etc/resolv.conf is a symlink
   ansible.builtin.file:
     path: /etc/resolv.conf
@@ -11,11 +16,12 @@
 
 - name: Create static /etc/resolv.conf
   ansible.builtin.template:
-    src: resolv.conf.j2
+    src: "{{ playbook_dir }}/../templates/dns/resolv.conf.j2"
     dest: /etc/resolv.conf
     owner: root
     group: root
     mode: '0644'
+    unsafe_writes: true
 
 - name: Protect /etc/resolv.conf from being overwritten
   ansible.builtin.file:

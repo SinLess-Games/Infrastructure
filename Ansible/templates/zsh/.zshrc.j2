@@ -3,8 +3,13 @@
    ===================================================================== #}
 
 {% set oh_my_zsh_path = user.home_directory ~ "/.oh-my-zsh" %}
-{% set starship_default_config_path = user.home_directory ~ "/.config/starship/starship.toml" %}
-{% set starship_xdg_config_path = user.home_directory ~ "/.config/starship/config.toml" %}
+{% set omz_builtin_plugins = [
+  'aliases', 'ansible', 'aws', 'azure', 'brew', 'docker', 'docker-compose',
+  'git', 'gh', 'helm', 'kubectl', 'terraform', 'sudo', 'systemd', 'vscode',
+  'ssh', 'ssh-agent', 'zoxide'
+] %}
+{% set custom_plugin_names = plugins | default([]) | map(attribute='name') | list %}
+{% set rendered_plugins = (omz_builtin_plugins + custom_plugin_names) | unique | list %}
 
 # =====================================================================
 # Zsh Shell Configuration
@@ -66,23 +71,16 @@ export PATH="$HOME/.venv/bin:$PATH"
 typeset -U path PATH
 # -------------------------- Environment --------------------------
 export ZSH="{{ oh_my_zsh_path }}"
-export STARSHIP_SHELL=zsh
 export HOMEBREW_NO_ENV_HINTS=1
 export DIRENV_LOG_FORMAT=
-
-if [[ -f "{{ starship_default_config_path }}" ]]; then
-  export STARSHIP_CONFIG="{{ starship_default_config_path }}"
-elif [[ -f "{{ starship_xdg_config_path }}" ]]; then
-  export STARSHIP_CONFIG="{{ starship_xdg_config_path }}"
-fi
 
 # -------------------------- Oh My Zsh --------------------------
 ZSH_THEME=""
 
 plugins=(
-  aliases ansible aws azure brew docker docker-compose
-  git gh helm kubectl terraform sudo systemd vscode
-  ssh ssh-agent zoxide
+{% for plugin_name in rendered_plugins %}
+  {{ plugin_name }}
+{% endfor %}
 )
 
 if [[ -s "$ZSH/oh-my-zsh.sh" ]]; then
@@ -103,10 +101,42 @@ setopt hist_ignore_dups hist_ignore_space hist_verify share_history
 # -------------------------- Aliases --------------------------
 source ~/.zsh_aliases 2>/dev/null || true
 
+# -------------------------- Prompt --------------------------
+source ~/.zsh_prompt 2>/dev/null || true
+
 # -------------------------- direnv --------------------------
 if command -v direnv >/dev/null 2>&1; then
   eval "$(command direnv hook zsh)"
 fi
+
+# -------------------------- Virtualenv Sync --------------------------
+typeset -g _ZSH_MANAGED_VENV=""
+
+_sync_direnv_virtualenv() {
+  local desired_venv="${VIRTUAL_ENV:-}"
+  local desired_bin=""
+
+  if [[ -n "$_ZSH_MANAGED_VENV" ]]; then
+    path=(${path:#"${_ZSH_MANAGED_VENV}/bin"})
+  fi
+
+  if [[ -n "$desired_venv" && -d "$desired_venv/bin" ]]; then
+    desired_bin="${desired_venv}/bin"
+    path=("$desired_bin" ${path:#"$desired_bin"})
+    export VIRTUAL_ENV="$desired_venv"
+    _ZSH_MANAGED_VENV="$desired_venv"
+  else
+    unset VIRTUAL_ENV
+    _ZSH_MANAGED_VENV=""
+  fi
+
+  export PATH="${(j.:.)path}"
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd _sync_direnv_virtualenv
+add-zsh-hook chpwd _sync_direnv_virtualenv
+_sync_direnv_virtualenv
 
 # -------------------------- zoxide --------------------------
 if command -v zoxide >/dev/null 2>&1; then
@@ -149,18 +179,3 @@ if ! ssh-add -l >/dev/null 2>&1; then
 fi
 
 unset SSH_ENV
-
-# -------------------------- Starship (FIXED) --------------------------
-if command -v starship >/dev/null 2>&1; then
-  eval "$(starship init zsh)"
-
-  # 🔒 CRITICAL FIX:
-  # VS Code calls PROMPT2 as a function.
-  # Starship sets it as a string → crash.
-  # We replace it with a wrapper function.
-  prompt2_starship() {
-    command starship prompt --continuation
-  }
-  PROMPT2='$(prompt2_starship)'
-fi
-# ---------------------------------------------------------------------

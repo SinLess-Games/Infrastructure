@@ -3,6 +3,9 @@
 # SSH Role Defaults
 # =============================================================================
 
+ssh_role_users: "{{ ssh.users | default(users | default([]), true) }}"
+ssh_role_manage_user_materials: true
+
 # ---------------------------------------------------------------------------
 # User SSH key settings
 # ---------------------------------------------------------------------------
@@ -25,7 +28,9 @@ ssh_repo_root: "{{ lookup('ansible.builtin.pipe', 'git rev-parse --show-toplevel
 # Persistent outputs directory (gitignored)
 ssh_output_root: "{{ ssh_repo_root }}/.outputs"
 ssh_output_base: "{{ ssh_output_root }}/ssh"
-ssh_ca_output_dir: "{{ ssh_output_root }}/ssh-ca"
+ssh_ca_output_dir: "{{ ssh_output_root }}/ssh_ca"
+ssh_controller_local_user: "{{ lookup('ansible.builtin.pipe', 'id -un') | trim }}"
+ssh_controller_local_group: "{{ lookup('ansible.builtin.pipe', 'id -gn') | trim }}"
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,62 @@
+// =====================================================================
+// Technitium Cluster Terraform Configuration (Managed by Ansible)
+// =====================================================================
+// Source: Ansible/roles/technitium-deploy/templates/technitium-cluster.tf.j2
+// DO NOT EDIT MANUALLY
+// Note: Provider and variables are shared from vault-cluster.tf
+// =====================================================================
+
+module "technitium_cluster" {
+  source = "{{ technitium_module_source }}"
+
+  # Cluster configuration
+  cluster_name     = "{{ technitium_cluster_name }}"
+  environment      = "{{ technitium_environment }}"
+  service_name     = "technitium"
+  node_role        = "dns"
+
+  # Proxmox placement (HA distribution)
+  nodes = [
+  {%- for i in range(technitium_node_count | int) %}
+    {
+      name        = "{{ technitium_node_name_prefix }}-{{ '%02d' | format(i + 1) }}"
+      vmid        = {{ technitium_vm_id_start | int + i }}
+      target_node = "{{ technitium_target_nodes[i % (technitium_target_nodes | length)] }}"
+      ip_address  = "{{ technitium_ip_addresses[i] }}"
+      hostname    = "{{ technitium_node_name_prefix }}-{{ '%02d' | format(i + 1) }}"
+      fqdn        = "{{ technitium_node_name_prefix }}-{{ '%02d' | format(i + 1) }}.{{ local_domain | default('local') }}"
+    }{{ "," if not loop.last else "" }}
+  {%- endfor %}
+  ]
+  clone_template = "{{ technitium_clone_template }}"
+
+  # Network configuration
+  gateway        = "{{ technitium_gateway }}"
+  cidr_subnet    = "{{ technitium_cidr_subnet }}"
+  vlan_id        = {{ technitium_vlan_id }}
+  network_bridge = "{{ technitium_network_bridge }}"
+  nameservers    = "{{ technitium_nameservers }}"
+
+  # Resource allocation
+  cpu_cores   = {{ technitium_cpu_cores }}
+  cpu_sockets = {{ technitium_cpu_sockets }}
+  memory_mb   = {{ technitium_memory_mb }}
+  disk_size   = "{{ technitium_disk_size }}"
+  storage     = "{{ technitium_storage }}"
+
+  # Access configuration
+  default_user = "{{ technitium_default_user }}"
+  default_password = "{{ technitium_default_password }}"
+  ssh_keys     = {{ technitium_ssh_keys | to_json }}
+  backup_enabled = {{ technitium_backup_enabled | ternary('true', 'false') }}
+
+  # VM options
+  start_at_node_boot = {{ technitium_start_at_node_boot | ternary('true', 'false') }}
+  agent_enabled      = {{ technitium_agent_enabled | ternary('true', 'false') }}
+  protection    = {{ technitium_protection | ternary('true', 'false') }}
+  startup_order = {{ technitium_startup_order }}
+
+  # Tags and metadata
+  tags        = {{ technitium_tags | to_json }}
+  description = "{{ technitium_description }}"
+}

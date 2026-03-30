@@ -1,0 +1,18 @@
+---
+# Standardized NTP source configuration for infrastructure roles.
+
+ntp_timezone: "UTC"
+
+# Ordered by preference: first entries are used first.
+ntp_servers:
+  # Internal/local first if available in your network.
+  - "10.10.10.12"
+  - "10.10.10.13"
+
+  # Reliable public fallback sources.
+  - "time.cloudflare.com"
+  - "time.google.com"
+  - "pool.ntp.org"
+
+# Optional pools in chrony-compatible format.
+ntp_pools: []

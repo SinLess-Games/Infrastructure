@@ -3,19 +3,19 @@
 # Validate users role inputs
 # =============================================================================
 
-- name: Ensure users variable is defined and is a list
+- name: Ensure users_role_entries is defined and is a list
   ansible.builtin.assert:
     that:
-      - users is defined
-      - users is iterable
+      - users_role_entries is defined
+      - users_role_entries is iterable
     fail_msg: >
-      "users must be defined as a list of user definitions"
+      "users_role_entries must be defined as a list of user definitions"
 
 - name: Validate required user fields
   ansible.builtin.assert:
     that:
       - item.name is defined
     fail_msg: "Each user must define at least a 'name'"
-  loop: "{{ users }}"
+  loop: "{{ users_role_entries }}"
   loop_control:
     label: "{{ item.name | default('undefined-user') }}"

@@ -11,16 +11,25 @@ module "postgres_cluster" {
   # Cluster configuration
   cluster_name     = "{{ postgres_cluster_name }}"
   environment      = "{{ postgres_environment }}"
-  node_count       = {{ postgres_node_count }}
-  node_name_prefix = "{{ postgres_node_name_prefix }}"
-  vm_id_start      = {{ postgres_vm_id_start }}
+  service_name     = "postgres"
+  node_role        = "database"
 
   # Proxmox placement (HA distribution)
-  target_nodes   = {{ postgres_target_nodes | to_json }}
+  nodes = [
+  {%- for node in postgres_nodes %}
+    {
+      name        = "{{ node.name }}"
+      vmid        = {{ node.vmid }}
+      target_node = "{{ node.target_node }}"
+      ip_address  = "{{ node.ip }}"
+      hostname    = "{{ node.name }}"
+      fqdn        = "{{ node.name }}.{{ local_domain | default('local') }}"
+    }{{ "," if not loop.last else "" }}
+  {%- endfor %}
+  ]
   clone_template = "{{ postgres_clone_template }}"
 
   # Network configuration
-  ip_addresses   = {{ postgres_nodes | map(attribute='ip') | list | to_json }}
   gateway        = "{{ postgres_gateway }}"
   cidr_subnet    = "{{ postgres_cidr_subnet }}"
   vlan_id        = {{ postgres_vlan_id }}
@@ -36,14 +45,9 @@ module "postgres_cluster" {
 
   # Access configuration
   default_user = "{{ postgres_default_user }}"
-  ansible_user = "{{ postgres_ansible_user }}"
+  default_password = "{{ postgres_default_password }}"
   ssh_keys     = {{ postgres_ssh_keys | to_json }}
-
-  # HA and backup
-  ha_enabled      = {{ postgres_ha_enabled | ternary('true', 'false') }}
-  ha_group        = "{{ postgres_ha_group }}"
-  backup_enabled  = {{ postgres_backup_enabled | ternary('true', 'false') }}
-  backup_schedule = "{{ postgres_backup_schedule }}"
+  backup_enabled = {{ postgres_backup_enabled | ternary('true', 'false') }}
 
   # VM options
   start_at_node_boot = {{ postgres_start_at_node_boot | ternary('true', 'false') }}

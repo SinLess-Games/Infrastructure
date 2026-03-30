@@ -1,0 +1,89 @@
+---
+# Validate and normalize storage configuration variables.
+
+- name: Normalize storage role inputs
+  ansible.builtin.set_fact:
+    proxmox_storage_target_nodes: "{{ proxmox_storage_nodes | default(groups.get('proxmox', [])) | list }}"
+    proxmox_storage_clean_all_disks: "{{ proxmox_storage_clean_all_disks | default(true) | bool }}"
+    proxmox_storage_clean_disk_patterns: "{{ proxmox_storage_clean_disk_patterns | default(['/dev/sd[b-z]', '/dev/nvme[1-9]n1']) }}"
+    proxmox_storage_pool_names_effective: >-
+      {{
+        proxmox_storage_pool_names
+        if (proxmox_storage_pool_names is defined and proxmox_storage_pool_names | length > 0)
+        else (
+          proxmox_storage_pools | default([]) | map(attribute='name') | list
+        )
+      }}
+    proxmox_storage_pool_weights_effective: "{{ proxmox_storage_pool_weights | default({}) }}"
+    proxmox_storage_pool_contents_effective: "{{ proxmox_storage_pool_contents | default({}) }}"
+    proxmox_storage_pool_max_disks_effective: "{{ proxmox_storage_pool_max_disks | default({}) }}"
+    proxmox_storage_pool_prefer_effective: "{{ proxmox_storage_pool_prefer | default({}) }}"
+    proxmox_storage_reserved_disks_map: "{{ proxmox_storage_reserved_disks | default({}) }}"
+
+- name: Resolve reserved disks for this node
+  ansible.builtin.set_fact:
+    proxmox_storage_reserved_disks_effective: "{{ (proxmox_storage_reserved_disks | default({})).get(inventory_hostname, []) | list }}"
+
+- name: Validate storage settings
+  ansible.builtin.assert:
+    that:
+      - proxmox_storage_enabled | default(true) | bool
+      - proxmox_storage_target_nodes | length > 0
+      - proxmox_storage_pool_names_effective is iterable
+      - proxmox_storage_pool_names_effective | length > 0
+      - proxmox_storage_clean_disk_patterns is iterable
+      - proxmox_storage_reserved_disks_effective is iterable
+    fail_msg: >-
+      Storage configuration is invalid. Set proxmox_storage_pool_names and
+      ensure proxmox_storage_nodes/proxmox groups are available.
+    quiet: true
+
+- name: Build normalized pool definitions
+  ansible.builtin.set_fact:
+    proxmox_storage_pools_normalized: "{{ proxmox_storage_pools_normalized | default([]) + [normalized_pool] }}"
+  vars:
+    _pool_name: "{{ item | string }}"
+    _pool_slug: "{{ (_pool_name | lower | regex_replace('[^a-z0-9_]', '_') | regex_replace('_+', '_') | regex_replace('^_|_$', '')) }}"
+    _node_suffix: "{{ inventory_hostname | regex_search('[0-9]+$') | default(inventory_hostname, true) }}"
+    _default_weight: "{{ 3 if (_pool_name | lower) is search('vm|disk|data') else (1 if (_pool_name | lower) is search('backup') else 1) }}"
+    _max_disks_raw: "{{ proxmox_storage_pool_max_disks_effective.get(_pool_name) }}"
+    _default_type: "{{ 'dir' if (_pool_name | lower) is search('backup') else 'lvmthin' }}"
+    normalized_pool:
+      name: "{{ _pool_name }}"
+      type: "{{ _default_type }}"
+      weight: "{{ proxmox_storage_pool_weights_effective.get(_pool_name, _default_weight) | int }}"
+      content: "{{ proxmox_storage_pool_contents_effective.get(_pool_name, 'images,rootdir') }}"
+      max_disks: "{{ (_max_disks_raw | int) if (_max_disks_raw is not none and (_max_disks_raw | string | length) > 0) else none }}"
+      prefer: "{{ proxmox_storage_pool_prefer_effective.get(_pool_name, 'smallest' if (_pool_name | lower) is search('backup') else 'largest') }}"
+      vg_name: "{{ _pool_slug }}_vg"
+      thinpool_name: "{{ _pool_slug }}_thin"
+      lv_name: "{{ _pool_slug }}_lv"
+      storage_id: "{{ _pool_slug }}_{{ _node_suffix }}"
+      mount_path: "/mnt/pve/{{ _pool_slug }}_{{ _node_suffix }}"
+      fs_type: "ext4"
+  loop: "{{ proxmox_storage_pool_names_effective }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Validate normalized pool weights
+  ansible.builtin.assert:
+    that:
+      - item.weight | int > 0
+      - item.type in ['lvmthin', 'dir']
+      - item.prefer in ['largest', 'smallest']
+      - (item.max_disks | string | length) == 0 or item.max_disks | int > 0
+    fail_msg: "Pool {{ item.name }} has an invalid storage policy"
+  loop: "{{ proxmox_storage_pools_normalized }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Display storage configuration
+  ansible.builtin.debug:
+    msg:
+      - "Storage configuration for {{ inventory_hostname }}"
+      - "Target nodes: {{ proxmox_storage_target_nodes | join(', ') }}"
+      - "Clean old LVM metadata: {{ proxmox_storage_clean_all_disks }}"
+      - "Reserved disks: {{ proxmox_storage_reserved_disks_effective | join(', ') if (proxmox_storage_reserved_disks_effective | length > 0) else 'none' }}"
+      - "Pools: {{ proxmox_storage_pools_normalized | map(attribute='name') | list | join(', ') }}"
+      - "Weights: {{ proxmox_storage_pools_normalized | map(attribute='name') | zip(proxmox_storage_pools_normalized | map(attribute='weight')) | list }}"
+  tags: [always]

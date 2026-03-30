@@ -5,6 +5,8 @@ tasks:
     desc: Start PXE stack (dnsmasq + nginx)
     cmds:
       - bash -lc 'docker compose -f PXE/docker-compose.yaml up -d'
+      # open the browser to localhost:3000
+      - bash -lc 'xdg-open http://localhost:3000'
 
   down:
     desc: Stop PXE stack

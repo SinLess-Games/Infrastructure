@@ -6,26 +6,56 @@
 - name: Test DNS resolution for each domain
   ansible.builtin.command:
     cmd: "getent hosts {{ item }}"
+  timeout: "{{ dns_query_timeout | int }}"
   loop: "{{ dns_test_domains }}"
   register: dns__resolution_tests
   failed_when: false
   changed_when: false
   ignore_errors: true
 
+- name: Set DNS resolution success count
+  ansible.builtin.set_fact:
+    dns__resolution_success_count: >-
+      {{
+        dns__resolution_tests.results
+        | default([])
+        | selectattr('rc', 'defined')
+        | selectattr('rc', 'equalto', 0)
+        | list
+        | length
+      }}
+
+- name: Set DNS resolution failed domain list
+  ansible.builtin.set_fact:
+    dns__resolution_failed_domains: >-
+      {{
+        dns__resolution_tests.results
+        | default([])
+        | rejectattr('rc', 'defined')
+        | map(attribute='item')
+        | list
+        +
+        (
+          dns__resolution_tests.results
+          | default([])
+          | selectattr('rc', 'defined')
+          | rejectattr('rc', 'equalto', 0)
+          | map(attribute='item')
+          | list
+        )
+      }}
+
 - name: Set DNS resolution status fact
   ansible.builtin.set_fact:
     dns__resolution_working: >-
-      {{ dns__resolution_tests.results
-         | selectattr('rc', 'equalto', 0)
-         | list
-         | length == dns_test_domains | length }}
+      {{ (dns__resolution_success_count | int) == (dns_test_domains | length) }}
 
 - name: Display DNS test results
   ansible.builtin.debug:
     msg:
       - "DNS Resolution Working: {{ dns__resolution_working }}"
-      - "Successful Tests: {{ dns__resolution_tests.results | selectattr('rc', 'equalto', 0) | list | length }}/{{ dns_test_domains | length }}"
-      - "Failed Domains: {{ dns__resolution_tests.results | selectattr('rc', 'ne', 0) | map(attribute='item') | list }}"
+      - "Successful Tests: {{ dns__resolution_success_count }}/{{ dns_test_domains | length }}"
+      - "Failed Domains: {{ dns__resolution_failed_domains }}"
 
 - name: Check current DNS configuration in /etc/resolv.conf
   ansible.builtin.slurp:

@@ -192,10 +192,6 @@ declare -A ISO_SOURCES=(
   ["debian-12"]="debian-12.13.0-amd64-netinst.iso|AUTO|https://cloudfront.debian.net/cdimage/archive/latest-oldstable/amd64/iso-cd/|SHA256SUMS"
   ["debian-13"]="debian-13.3.0-amd64-netinst.iso|AUTO|https://cloudfront.debian.net/cdimage/release/current/amd64/iso-cd/|SHA256SUMS"
   
-  # Flatcar Linux - Stable Release v4459.2.3 (lightweight container OS)
-  # Suitable for Kubernetes and container-based deployments
-  ["flatcar"]="flatcar_production_qemu_image.img.bz2|4a30f4929e84879ab6f99fbed1e480c0994580548aebafe221f9ad98f53be60c|https://stable.release.flatcar-linux.net/amd64-usr/current/"
-  
   # ========== COMMENTED EXAMPLES - Uncomment and fill in values to enable ==========
   # Ubuntu Server ISOs (fill in actual checksum from official Ubuntu downloads)
   # ["ubuntu-22.04"]="ubuntu-22.04.3-live-server-amd64.iso|AUTO|https://releases.ubuntu.com/22.04.3/|SHA256SUMS"

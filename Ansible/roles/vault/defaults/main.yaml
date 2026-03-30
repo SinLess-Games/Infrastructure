@@ -1,0 +1,7 @@
+---
+vault_role_phases:
+  - deploy
+  - configure
+  - setup
+  - secrets
+  - users

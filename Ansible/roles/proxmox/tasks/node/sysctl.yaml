@@ -1,0 +1,142 @@
+---
+# =============================================================================
+# proxmox-node — sysctl
+# -----------------------------------------------------------------------------
+# Kernel and sysctl tuning for Proxmox VE nodes
+#
+# Design goals:
+# - Safe for Proxmox clustering (Corosync)
+# - Safe for Ceph (public + cluster networks)
+# - Safe for Linux bridges, VLANs, and VMs
+# - Deterministic and idempotent
+#
+# Explicitly avoids:
+# - Aggressive hardening that breaks networking
+# - VM-hostile memory overcommit tweaks
+# - Kubernetes-specific tuning (handled elsewhere)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Ensure sysctl support is present
+# -----------------------------------------------------------------------------
+
+- name: Ensure procps is installed (sysctl tooling)
+  ansible.builtin.package:
+    name: procps
+    state: present
+
+# -----------------------------------------------------------------------------
+# Networking — Proxmox & Ceph safe defaults
+# -----------------------------------------------------------------------------
+
+- name: Apply network-related sysctl settings
+  ansible.builtin.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    # IP forwarding (required for vmbr bridges)
+    - { name: "net.ipv4.ip_forward", value: "1" }
+
+    # Disable ICMP redirects (host safety)
+    - { name: "net.ipv4.conf.all.accept_redirects", value: "0" }
+    - { name: "net.ipv4.conf.default.accept_redirects", value: "0" }
+    - { name: "net.ipv4.conf.all.send_redirects", value: "0" }
+    - { name: "net.ipv4.conf.default.send_redirects", value: "0" }
+
+    # Reverse path filtering (safe mode for routed/bridged envs)
+    - { name: "net.ipv4.conf.all.rp_filter", value: "1" }
+    - { name: "net.ipv4.conf.default.rp_filter", value: "1" }
+
+    # Bridge traffic visibility for firewalling (Proxmox-friendly)
+    - { name: "net.bridge.bridge-nf-call-iptables", value: "1" }
+    - { name: "net.bridge.bridge-nf-call-arptables", value: "1" }
+
+    # Disable IPv6
+    - { name: "net.ipv6.conf.all.disable_ipv6", value: "1" }
+    - { name: "net.ipv6.conf.default.disable_ipv6", value: "1" }
+    - { name: "net.ipv6.conf.lo.disable_ipv6", value: "1" }
+
+# -----------------------------------------------------------------------------
+# Kernel hardening — safe baseline
+# -----------------------------------------------------------------------------
+
+- name: Apply kernel hardening sysctl settings
+  ansible.builtin.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    # Restrict kernel pointer exposure
+    - { name: "kernel.kptr_restrict", value: "2" }
+
+    # Restrict dmesg access
+    - { name: "kernel.dmesg_restrict", value: "1" }
+
+    # Panic behavior (fail fast, preserve logs)
+    - { name: "kernel.panic", value: "10" }
+    - { name: "kernel.panic_on_oops", value: "1" }
+
+    # Disable magic SysRq by default (can be enabled per-host if needed)
+    - { name: "kernel.sysrq", value: "0" }
+
+# -----------------------------------------------------------------------------
+# Memory management — VM-friendly defaults
+# -----------------------------------------------------------------------------
+# NOTE:
+# - Proxmox manages memory aggressively already
+# - These values avoid starving VMs or Ceph OSDs
+# -----------------------------------------------------------------------------
+
+- name: Apply memory-related sysctl settings
+  ansible.builtin.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    # Avoid excessive swapping on hosts
+    - { name: "vm.swappiness", value: "10" }
+
+    # Dirty page writeback tuning (host stability)
+    - { name: "vm.dirty_ratio", value: "20" }
+    - { name: "vm.dirty_background_ratio", value: "10" }
+
+# -----------------------------------------------------------------------------
+# File system & inotify limits (large VM counts)
+# -----------------------------------------------------------------------------
+
+- name: Apply filesystem and inotify sysctl settings
+  ansible.builtin.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    # Inotify limits for large clusters
+    - { name: "fs.inotify.max_user_instances", value: "8192" }
+    - { name: "fs.inotify.max_user_watches", value: "524288" }
+
+    # File descriptor limits
+    - { name: "fs.file-max", value: "2097152" }
+
+# -----------------------------------------------------------------------------
+# Validation marker
+# -----------------------------------------------------------------------------
+
+- name: Confirm sysctl configuration applied
+  ansible.builtin.debug:
+    msg: "Proxmox sysctl baseline applied successfully."
+
+# =============================================================================
+# Notes
+# -----------------------------------------------------------------------------
+# - Kubernetes tuning (nf_conntrack, fs.aio-max-nr) should live in k8s roles
+# - Host-specific overrides belong in host_vars/
+# =============================================================================

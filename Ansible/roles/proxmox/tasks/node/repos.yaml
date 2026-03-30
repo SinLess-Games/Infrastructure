@@ -1,0 +1,110 @@
+---
+# =============================================================================
+# Proxmox APT repositories
+# =============================================================================
+
+- name: Remove Proxmox enterprise .sources files (unlicensed nodes)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/pve-enterprise.sources
+  when: not proxmox_node.licensed | bool
+
+- name: Remove legacy Proxmox enterprise .list files (if present)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/pve-enterprise.list
+  when: not proxmox_node.licensed | bool
+
+- name: Remove Ceph repository definitions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/ceph.sources
+    - /etc/apt/sources.list.d/ceph.list
+    - /etc/apt/sources.list.d/ceph-squid-no-subscription.list
+    - /etc/apt/sources.list.d/ceph-squid-no-subscription.sources
+  become: true
+
+- name: Enable Proxmox VE no-subscription repository
+  ansible.builtin.apt_repository:
+    repo: "deb http://download.proxmox.com/debian/pve {{ ansible_distribution_release }} pve-no-subscription"
+    filename: pve-no-subscription
+    state: present
+    update_cache: no
+  when: not proxmox_node.licensed | bool
+
+- name: Enable Proxmox VE enterprise repository (licensed nodes only)
+  ansible.builtin.apt_repository:
+    repo: "deb https://enterprise.proxmox.com/debian/pve {{ ansible_distribution_release }} pve-enterprise"
+    state: present
+    update_cache: no
+  when: proxmox_node.licensed | bool
+
+- name: Read resolver configuration before apt update
+  ansible.builtin.command: cat /etc/resolv.conf
+  register: proxmox_resolv_conf
+  changed_when: false
+
+- name: Verify DNS resolution for apt repositories
+  ansible.builtin.shell: |
+    set -eu
+    getent ahosts deb.debian.org
+    getent ahosts security.debian.org
+    getent ahosts download.proxmox.com
+  args:
+    executable: /bin/bash
+  register: proxmox_dns_preflight
+  changed_when: false
+  failed_when: false
+
+- name: Fail fast when DNS resolution is broken
+  ansible.builtin.fail:
+    msg: |-
+      DNS preflight failed on {{ inventory_hostname }} before apt update.
+      /etc/resolv.conf:
+      {{ proxmox_resolv_conf.stdout | default('(unavailable)') }}
+
+      getent output:
+      {{ proxmox_dns_preflight.stdout | default('(no stdout)') }}
+
+      getent errors:
+      {{ proxmox_dns_preflight.stderr | default('(no stderr)') }}
+  when: proxmox_dns_preflight.rc != 0
+
+- name: Update apt cache (single clean run)
+  block:
+    - name: Refresh apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        lock_timeout: 120
+        update_cache_retries: 5
+        update_cache_retry_max_delay: 30
+      register: proxmox_apt_update
+
+  rescue:
+    - name: Capture apt update output when it fails
+      ansible.builtin.command: apt-get update
+      register: proxmox_apt_update_debug
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with apt update error details
+      ansible.builtin.fail:
+        msg: |-
+          Apt update failed on {{ inventory_hostname }}.
+          /etc/resolv.conf:
+          {{ proxmox_resolv_conf.stdout | default('(unavailable)') }}
+
+          apt module error:
+          {{ ansible_failed_result.msg | default(proxmox_apt_update.msg | default('unknown error')) }}
+
+          apt-get update stdout:
+          {{ proxmox_apt_update_debug.stdout | default('(no stdout)') }}
+
+          apt-get update stderr:
+          {{ proxmox_apt_update_debug.stderr | default('(no stderr)') }}

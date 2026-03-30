@@ -1,0 +1,60 @@
+---
+# Task: Create Proxmox groups
+
+- name: "Create groups"
+  block:
+    - name: "Check if proxmox_groups is defined"
+      assert:
+        that:
+          - proxmox_groups is defined
+          - proxmox_groups | type_debug == 'dict'
+        fail_msg: "proxmox_groups must be defined in group_vars"
+
+    - name: "Create group: {{ item.key }}"
+      shell: |
+        set -euo pipefail
+
+        group_name="{{ item.key }}"
+        group_comment={{ (item.value.comment | default('')) | quote }}
+        group_exists=$(pveum group list --output-format json | GROUP="$group_name" python3 -c 'import json, os, sys; group=os.environ.get("GROUP"); data=json.load(sys.stdin); print("YES" if any(g.get("groupid")==group for g in data) else "NO")')
+
+        if [ "$group_exists" = "NO" ]; then
+          if [ -n "$group_comment" ]; then
+            pveum group add "$group_name" -comment "$group_comment"
+          else
+            pveum group add "$group_name"
+          fi
+          echo "CHANGED"
+        else
+          echo "UNCHANGED"
+        fi
+      register: group_result
+      changed_when: "'CHANGED' in group_result.stdout"
+      loop: "{{ proxmox_groups | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      delegate_to: "{{ groups['pve_nodes'] | first }}"
+      become: true
+      run_once: true
+      when: not proxmox_permissions_dev_mode
+      tags:
+        - proxmox
+        - permissions
+        - groups
+
+    - name: "[DEV MODE] Display group creation (simulated): {{ item.key }}"
+      debug:
+        msg: "Would create group: {{ item.key }} with comment: {{ item.value.comment | default('none') }}"
+      loop: "{{ proxmox_groups | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: proxmox_permissions_dev_mode
+      tags:
+        - proxmox
+        - permissions
+        - groups
+
+  tags:
+    - proxmox
+    - permissions
+    - groups

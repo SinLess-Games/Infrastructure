@@ -3,10 +3,37 @@
 # Vault Deployment Playbook
 # =============================================================================
 # Purpose:
-#   - Deploy Vault VMs using Terraform module
-#   - Render Terraform configuration from group_vars/vault
+#   - Deploy Vault VMs using the shared Proxmox VM Terraform module
+#   - Render service-specific Terraform configuration from group_vars/vault
 #   - Execute Terraform via Taskfile
 # =============================================================================
+
+- name: Prepare controller SSH state for Vault access
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  become: true
+
+  vars:
+    vault_controller_user: "{{ lookup('env', 'USER') }}"
+    vault_controller_home: "{{ lookup('env', 'HOME') }}"
+
+  tasks:
+    - name: Ensure controller SSH directory exists
+      ansible.builtin.file:
+        path: "{{ vault_controller_home }}/.ssh"
+        state: directory
+        owner: "{{ vault_controller_user }}"
+        group: "{{ vault_controller_user }}"
+        mode: "0700"
+
+    - name: Ensure controller known_hosts is writable by the current user
+      ansible.builtin.file:
+        path: "{{ vault_controller_home }}/.ssh/known_hosts"
+        state: touch
+        owner: "{{ vault_controller_user }}"
+        group: "{{ vault_controller_user }}"
+        mode: "0600"
 
 - name: Deploy Vault cluster with Terraform
   hosts: localhost
@@ -18,7 +45,9 @@
     - ../group_vars/vault/vault-vms.yaml
 
   roles:
-    - role: vault-deploy
+    - role: vault
+      vars:
+        vault_role_phases: ["deploy"]
       tags: ["deploy"]
 
 - name: Configure Vault nodes
@@ -39,11 +68,9 @@
 
   vars:
     # Only install essential packages for Vault nodes
-    packages_enabled_groups:
-      - base
-      - cli
-      - net
-      - system
+    packages_role_groups:
+      - production
+      - shell
 
   roles:
     - role: dns-resolver
@@ -61,17 +88,22 @@
     - role: ssh
       tags: ["configure", "sshd"]
   
-    - role: vault-configure
+    - role: vault
+      vars:
+        vault_role_phases: ["configure"]
       tags: ["configure"]
-    
-    - role: vault-setup
+
+    - role: vault
+      vars:
+        vault_role_phases: ["setup"]
       tags: ["setup"]
 
-    - role: vault-secrets
+    - role: vault
+      vars:
+        vault_role_phases: ["secrets"]
       tags: ["secrets"]
 
-    - role: vault-users
+    - role: vault
+      vars:
+        vault_role_phases: ["users"]
       tags: ["users"]
-
-
-

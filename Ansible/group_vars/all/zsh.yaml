@@ -1,6 +1,6 @@
 ---
 # =============================================================================
-# Zsh / Oh My Zsh / Starship Configuration (Global Defaults)
+# Zsh / Oh My Zsh Configuration (Global Defaults)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -12,7 +12,7 @@ zsh_theme: robbyrussell
 
 shell_install_zsh: true
 shell_install_oh_my_zsh: true
-shell_install_starship: true
+shell_install_starship: false
 
 # -----------------------------------------------------------------------------
 # Users that should receive shell configuration
@@ -77,11 +77,11 @@ fzf_key_bindings: true
 fzf_completion: true
 
 # -----------------------------------------------------------------------------
-# Starship Prompt
+# Native Zsh prompt
 # -----------------------------------------------------------------------------
 
-starship_enabled: true
-starship_config_path: ".config/starship/config.toml"
+zsh_prompt_enabled: true
+zsh_prompt_file: ".zsh_prompt"
 
 # -----------------------------------------------------------------------------
 # Oh My Zsh Custom Paths

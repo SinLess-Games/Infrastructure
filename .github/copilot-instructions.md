@@ -2,173 +2,176 @@
 
 ## Project Overview
 
-This is an **Infrastructure-as-Code** monorepo for managing a production Proxmox cluster with integrated Ceph storage, Kubernetes workloads, and zero-trust networking. The platform serves SinLess Games LLC with development, staging, and production environments.
+This repository is the infrastructure monorepo for SinLess Games LLC. It manages Proxmox-backed virtual machines, Kubernetes clusters, DNS, storage services, and workstation/bootstrap automation with Ansible, Terraform, Packer, and Vault.
 
-**Core Technologies:**
-- **Proxmox VE** (5-node cluster: pve-01 through pve-05)
-- **Ceph** for shared storage (Proxmox-integrated)
-- **Ansible** for configuration management
-- **Kubernetes** (RKE2) with FluxCD GitOps
-- **Packer** for VM template building
-- **Terraform** for infrastructure provisioning
-- **HashiCorp Vault** for secrets management
+Treat the repository as the source of truth for the current architecture. Prefer describing what is implemented here today over aspirational or historical designs.
 
-## Architecture Principles
+**Primary technologies**
+- **Proxmox VE** for hypervisor and VM lifecycle
+- **Ansible** for configuration management and orchestration
+- **Terraform** for VM provisioning and secrets-related infrastructure logic
+- **Packer** for image/template creation
+- **Vault** for secrets and bootstrap material
+- **Kubernetes / Talos** as the intended cluster platform direction
 
-1. **Taskfile-First Interface**: Always use `task` commands—never run tools directly. See [taskfile.yaml](taskfile.yaml) and `.taskfiles/` subdirectories.
-2. **VLAN-Based Network Segmentation**: Management (VLAN 10), Services (VLAN 20), K8s (VLAN 30), Storage (VLAN 40), DMZ (VLAN 50)
-3. **Idempotent Operations**: All playbooks and tasks are safe to re-run
-4. **Environment Separation**: [Environments/](Environments/) contains dev/staging/prod overlays
-5. **Secrets in Ansible Vault**: Sensitive values prefixed with `vault_` in [Ansible/group_vars/](Ansible/group_vars/)
+## Current Repository Shape
 
-## Critical Workflows
+### Ansible
 
-### Initializing the Repository
+Custom domain roles live in [Ansible/roles](../Ansible/roles):
+- `proxmox`
+- `kubernetes`
+- `vault`
+- `postgres`
+- `minio`
+- `technitium`
+- shared foundation roles such as `users`, `ssh`, `shell-config`, `packages`, and `dns-resolver`
+
+Role-local templates have been consolidated into [Ansible/templates](../Ansible/templates). Do not reintroduce `templates/` directories inside roles unless there is a compelling reason.
+
+Group variables are organized by domain in [Ansible/group_vars](../Ansible/group_vars):
+- [all](../Ansible/group_vars/all)
+- [kubernetes](../Ansible/group_vars/kubernetes)
+- [minio](../Ansible/group_vars/minio)
+- [postgres](../Ansible/group_vars/postgres)
+- [proxmox](../Ansible/group_vars/proxmox)
+- [technitium](../Ansible/group_vars/technitium)
+- [vault](../Ansible/group_vars/vault)
+- [zsh](../Ansible/group_vars/zsh)
+
+### Terraform
+
+VM provisioning has been consolidated into a shared module at [Terraform/modules/proxmox-vm-cluster](../Terraform/modules/proxmox-vm-cluster).
+
+The only other active Terraform module today is [Terraform/modules/vault-secrets](../Terraform/modules/vault-secrets).
+
+If you see older service-specific VM module references, treat them as stale and migrate them toward the shared Proxmox VM module instead of adding more duplication.
+
+## Preferred Workflows
+
+### Use Repository Wrappers First
+
+Prefer the repository task wrappers under [.taskfiles](../.taskfiles) when they exist. They standardize the Python virtualenv, Ansible config, and common arguments.
+
+Common Ansible entrypoints are defined in [.taskfiles/Ansible/Taskfile.yaml](../.taskfiles/Ansible/Taskfile.yaml), including:
+- `configure-localhost`
+- `setup-proxmox-nodes`
+- `setup-technitium`
+- `deploy-vault`
+- `deploy-postgres`
+- `deploy-minio`
+- `k8s:dev`
+- `k8s:dev:plan`
+- `k8s:dev:destroy`
+
+When direct tool invocation is necessary, use the repo-managed virtualenv at [Ansible/.venv](../Ansible/.venv) and the repo Ansible config at [Ansible/ansible.cfg](../Ansible/ansible.cfg).
+
+### Active Playbooks
+
+The primary maintained playbooks in [Ansible/playbooks](../Ansible/playbooks) are:
+- [configure-localhost.yaml](../Ansible/playbooks/configure-localhost.yaml)
+- [setup-proxmox-nodes.yaml](../Ansible/playbooks/setup-proxmox-nodes.yaml)
+- [setup-technitium.yaml](../Ansible/playbooks/setup-technitium.yaml)
+- [deploy-vault.yaml](../Ansible/playbooks/deploy-vault.yaml)
+- [deploy-postgres.yaml](../Ansible/playbooks/deploy-postgres.yaml)
+- [deploy-minio.yaml](../Ansible/playbooks/deploy-minio.yaml)
+- [deploy-kubernetes-dev.yaml](../Ansible/playbooks/deploy-kubernetes-dev.yaml)
+- [deploy-kubernetes-staging.yaml](../Ansible/playbooks/deploy-kubernetes-staging.yaml)
+- [deploy-kubernetes-prod.yaml](../Ansible/playbooks/deploy-kubernetes-prod.yaml)
+
+When adding new automation, prefer extending existing domain playbooks and roles before creating new one-off role splits.
+
+## Architecture Guidance
+
+### Domain-First Role Design
+
+The repo has moved away from split roles like `*-deploy`, `*-configure`, and service-specific Terraform VM modules. Keep that direction:
+- prefer one domain role per service
+- keep orchestration phases inside the domain role
+- move reusable logic into shared roles or shared templates
+- avoid duplicating nearly identical Terraform or template code per service
+
+### Proxmox
+
+There is one active Proxmox domain role: [Ansible/roles/proxmox](../Ansible/roles/proxmox).
+
+The Proxmox path no longer includes separate HA UI or dedicated Proxmox HA VM orchestration. Do not add new Proxmox HA VM logic back into that role unless the architecture is intentionally changing.
+
+The Proxmox role is responsible for the cluster/node lifecycle areas that still exist in this repo, such as node configuration, certificates, networking, storage, permissions, and related bootstrap steps.
+
+### Shared Routing Templates
+
+HAProxy, Keepalived, and health-check templates were consolidated under [Ansible/templates/haproxy](../Ansible/templates/haproxy) for use by dedicated routing VMs. Those templates are shared infrastructure assets and should not be re-duplicated per service.
+
+### Kubernetes
+
+Kubernetes configuration is environment-oriented under [Ansible/group_vars/kubernetes](../Ansible/group_vars/kubernetes) with `development`, `staging`, and `production` overlays.
+
+Favor putting shared defaults in the common Kubernetes vars and reserving environment folders for topology or environment-specific overrides.
+
+Talos should be treated as the target Kubernetes node OS and control-plane approach. Prefer Talos-oriented guidance, naming, and automation decisions over older RKE2 assumptions when updating Kubernetes docs, templates, or playbooks.
+
+## Secrets and Sensitive Data
+
+Do not commit secrets to Git.
+
+Current secret-handling expectations:
+- keep runtime credentials out of tracked Terraform tfvars files
+- prefer Vault, token files, environment variables, or other runtime-only inputs
+- the repo root `.env` is intentionally gitignored and may be generated locally by Ansible
+- [.envrc](../.envrc) is expected to load `.env` when present
+
+Examples of acceptable patterns:
+- `TF_VAR_*` environment variables for Terraform credentials
+- Vault-managed secrets referenced by Ansible variables
+- gitignored local files such as `.env`
+
+Examples of unacceptable patterns:
+- embedding API tokens in [Terraform/main.auto.tfvars](../Terraform/main.auto.tfvars)
+- checking in local `.env` files
+- duplicating secrets across multiple var files
+
+## Editing Conventions
+
+- Prefer updating existing domain roles instead of creating new overlapping roles.
+- Prefer shared templates in [Ansible/templates](../Ansible/templates) over role-local duplicates.
+- Prefer consolidating repeated variables into [Ansible/group_vars/all](../Ansible/group_vars/all) when they are truly global.
+- Keep production defaults minimal and security-minded.
+- Keep shell and developer conveniences separated from production runtime packages.
+- When changing Zsh or prompt behavior, update the native Zsh templates in [Ansible/templates/zsh](../Ansible/templates/zsh) rather than reintroducing Starship.
+
+## Validation Expectations
+
+After changing Ansible code, prefer validating with:
 
 ```bash
-# Bootstrap the environment (installs dependencies, creates venv)
-task init
-
-# Configure localhost as Ansible control node
-task ansible:configure-localhost
+ANSIBLE_CONFIG=Ansible/ansible.cfg Ansible/.venv/bin/ansible-playbook -i Ansible/inventory Ansible/playbooks/<playbook>.yaml --syntax-check
 ```
 
-**What happens:**
-- Creates Python venv at `Ansible/.venv/`
-- Installs Ansible + dependencies from [Ansible/requirements.txt](Ansible/requirements.txt)
-- Installs Galaxy collections to `Ansible/.collections/`
-
-### Running Ansible Playbooks
-
-**Never invoke `ansible-playbook` directly.** Use task wrappers:
+After changing Terraform modules, prefer validating formatting and module references, for example:
 
 ```bash
-# Setup Proxmox cluster nodes
-task ansible:setup-proxmox-nodes
-
-# Setup Technitium DNS
-task ansible:setup-technitium
+terraform fmt -check -recursive Terraform/modules
 ```
 
-**Tag-based execution:**
-```bash
-# Run only certificate management role
-cd Ansible && ../.venv/bin/ansible-playbook playbooks/setup-proxmox-nodes.yaml \
-  --tags proxmox,certs --ask-vault-pass
-```
-
-Common tags: `proxmox`, `cluster`, `ceph`, `certs`, `ha-ui`, `network`, `hardware`
-
-### Ansible Vault Pattern
-
-Sensitive variables follow this convention:
-- **Public variables**: [Ansible/group_vars/proxmox/certificate.yaml](Ansible/group_vars/proxmox/certificate.yaml) references `{{ vault_cloudflare_dns_token }}`
-- **Secret values**: [Ansible/group_vars/proxmox/vault-certs.yaml](Ansible/group_vars/proxmox/vault-certs.yaml) (encrypted with `ansible-vault encrypt`)
-
-To edit vault files:
-```bash
-ansible-vault edit Ansible/group_vars/proxmox/vault-certs.yaml
-```
-
-## Project-Specific Conventions
-
-### Role Structure
-
-Custom roles live in [Ansible/roles/](Ansible/roles/). Key roles:
-- `proxmox-cluster`: Bootstraps/joins Proxmox cluster (SERIALIZED—never parallel)
-- `proxmox-ceph`: Configures Ceph monitors, managers, OSDs, and storage pools
-- `proxmox-ha-ui`: Deploys Keepalived VIP + HAProxy for HA dashboard access
-- `proxmox-certs`: Manages certificates (self-signed, ACME/Let's Encrypt, or manual CA)
-- `proxmox-networking`: Configures VLANs, bridges, and firewall rules
-
-**Role execution order matters**: See [Ansible/playbooks/setup-proxmox-nodes.yaml](Ansible/playbooks/setup-proxmox-nodes.yaml) phases:
-1. SSH baseline
-2. Node hardening
-3. Cluster lifecycle (bootstrap leader, then join members)
-4. Hardware inventory
-5. HA UI setup
-6. Certificate management
-7. Networking
-8. Ceph storage
-
-### Proxmox Cluster Operations
-
-**CRITICAL**: Proxmox cluster join operations MUST be serialized. The [proxmox-cluster](Ansible/roles/proxmox-cluster/) role handles this with conditional logic:
-- First node (defined by `proxmox_cluster_bootstrap_node` in [cluster.yaml](Ansible/group_vars/proxmox/cluster.yaml)) creates cluster
-- Remaining nodes join sequentially with `serial: 1`
-
-Never run cluster tasks in parallel—Proxmox's cluster join process is not concurrency-safe.
-
-### Ceph Storage Configuration
-
-Ceph pools and storage classes are defined in [Ansible/group_vars/proxmox/ceph.yaml](Ansible/group_vars/proxmox/ceph.yaml):
-- **ISOs**: CephFS filesystem for ISO storage (`/mnt/pve/ISOs`)
-- **vm-fast**: RBD pool for high-performance VM disks
-- **vm-capacity**: RBD pool for capacity-optimized storage
-
-Mount CephFS manually for testing:
-```bash
-ssh root@<node> "mount -t ceph <mon1>,<mon2>,<mon3>:/ /mnt/pve/ISOs -o name=admin,fs=ISOs"
-```
-
-### Certificate Management
-
-ACME integration uses Cloudflare DNS-01 challenge. Configuration in [certificate.yaml](Ansible/group_vars/proxmox/certificate.yaml):
-- Set `proxmox_acme_enabled: true` to activate
-- Pre-populated for `sinlessgames.com` domain
-- Supports self-signed, ACME, or manual CA-signed certs
-- Auto-renewal when within `proxmox_cert_renewal_threshold` days
-
-## File Navigation
-
-**Key documentation paths:**
-- [Docs/Start-Here/](Docs/Start-Here/): Sequential guides (00-09) for bootstrapping
-- [Docs/Architecture/ARCHITECTURE.md](Docs/Architecture/ARCHITECTURE.md): System blueprint
-- [Docs/Architecture/DECISIONS.md](Docs/Architecture/DECISIONS.md): ADR index
-- [Docs/Start-Here/01-Repository-Layout.md](Docs/Start-Here/01-Repository-Layout.md): Directory structure rules
-
-**Inventory structure:**
-- [Ansible/inventory/](Ansible/inventory/): YAML-based inventory
-- [Ansible/inventory/proxmox.yaml](Ansible/inventory/proxmox.yaml): Proxmox nodes
-- [Ansible/inventory/dns.yaml](Ansible/inventory/dns.yaml): Technitium DNS servers
-
-**Variable precedence:**
-1. [Ansible/group_vars/all/](Ansible/group_vars/all/): Global defaults
-2. [Ansible/group_vars/proxmox/](Ansible/group_vars/proxmox/): Proxmox-specific
-3. [Ansible/group_vars/technitium/](Ansible/group_vars/technitium/): DNS-specific
+If you update shared module or template paths, verify that playbooks, group vars, and templates no longer reference removed locations.
 
 ## Common Pitfalls
 
-1. **Don't bypass the venv**: Always use `Ansible/.venv/bin/ansible-playbook`, not system Ansible
-2. **Don't skip vault passwords**: Most playbooks require `--ask-vault-pass` or `ANSIBLE_VAULT_PASSWORD_FILE`
-3. **Don't parallelize cluster joins**: Use `serial: 1` for any Proxmox cluster join tasks
-4. **Don't hardcode secrets**: Use `{{ vault_* }}` variable references and Ansible Vault encryption
-5. **Don't skip task init**: Run `task init` after fresh clone or when dependencies change
+1. Do not describe deleted split roles as active architecture.
+2. Do not introduce new duplicated Terraform VM modules for each service.
+3. Do not place secrets in tracked tfvars, inventory, or group vars files.
+4. Do not reintroduce role-local template sprawl when a shared template path already exists.
+5. Do not assume historical infrastructure details are still authoritative; verify against the repo first.
 
-## Testing & Validation
+## File Landmarks
 
-```bash
-# Validate Ansible syntax
-cd Ansible && ../.venv/bin/ansible-playbook playbooks/setup-proxmox-nodes.yaml --syntax-check
-
-# Dry-run (check mode)
-cd Ansible && ../.venv/bin/ansible-playbook playbooks/setup-proxmox-nodes.yaml --check --diff
-
-# List available tasks
-task --list
-```
-
-## Integration Points
-
-- **Cloudflare**: DNS management and Zero Trust access (ACME DNS-01 challenges)
-- **HashiCorp Vault**: Centralized secrets management (Raft-based cluster)
-- **MinIO**: S3-compatible storage for backups (hosted on pve-02, pve-03)
-- **GitLab**: Git hosting and CI/CD (hosted on pve-02, pve-03)
-- **FluxCD**: Kubernetes GitOps controller
-- **Authentik**: OIDC identity provider
-
-## External References
-
-- ADR Process: See [DECISIONS.md](Docs/Architecture/DECISIONS.md) for architectural decision records
-- Network Topology: [Docs/Network/Layer_2-3_diagram.md](Docs/Network/Layer_2-3_diagram.md)
-- ACME Setup: [Docs/Start-Here/00-ACME-Implementation-Summary.md](Docs/Start-Here/00-ACME-Implementation-Summary.md)
+- [Ansible/roles](../Ansible/roles)
+- [Ansible/playbooks](../Ansible/playbooks)
+- [Ansible/group_vars](../Ansible/group_vars)
+- [Ansible/templates](../Ansible/templates)
+- [Ansible/inventory](../Ansible/inventory)
+- [Terraform/modules/proxmox-vm-cluster](../Terraform/modules/proxmox-vm-cluster)
+- [Terraform/modules/vault-secrets](../Terraform/modules/vault-secrets)
+- [Packer](../Packer)
+- [Docs](../Docs)

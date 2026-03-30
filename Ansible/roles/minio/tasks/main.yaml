@@ -1,0 +1,50 @@
+---
+- name: Run MinIO deploy phase
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/defaults/deploy.yaml"
+    name: __minio_deploy_defaults
+  when: "'deploy' in minio_role_phases"
+  tags:
+    - minio
+    - deploy
+
+- name: Apply MinIO deploy defaults
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (__minio_deploy_defaults | default({})) | dict2items }}"
+  when: "'deploy' in minio_role_phases"
+  tags:
+    - minio
+    - deploy
+
+- name: Include MinIO deploy tasks
+  ansible.builtin.include_tasks: deploy.yaml
+  when: "'deploy' in minio_role_phases"
+  tags:
+    - minio
+    - deploy
+
+- name: Run MinIO configure phase
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/defaults/configure.yaml"
+    name: __minio_configure_defaults
+  when: "'configure' in minio_role_phases"
+  tags:
+    - minio
+    - configure
+
+- name: Apply MinIO configure defaults
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (__minio_configure_defaults | default({})) | dict2items }}"
+  when: "'configure' in minio_role_phases"
+  tags:
+    - minio
+    - configure
+
+- name: Include MinIO configure tasks
+  ansible.builtin.include_tasks: configure-main.yaml
+  when: "'configure' in minio_role_phases"
+  tags:
+    - minio
+    - configure

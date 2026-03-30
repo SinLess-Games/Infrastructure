@@ -1,10 +1,9 @@
-all:
-  children:
-    postgres:
-      hosts:
-        postgres-01:
-          ansible_host: 10.10.40.2
-        postgres-02:
-          ansible_host: 10.10.40.3
-        postgres-03:
-          ansible_host: 10.10.40.4
+---
+postgres:
+  hosts:
+    postgres-01:
+      ansible_host: 10.10.40.2
+    postgres-02:
+      ansible_host: 10.10.40.3
+    postgres-03:
+      ansible_host: 10.10.40.4

@@ -1,0 +1,26 @@
+---
+# =============================================================================
+# Kubernetes Development Worker Variables
+# =============================================================================
+
+kubernetes_worker:
+  count: 2
+  vmid_start: 310
+  name_prefix: "k8s-dev-wk"
+  cpu_cores: 4
+  cpu_sockets: 1
+  memory_mb: 8192
+  disk_size: "100G"
+  clone_template: "debian-13-template"
+  target_nodes:
+    - "pve-04"
+    - "pve-05"
+  startup_order: 20
+
+kubernetes_worker_ips:
+  - "10.10.20.21"
+  - "10.10.20.22"
+
+kubernetes_rke2_agent_node_labels:
+  - "node-role.kubernetes.io/worker=true"
+  - "topology.kubernetes.io/environment=dev"

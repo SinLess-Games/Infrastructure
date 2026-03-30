@@ -12,17 +12,22 @@
 # =============================================================================
 
 - name: Check if Homebrew is already installed
-  ansible.builtin.command: brew --version
+  become: false
+  ansible.builtin.command: "{{ packages_homebrew_bin }} --version"
   register: brew_check
   changed_when: false
   failed_when: false
 
 - name: Install Homebrew (Linuxbrew)
+  become: false
   ansible.builtin.shell: |
     NONINTERACTIVE=1 \
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   args:
-    creates: /home/linuxbrew/.linuxbrew/bin/brew
+    creates: "{{ packages_homebrew_bin }}"
+  environment:
+    HOME: "{{ lookup('env', 'HOME') }}"
+    USER: "{{ packages_homebrew_user }}"
   when:
     - brew_check.rc != 0
     - ansible_system == "Linux"
@@ -33,13 +38,13 @@
     mode: "0644"
     content: |
       # Homebrew (Linuxbrew)
-      if [ -d "/home/linuxbrew/.linuxbrew" ]; then
-        export HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"
-        export HOMEBREW_CELLAR="/home/linuxbrew/.linuxbrew/Cellar"
-        export HOMEBREW_REPOSITORY="/home/linuxbrew/.linuxbrew/Homebrew"
-        export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
-        export MANPATH="/home/linuxbrew/.linuxbrew/share/man:$MANPATH"
-        export INFOPATH="/home/linuxbrew/.linuxbrew/share/info:$INFOPATH"
+      if [ -d "{{ packages_homebrew_prefix }}" ]; then
+        export HOMEBREW_PREFIX="{{ packages_homebrew_prefix }}"
+        export HOMEBREW_CELLAR="{{ packages_homebrew_prefix }}/Cellar"
+        export HOMEBREW_REPOSITORY="{{ packages_homebrew_prefix }}/Homebrew"
+        export PATH="{{ packages_homebrew_prefix }}/bin:{{ packages_homebrew_prefix }}/sbin:$PATH"
+        export MANPATH="{{ packages_homebrew_prefix }}/share/man:$MANPATH"
+        export INFOPATH="{{ packages_homebrew_prefix }}/share/info:$INFOPATH"
       fi
   when:
     - ansible_system == "Linux"

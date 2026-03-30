@@ -1,0 +1,120 @@
+---
+proxmox_role_phases:
+  - node
+  - cluster
+  - hardware
+  - certs
+  - networking
+  - storage
+  - permissions
+
+proxmox_node:
+  licensed: false
+  enable_iommu: true
+  enable_hugepages: false
+  hugepages_count: 0
+  enable_api_users: true
+  timezone: "UTC"
+
+proxmox_cluster:
+  name: sinless-games
+  expected_nodes: 1
+  allow_rejoin: false
+  enforce_quorum: true
+  corosync:
+    transport: knet
+    bindnetaddr: null
+    link_mode: active
+    secure_auth: true
+    ring_count: 1
+  quorum:
+    fail_on_quorum_loss: true
+    expected_votes: null
+    allow_single_node: false
+  api:
+    validate_api: true
+    api_timeout: 15
+  timeouts:
+    pve_fs_sync: 30
+    corosync_stabilize: 20
+  debug:
+    show_cluster_status: true
+    show_corosync_config: false
+
+_proxmox_cluster_internal:
+  pve_cluster_fs: /etc/pve
+  corosync_conf: /etc/pve/corosync.conf
+  corosync_service: corosync
+
+proxmox_cluster_mode: expand
+
+infra_repo_root: "{{ lookup('ansible.builtin.pipe', 'git rev-parse --show-toplevel') | trim }}"
+infra_output_root: "{{ infra_repo_root }}/.outputs"
+proxmox_hardware_output_base: "{{ infra_output_root }}/proxmox-hardware"
+proxmox_hardware_node_dir: "{{ proxmox_hardware_output_base }}/{{ inventory_hostname }}"
+
+proxmox_cert_source: "self-signed"
+proxmox_cert_validity_days: 365
+proxmox_acme_enabled: false
+proxmox_acme_provider: "letsencrypt"
+proxmox_acme_provider_staging: false
+proxmox_acme_email: "admin@example.com"
+proxmox_acme_challenge_type: "dns-01"
+proxmox_acme_account_name: "default"
+proxmox_acme_plugin_id: "dns"
+proxmox_acme_plugin_type: "dns"
+proxmox_acme_dns_api: "cloudflare"
+proxmox_acme_directory_letsencrypt_prod: "https://acme-v02.api.letsencrypt.org/directory"
+proxmox_acme_directory_letsencrypt_staging: "https://acme-staging-v02.api.letsencrypt.org/directory"
+proxmox_acme_directory_zerossl: "https://acme.zerossl.com/v2/DV90"
+proxmox_acme_directory_buypass: "https://api.buypass.com/acme/directory"
+proxmox_acme_directory: "{{ proxmox_acme_directory_letsencrypt_staging if proxmox_acme_provider_staging else proxmox_acme_directory_letsencrypt_prod }}"
+proxmox_cert_manual: false
+proxmox_cert_auto_renew: true
+proxmox_cert_renewal_threshold: 30
+proxmox_cert_backup: true
+proxmox_cert_backup_retention: 5
+proxmox_cert_restart_services: true
+proxmox_certs_base_dir: /etc/pve/nodes
+proxmox_cert_filename: "pve-ssl.pem"
+proxmox_key_filename: "pve-ssl.key"
+proxmox_cert_backup_dir: "/var/backups/proxmox-certs"
+proxmox_cert_country: "US"
+proxmox_cert_state: "State"
+proxmox_cert_locality: "City"
+proxmox_cert_organization: "Organization"
+proxmox_cert_ou: "IT"
+proxmox_cert_cn: "{{ inventory_hostname }}"
+proxmox_cert_san:
+  - "{{ inventory_hostname }}"
+  - "{{ ansible_host }}"
+  - "proxmox.local"
+
+proxmox_networking_enabled: true
+proxmox_networking_apply: true
+proxmox_networking_backup: true
+proxmox_interfaces_file: "/etc/network/interfaces"
+proxmox_networking_backup_dir: "{{ lookup('env', 'PWD') }}/.outputs"
+proxmox_management_network: "10.10.10.0/24"
+proxmox_cluster_network: "10.10.10.0/24"
+proxmox_networking_restart_required: true
+proxmox_node_interfaces: {}
+proxmox_node_bonds: {}
+proxmox_node_bridges: {}
+proxmox_bridges: {}
+
+proxmox_storage_enabled: true
+proxmox_storage_auto_discover_disks: true
+proxmox_storage_clean_all_disks: false
+proxmox_storage_clean_disk_patterns:
+  - "/dev/sd[b-z]"
+  - "/dev/nvme[1-9]n1"
+proxmox_storage_nodes: "{{ groups.get('proxmox', []) }}"
+proxmox_storage_pools: []
+
+proxmox_permissions_enabled: true
+proxmox_permissions_dev_mode: false
+proxmox_auth_method: "local"
+proxmox_password_generate: true
+proxmox_password_length: 24
+proxmox_pve_node: "{{ inventory_hostname }}"

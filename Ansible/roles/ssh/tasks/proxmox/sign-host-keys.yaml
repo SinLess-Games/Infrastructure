@@ -45,7 +45,8 @@
 - name: Resolve controller runtime dir + user (controller facts)
   ansible.builtin.set_fact:
     ssh__controller_runtime_dir: "{{ ssh__controller_outputs_dir_effective ~ '/ssh_host_certs' }}"
-    ssh__controller_user: "{{ lookup('env', 'USER') | default('ansible', true) }}"
+    ssh__controller_user: "{{ ssh_controller_local_user }}"
+    ssh__controller_group: "{{ ssh_controller_local_group }}"
   delegate_to: localhost
   changed_when: false
 
@@ -117,15 +118,21 @@
   ansible.builtin.file:
     path: "{{ ssh__controller_host_certs_dir_effective }}"
     state: directory
+    owner: "{{ ssh__controller_user }}"
+    group: "{{ ssh__controller_group }}"
     mode: "0700"
   delegate_to: localhost
+  become: true
 
 - name: Ensure controller staging directory exists for this host
   ansible.builtin.file:
     path: "{{ ssh__controller_host_staging_dir }}"
     state: directory
+    owner: "{{ ssh__controller_user }}"
+    group: "{{ ssh__controller_group }}"
     mode: "0700"
   delegate_to: localhost
+  become: true
 
 # -----------------------------------------------------------------------------
 # Validate CA private key (no symlinks)

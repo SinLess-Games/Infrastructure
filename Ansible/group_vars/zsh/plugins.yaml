@@ -1,0 +1,11 @@
+plugins:
+  - name: "zsh-syntax-highlighting"
+    repo: "https://github.com/zsh-users/zsh-syntax-highlighting.git"
+  - name: "zsh-autosuggestions"
+    repo: "https://github.com/zsh-users/zsh-autosuggestions.git"
+  - name: "zsh-completions"
+    repo: "https://github.com/zsh-users/zsh-completions.git"
+  - name: "you-should-use"
+    repo: "https://github.com/MichaelAquilina/zsh-you-should-use.git"
+  - name: "zsh-bat"
+    repo: "https://github.com/fdellwing/zsh-bat.git"

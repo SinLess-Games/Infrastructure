@@ -1,0 +1,249 @@
+---
+# =============================================================================
+# Parse Proxmox Hardware and Configure Network Interfaces
+# =============================================================================
+# Parses raw hardware inventory data from .outputs/proxmox-hardware/{nodename}/raw/
+# Creates structured JSON in .outputs/proxmox-hardware/{nodename}/parsed/
+# Automatically selects ports for vmbr based on prod flag and interface speed
+#
+# Logic:
+#   - Management (vmbr0): Always 1GB interface
+#   - Production (prod: true): Use 10GB interface if available
+#   - Non-production (prod: false): Use 1GB interface
+# =============================================================================
+
+- name: Validate proxmox_hardware_output_base is defined
+  assert:
+    that:
+      - proxmox_hardware_output_base is defined
+    fail_msg: "proxmox_hardware_output_base must be defined"
+  delegate_to: localhost
+  run_once: true
+
+- name: Define hardware node directory
+  set_fact:
+    proxmox_hw_node_dir: "{{ proxmox_hardware_output_base }}/{{ inventory_hostname }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Check if raw hardware directory exists
+  stat:
+    path: "{{ proxmox_hw_node_dir }}/raw"
+  register: hw_raw_dir
+  delegate_to: localhost
+  run_once: true
+
+- name: Skip if no raw data exists
+  debug:
+    msg: "No raw hardware data found at {{ proxmox_hw_node_dir }}/raw - skipping parse"
+  when: not hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+# =============================================================================
+# Phase 1: Parse raw network hardware data
+# =============================================================================
+
+- name: Read raw network data  
+  slurp:
+    src: "{{ proxmox_hw_node_dir }}/raw/network.txt"
+  register: raw_network_data
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Extract parsed interfaces from raw data
+  set_fact:
+    raw_data_text: "{{ raw_network_data.content | b64decode }}"
+    parsed_interfaces: {}
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Parse JSON from raw text
+  set_fact:
+    parsed_interfaces: >-
+      {{
+        (
+          raw_data_text
+          .split('===== parsed details =====', 1)[1]
+          .split('===== bridges =====', 1)[0]
+          | trim
+          | from_json
+        )
+        | default({})
+      }}
+  when: hw_raw_dir.stat.exists and "'===== parsed details =====' in raw_data_text"
+  delegate_to: localhost
+  run_once: true
+
+# =============================================================================
+# Phase 2: Organize interfaces by speed
+# =============================================================================
+
+- name: Extract interfaces by speed
+  set_fact:
+    interfaces_10gb: "{{ parsed_interfaces | dict2items | selectattr('value.speed', 'match', '.*10000.*') | map(attribute='key') | list }}"
+    interfaces_1gb: "{{ parsed_interfaces | dict2items | selectattr('value.speed', 'match', '.*1000.*') | map(attribute='key') | list }}"
+  when: hw_raw_dir.stat.exists and parsed_interfaces
+  delegate_to: localhost
+  run_once: true
+
+- name: Build interface inventory
+  set_fact:
+    interface_inventory:
+      by_name: "{{ parsed_interfaces }}"
+      by_speed:
+        "10Gb": "{{ interfaces_10gb | default([]) }}"
+        "1Gb": "{{ interfaces_1gb | default([]) }}"
+      total_count: "{{ parsed_interfaces | length }}"
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+# =============================================================================
+# Phase 3: Build port assignments for vmbr bridges
+# =============================================================================
+
+- name: Get node configuration
+  set_fact:
+    node_bridges_config: "{{ proxmox_node_bridges.get(inventory_hostname, {}) | default({}) }}"
+    management_iface: "{{ ((proxmox_node_interfaces.get(inventory_hostname, {}) | default({}) | dict2items | map(attribute='key') | list) | first | default('')) }}"
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Initialize bridge port map
+  set_fact:
+    bridge_port_map: {}
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Build bridge port assignments
+  set_fact:
+    bridge_port_map: |
+      {%- set assignments = {} -%}
+      {%- set used_10gb = [] -%}
+      {%- set used_1gb = [] -%}
+      {%- for vmbr_name, vmbr_cfg in node_bridges_config.items() -%}
+        {%- if vmbr_cfg is not none -%}
+          {%- set port = '' -%}
+          {%- if vmbr_name == 'vmbr0' -%}
+            {# Management: use configured interface or first 1GB #}
+            {%- if management_iface -%}
+              {%- set port = management_iface -%}
+            {%- elif interfaces_1gb -%}
+              {%- set port = (interfaces_1gb | reject('in', used_1gb) | list | first) -%}
+            {%- endif -%}
+            {%- if port -%}
+              {%- set _ = used_1gb.append(port) -%}
+            {%- endif -%}
+          {%- elif vmbr_cfg.prod | default(false) -%}
+            {# Production: prefer 10GB, fallback to 1GB #}
+            {%- set avail_10gb = interfaces_10gb | default([]) | reject('in', used_10gb) | list -%}
+            {%- set avail_1gb = interfaces_1gb | default([]) | reject('in', used_1gb) | list -%}
+            {%- if avail_10gb -%}
+              {%- set port = avail_10gb | first -%}
+              {%- set _ = used_10gb.append(port) -%}
+            {%- elif avail_1gb -%}
+              {%- set port = avail_1gb | first -%}
+              {%- set _ = used_1gb.append(port) -%}
+            {%- endif -%}
+          {%- else -%}
+            {# Non-production: prefer 1GB, fallback to 10GB #}
+            {%- set avail_1gb = interfaces_1gb | default([]) | reject('in', used_1gb) | list -%}
+            {%- set avail_10gb = interfaces_10gb | default([]) | reject('in', used_10gb) | list -%}
+            {%- if avail_1gb -%}
+              {%- set port = avail_1gb | first -%}
+              {%- set _ = used_1gb.append(port) -%}
+            {%- elif avail_10gb -%}
+              {%- set port = avail_10gb | first -%}
+              {%- set _ = used_10gb.append(port) -%}
+            {%- endif -%}
+          {%- endif -%}
+          {%- if port -%}
+            {%- set _ = assignments.update({vmbr_name: {
+                'port': port,
+                'prod': vmbr_cfg.prod | default(false),
+                'description': vmbr_cfg.get('description', ''),
+                'vlan_id': vmbr_cfg.get('vlan_id', 0)
+              }}) -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ assignments }}
+  when: hw_raw_dir.stat.exists and node_bridges_config
+  delegate_to: localhost
+  run_once: true
+
+# =============================================================================
+# Phase 4: Create parsed JSON output files
+# =============================================================================
+
+- name: Ensure parsed output directory exists
+  file:
+    path: "{{ proxmox_hw_node_dir }}/parsed"
+    state: directory
+    mode: "0755"
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Write network.json
+  copy:
+    dest: "{{ proxmox_hw_node_dir }}/parsed/network.json"
+    content: |
+      {
+        "node": "{{ inventory_hostname }}",
+        "timestamp": "{{ ansible_date_time.iso8601 }}",
+        "interfaces": {{ interface_inventory | to_json }},
+        "bridge_assignments": {{ bridge_port_map | to_json | default('{}') }},
+        "raw_parsed_details": {{ parsed_interfaces | to_json | default('{}') }}
+      }
+    mode: "0644"
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Write interfaces.json
+  copy:
+    dest: "{{ proxmox_hw_node_dir }}/parsed/interfaces.json"
+    content: "{{ interface_inventory | to_nice_json }}"
+    mode: "0644"
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Write bridge-ports.json
+  copy:
+    dest: "{{ proxmox_hw_node_dir }}/parsed/bridge-ports.json"
+    content: "{{ bridge_port_map | to_nice_json | default('{}') }}"
+    mode: "0644"
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+# =============================================================================
+# Phase 5: Summary and facts
+# =============================================================================
+
+- name: Display parse summary
+  debug:
+    msg:
+      - "=== Hardware Parse Summary: {{ inventory_hostname }} ==="
+      - "Total interfaces: {{ interface_inventory.total_count | default(0) }}"
+      - "10Gb ports: {{ (interface_inventory.by_speed | default({})).get('10Gb', []) | length }}"
+      - "1Gb ports: {{ (interface_inventory.by_speed | default({})).get('1Gb', []) | length }}"
+      - ""
+      - "Bridge assignments: {{ bridge_port_map | default({}) | to_nice_json }}"
+  when: hw_raw_dir.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Store hardware parse facts
+  ansible.builtin.set_fact:
+    cacheable: true
+    hardware_parsed_interfaces: "{{ interface_inventory.by_name | default({}) }}"
+    hardware_parsed_bridge_ports: "{{ bridge_port_map | default({}) }}"
+  when: hw_raw_dir.stat.exists

@@ -22,7 +22,7 @@
 
 - name: Get root user definition (if present)
   ansible.builtin.set_fact:
-    _ssh_root_user_def: "{{ (ssh.users | default([]) | selectattr('name', 'equalto', 'root') | list | first) | default({}) }}"
+    _ssh_root_user_def: "{{ (ssh_role_users | default([]) | selectattr('name', 'equalto', 'root') | list | first) | default({}) }}"
 
 - name: Initialize root allowed principals (defaults to ['root'])
   ansible.builtin.set_fact:
@@ -31,7 +31,7 @@
 - name: Merge principals of users sharing root cert
   ansible.builtin.set_fact:
     ssh_root_allowed_principals: "{{ ssh_root_allowed_principals + (item.ssh_principals | default([])) }}"
-  loop: "{{ ssh.users | default([]) }}"
+  loop: "{{ ssh_role_users | default([]) }}"
   when:
     - item.name is defined
     - item.name != 'root'

@@ -10,31 +10,31 @@
 proxmox_node_interfaces:
   pve-01:
     enp9s0:
-      inet: "10.10.10.15"
+      inet: "10.10.10.14"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
 
-  pve-02:
-    enp0s25:
-      inet: "10.10.10.16"
-      netmask: "255.255.255.0"
-      gateway: "10.10.10.1"
+  # pve-02:
+  #   enp0s25:
+  #     inet: "10.10.10.15"
+  #     netmask: "255.255.255.0"
+  #     gateway: "10.10.10.1"
 
   pve-03:
     eno1:
-      inet: "10.10.10.17"
+      inet: "10.10.10.16"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
 
   pve-04:
     eno1:
-      inet: "10.10.10.18"
+      inet: "10.10.10.17"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
 
   pve-05:
-    enp6s0f0:
-      inet: "10.10.10.19"
+    eno1:
+      inet: "10.10.10.18"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
 
@@ -96,78 +96,88 @@ proxmox_node_bridges:
       vlan_id: 1
       ports:
         - enp9s0
-      address: "10.10.10.15/24"
+      address: "10.10.10.14/24"
       vlan_aware: true
       auto: true
       stp: true
       stp_forward_delay: 0
 
     vmbr1:
-      description: "VM Bridge - all vm traffic not production (Development, Staging)"
-      vlan_id: 0
+      description: "VM Bridge - VLAN 20 (Development, Staging)"
+      vlan_id: 20
       ports:
         - bond0
-      address: "10.10.20.15/24"
+      address: "10.10.20.14/24"
       vlan_aware: true
       auto: true
       stp: true
       stp_forward_delay: 0
 
     vmbr40:
+      prod: true
       description: "VM Bridge - VLAN 40 (Production)"
       vlan_id: 40
       ports:
         - enp10s0f0
-      address: "10.10.40.15/24"
+      address: "10.10.40.14/24"
       vlan_aware: true
       auto: true
       stp: true
       stp_forward_delay: 0
 
-    vmbr60:
-      description: "VM Bridge - VLAN 60 (Ceph)"
-      vlan_id: 60
-      ports:
-        - enp10s0f1
-      address: "10.10.60.15/24"
-      vlan_aware: false
-      auto: true
-      stp: false
-      stp_forward_delay: 0
 
-
-  pve-02:
-
-    vmbr40:
-      description: "VM Bridge - VLAN 40 (Production)"
-      vlan_id: 40
-      ports: []
-      address: "10.10.40.16/24"
-      vlan_aware: true
-      auto: true
-      stp: true
-      stp_forward_delay: 0
-
-    vmbr60: null
+  pve-02: null
 
 
   pve-03:
+    vmbr0:
+      description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
+      vlan_id: 1
+      ports:
+        - eno1
+      address: "10.10.10.16/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
+
+
+  pve-04:
+    vmbr0:
+      description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
+      vlan_id: 1
+      ports:
+        - eno1
+      address: "10.10.10.17/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
+
+    vmbr1:
+      description: "VM Bridge - VLAN 20 (Development, Staging)"
+      vlan_id: 20
+      ports:
+        - bond0
+      address: "10.10.20.17/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
 
     vmbr40:
+      prod: true
       description: "VM Bridge - VLAN 40 (Production)"
       vlan_id: 40
       ports:
-        - eno2
+        - enp10s0f0
       address: "10.10.40.17/24"
       vlan_aware: true
       auto: true
       stp: true
       stp_forward_delay: 0
 
-    vmbr60: null
-
-
-  pve-04:
+  pve-05:
     vmbr0:
       description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
       vlan_id: 1
@@ -180,8 +190,8 @@ proxmox_node_bridges:
       stp_forward_delay: 0
 
     vmbr1:
-      description: "VM Bridge - all vm traffic not production (Development, Staging)"
-      vlan_id: 0
+      description: "VM Bridge - VLAN 20 (Development, Staging)"
+      vlan_id: 20
       ports:
         - bond0
       address: "10.10.20.18/24"
@@ -190,72 +200,17 @@ proxmox_node_bridges:
       stp: true
       stp_forward_delay: 0
 
+    # Keep production traffic on dedicated 10Gb port on this node.
     vmbr40:
+      prod: true
       description: "VM Bridge - VLAN 40 (Production)"
       vlan_id: 40
       ports:
-        - enp10s0f0
+        - enp6s0f1
       address: "10.10.40.18/24"
       vlan_aware: true
       auto: true
       stp: true
-      stp_forward_delay: 0
-
-    vmbr60:
-      description: "VM Bridge - VLAN 60 (Ceph)"
-      vlan_id: 60
-      ports:
-        - enp10s0f1
-      address: "10.10.60.18/24"
-      vlan_aware: false
-      auto: true
-      stp: false
-      stp_forward_delay: 0
-
-
-  pve-05:
-    vmbr0:
-      description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
-      vlan_id: 1
-      ports:
-        - enp6s0f0
-      address: "10.10.10.19/24"
-      vlan_aware: true
-      auto: true
-      stp: true
-      stp_forward_delay: 0
-
-    vmbr1:
-      description: "VM Bridge - all vm traffic not production (Development, Staging)"
-      vlan_id: 0
-      ports:
-        - bond0
-      address: "10.10.20.19/24"
-      vlan_aware: true
-      auto: true
-      stp: true
-      stp_forward_delay: 0
-
-    vmbr40:
-      description: "VM Bridge - VLAN 40 (Production)"
-      vlan_id: 40
-      ports:
-        - enp6s0f0
-      address: "10.10.40.19/24"
-      vlan_aware: true
-      auto: true
-      stp: true
-      stp_forward_delay: 0
-
-    vmbr60:
-      description: "VM Bridge - VLAN 60 (Ceph)"
-      vlan_id: 60
-      ports:
-        - enp6s0f1
-      address: "10.10.60.19/24"
-      vlan_aware: false
-      auto: true
-      stp: false
       stp_forward_delay: 0
 
 
@@ -267,14 +222,14 @@ proxmox_bridges:
   vmbr0:
     description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
     vlan_id: 1
-    ports:
-      - enp9s0
+    ports: []
     vlan_aware: true
     auto: true
     stp: true
     stp_forward_delay: 0
 
   vmbr40:
+    prod: true
     description: "VM Bridge - VLAN 40 (Production)"
     vlan_id: 40
     ports: []
@@ -291,4 +246,3 @@ proxmox_networking_restart_required: false
 
 proxmox_management_network: "10.10.10.0/24"
 proxmox_cluster_network: "10.10.10.0/24"
-proxmox_ceph_network: "10.10.60.0/24"

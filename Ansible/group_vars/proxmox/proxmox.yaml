@@ -1,6 +1,14 @@
 proxmox_node:
   licensed: false
 
+# Some nodes still present legacy RSA host keys, so keep SSH compatibility
+# enabled until those host keys are rotated.
+ansible_ssh_common_args: >-
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o HostKeyAlgorithms=+ssh-rsa
+  -o PubkeyAcceptedAlgorithms=+ssh-rsa
+
 # =============================================================================
 # Proxmox Cluster Control
 # =============================================================================

@@ -6,10 +6,10 @@
 postgres_environment: "dev"
 
 # Terraform/Proxmox integration
-postgres_module_source: "./modules/postgres"
-postgres_proxmox_api_url: "https://10.10.10.15:8006/api2/json"
-postgres_proxmox_tls_insecure: true
-postgres_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
+postgres_module_source: "./modules/proxmox-vm-cluster"
+postgres_proxmox_api_url: "{{ infra_proxmox_api_url }}"
+postgres_proxmox_tls_insecure: "{{ infra_proxmox_tls_insecure }}"
+postgres_proxmox_api_token_file: "{{ infra_proxmox_api_token_file }}"
 
 # Vault secrets (KV v2)
 postgres_vault_kv_path: "ansible/postgres"
@@ -77,13 +77,9 @@ postgres_nodes:
     keepalived_priority: 120
 
 # Access/bootstrap
-postgres_default_user: "sinless777"
-postgres_ansible_user: "sinless777"
-postgres_ssh_keys:
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA7g0acAC3ORT/DUzu3ftMtRW6MlVWuWZ7qqd4tNHLcY automation@sinlessgames"
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKDoqYKB+akwuGHSAJWn6EeXR70zIg9oZXuP60Al1mOS breakglass@sinlessgames"
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEMakhAavnUU1qkhadP1tNtmwG7tsu49siUyMIEcKKn9 root@sinlessgames"
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ0Ch6BKvYa5V+7su2oXhf8jRBgBdRKvoqd0UKVtt1mS sinless777@sinlessgames"
+postgres_default_user: "{{ infra_bootstrap_default_user }}"
+postgres_ansible_user: "{{ infra_bootstrap_ansible_user }}"
+postgres_ssh_keys: "{{ infra_bootstrap_ssh_keys }}"
 
 # Service ports
 postgres_listen_port: 5432

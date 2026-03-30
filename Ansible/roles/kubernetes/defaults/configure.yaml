@@ -1,0 +1,135 @@
+---
+# =============================================================================
+# Kubernetes Configure Role - Default Variables
+# =============================================================================
+# Purpose:
+#   - Define default values for Kubernetes node configuration
+#   - Provide sane RKE2 defaults for bootstrap and join operations
+#   - Keep environment-specific values overrideable from inventory/group_vars
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Distribution / version
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_distribution: "rke2"
+kubernetes_configure_version: "{{ kubernetes_rke2_version | default('') }}"
+kubernetes_configure_channel: "stable"
+
+# -----------------------------------------------------------------------------
+# Installation paths
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_install_dir: "/usr/local/bin"
+kubernetes_configure_config_dir: "/etc/rancher/rke2"
+kubernetes_configure_data_dir: "/var/lib/rancher/rke2"
+kubernetes_configure_kubeconfig_path: "/etc/rancher/rke2/rke2.yaml"
+kubernetes_configure_kubeconfig_mode: "0644"
+
+# -----------------------------------------------------------------------------
+# Cluster networking
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_cluster_cidr: "{{ kubernetes_cluster_cidr | default('10.42.0.0/16') }}"
+kubernetes_configure_service_cidr: "{{ kubernetes_service_cidr | default('10.43.0.0/16') }}"
+kubernetes_configure_cluster_dns: "{{ kubernetes_cluster_dns | default('10.43.0.10') }}"
+
+# -----------------------------------------------------------------------------
+# Bootstrap / join configuration
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_server_token: "{{ rke2_server_token | default('') }}"
+kubernetes_configure_api_port: 9345
+kubernetes_configure_kubernetes_api_port: 6443
+
+# First server / join endpoint
+kubernetes_configure_server_host: >-
+  {{
+    kubernetes_rke2_api_ip
+    | default(
+        (kubernetes_master_ips[0])
+        if (kubernetes_master_ips is defined and (kubernetes_master_ips | length > 0))
+        else '127.0.0.1'
+      )
+  }}
+
+kubernetes_configure_server_url: >-
+  https://{{ kubernetes_configure_server_host }}:{{ kubernetes_configure_api_port }}
+
+# -----------------------------------------------------------------------------
+# Node role / labeling / taints
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_node_role: >-
+  {{
+    'master'
+    if ('kubernetes_dev_control_plane' in group_names or 'masters' in group_names)
+    else 'worker'
+  }}
+
+kubernetes_configure_node_labels: []
+kubernetes_configure_server_node_taints: []
+
+# -----------------------------------------------------------------------------
+# RKE2 feature flags
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_disable_components:
+  - rke2-ingress-nginx
+
+kubernetes_configure_cni:
+  - none
+
+kubernetes_configure_write_kubeconfig: true
+kubernetes_configure_download_kubeconfig: false
+
+# -----------------------------------------------------------------------------
+# SSH / access
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_ssh_user: "{{ kubernetes_default_user | default('sinless777') }}"
+kubernetes_configure_ssh_key_file: "{{ kubernetes_ssh_private_key_file | default('/root/.ssh/id_ed25519') }}"
+
+# -----------------------------------------------------------------------------
+# Local kubeconfig output
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_kubeconfig_output_root: >-
+  {{
+    kubernetes_generated_dir
+    | default((playbook_dir | dirname | dirname) ~ '/.outputs/kubernetes')
+  }}
+
+kubernetes_configure_kubeconfig_output_dir: >-
+  {{ kubernetes_configure_kubeconfig_output_root }}/{{ kubernetes_environment | default('dev') }}
+
+kubernetes_configure_kubeconfig_filename: "kubeconfig"
+kubernetes_configure_kubeconfig_cluster_filename: >-
+  {{ kubernetes_cluster_name | default('k8s') }}.yaml
+
+# -----------------------------------------------------------------------------
+# Timeouts / waits
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_wait_for_api_timeout: 1800
+kubernetes_configure_wait_for_nodes_timeout: 600
+kubernetes_configure_wait_for_kubeconfig_timeout: 300
+kubernetes_configure_wait_for_systemd_timeout: 30
+kubernetes_configure_wait_for_ready_retries: 30
+kubernetes_configure_wait_for_ready_delay: 10
+
+# -----------------------------------------------------------------------------
+# Prepare-node behavior
+# -----------------------------------------------------------------------------
+
+kubernetes_prepare_disable_firewall: true
+kubernetes_prepare_manage_hosts_file: true
+kubernetes_prepare_reboot_if_required: false
+
+# -----------------------------------------------------------------------------
+# Validation / behavior toggles
+# -----------------------------------------------------------------------------
+
+kubernetes_configure_validate_cluster: true
+kubernetes_configure_save_kubeconfig: true
+kubernetes_configure_install_kubectl_symlink: true

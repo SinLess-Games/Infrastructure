@@ -7,12 +7,10 @@
 #   <public key> <optional key comment>
 # -------------------------------------------------------------------
 
-{% if authorized_keys_list is defined and authorized_keys_list | length > 0 %}
-{% for entry in authorized_keys_list %}
-{% if entry.comment is defined %}
-# {{ entry.comment }}
-{% endif %}
-{{ entry.key }}
+{% set authorized_key_paths = authorized_key_paths | default([]) %}
+{% if authorized_key_paths | length > 0 %}
+{% for key_path in authorized_key_paths %}
+{{ lookup('file', key_path) | trim }}
 {% endfor %}
 {% else %}
 # No authorized keys defined

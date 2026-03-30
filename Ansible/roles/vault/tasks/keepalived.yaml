@@ -1,0 +1,69 @@
+---
+# Setup Keepalived for Virtual IP
+# Location: Ansible/roles/vault-configure/tasks/keepalived.yaml
+
+- name: "Setup Keepalived for Virtual IP"
+  block:
+    - name: "Install Keepalived"
+      package:
+        name: "keepalived"
+        state: present
+      when: vault_keepalived_enabled | bool
+
+    - name: "Allow non-local bind for VIP"
+      sysctl:
+        name: net.ipv4.ip_nonlocal_bind
+        value: "1"
+        state: present
+        sysctl_set: true
+        reload: true
+      when: vault_keepalived_enabled | bool
+
+    - name: "Create Vault health check script"
+      template:
+        src: "{{ playbook_dir }}/../templates/haproxy/health-check.sh.j2"
+        dest: "/usr/local/bin/check-vault-health.sh"
+        owner: "root"
+        group: "root"
+        mode: "0755"
+      vars:
+        routing_profile: "vault"
+      when: vault_keepalived_enabled | bool
+
+    - name: "Create Keepalived notification scripts"
+      template:
+        src: "{{ playbook_dir }}/../templates/vault/{{ item }}"
+        dest: "/usr/local/bin/{{ item | regex_replace('\\.j2$', '') }}"
+        owner: "root"
+        group: "root"
+        mode: "0755"
+      loop:
+        - "vault-vip-master.sh.j2"
+        - "vault-vip-backup.sh.j2"
+        - "vault-vip-fault.sh.j2"
+      when: vault_keepalived_enabled | bool
+
+    - name: "Template Keepalived configuration"
+      template:
+        src: "{{ playbook_dir }}/../templates/haproxy/keepalived.conf.j2"
+        dest: "/etc/keepalived/keepalived.conf"
+        owner: "root"
+        group: "root"
+        mode: "0644"
+        backup: true
+      vars:
+        routing_profile: "vault"
+      notify: "restart keepalived"
+      when: vault_keepalived_enabled | bool
+
+    - name: "Enable and start Keepalived"
+      systemd:
+        name: keepalived
+        state: started
+        enabled: true
+      when: vault_keepalived_enabled | bool
+
+  tags:
+    - "vault"
+    - "vault-ha"
+    - "vault-keepalived"

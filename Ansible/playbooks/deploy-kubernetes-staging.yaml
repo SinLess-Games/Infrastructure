@@ -1,0 +1,236 @@
+---
+# =============================================================================
+# Load Kubernetes Staging Runtime Cache on Localhost + Deploy Infrastructure
+# =============================================================================
+- name: Load Kubernetes staging runtime secrets into localhost cache and deploy VMs
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/staging/main.yaml
+    - ../group_vars/kubernetes/staging/master.yaml
+    - ../group_vars/kubernetes/staging/worker.yaml
+
+  vars:
+    kubernetes_vault_kv_mount: "secrets"
+    kubernetes_vault_kv_paths:
+      - "kubernetes/common/access"
+      - "kubernetes/staging/bootstrap"
+      - "kubernetes/staging/integrations"
+      - "kubernetes/staging/cluster"
+
+  tasks:
+    - name: Load Kubernetes staging secrets from Vault
+      ansible.builtin.include_tasks: ../tasks/vault.yaml
+      vars:
+        vault_addr: "{{ kubernetes_deploy_vault_addr }}"
+        vault_kv_mount: "{{ kubernetes_vault_kv_mount }}"
+        vault_kv_paths: "{{ kubernetes_vault_kv_paths }}"
+        vault_skip_verify: "{{ kubernetes_deploy_vault_skip_verify }}"
+        vault_token: "{{ kubernetes_deploy_vault_token }}"
+      tags:
+        - preflight
+        - vault
+
+    - name: Cache Vault documents and merged secrets for later plays
+      ansible.builtin.set_fact:
+        kubernetes_vault_documents: "{{ vault_runtime_documents | default({}) }}"
+        kubernetes_vault_data: "{{ vault_runtime_secrets | default({}) }}"
+      no_log: true
+      tags:
+        - preflight
+        - vault
+
+    - name: Build runtime SSH key list from shared access document
+      ansible.builtin.set_fact:
+        kubernetes_runtime_ssh_keys: >-
+          {{
+            (
+              vault_runtime_documents['kubernetes/common/access'].ssh_authorized_keys
+              | default({})
+              | dict2items
+              | selectattr('value.enabled', 'defined')
+              | selectattr('value.enabled')
+              | map(attribute='value.public_key')
+              | list
+            )
+          }}
+      no_log: true
+      tags:
+        - preflight
+        - vault
+
+    - name: Build runtime bootstrap values from Vault
+      ansible.builtin.set_fact:
+        kubernetes_runtime_rke2_server_token: >-
+          {{
+            vault_runtime_documents['kubernetes/staging/bootstrap'].rke2_server_token
+            | default(vault_runtime_secrets.rke2_server_token | default(''))
+          }}
+      no_log: true
+      tags:
+        - preflight
+        - vault
+
+    - name: Validate cached runtime values
+      ansible.builtin.assert:
+        that:
+          - kubernetes_runtime_rke2_server_token is defined
+          - kubernetes_runtime_rke2_server_token | length > 0
+          - kubernetes_runtime_ssh_keys is defined
+          - kubernetes_runtime_ssh_keys | length >= 1
+        fail_msg: "Failed to populate localhost runtime cache from Vault."
+      tags:
+        - preflight
+        - vault
+        - validate
+
+    - name: Deploy Kubernetes staging infrastructure
+      ansible.builtin.import_role:
+        name: kubernetes
+      vars:
+        kubernetes_role_phases: ["deploy"]
+        kubernetes_deploy_rke2_server_token: "{{ kubernetes_runtime_rke2_server_token }}"
+        kubernetes_deploy_ssh_keys: "{{ kubernetes_runtime_ssh_keys }}"
+      tags:
+        - deploy
+        - infrastructure
+
+
+# =============================================================================
+# Wait for All Kubernetes Staging Nodes
+# =============================================================================
+- name: Wait for Kubernetes staging nodes
+  hosts: kubernetes_staging
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/staging/main.yaml
+    - ../group_vars/kubernetes/staging/master.yaml
+    - ../group_vars/kubernetes/staging/worker.yaml
+
+  tasks:
+    - name: Wait for SSH on Kubernetes nodes
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: "{{ kubernetes_wait_for_ssh_timeout | default(900) }}"
+        connect_timeout: 10
+      tags:
+        - wait
+        - kubernetes
+
+    - name: Gather facts after SSH is available
+      ansible.builtin.setup:
+      tags:
+        - wait
+        - kubernetes
+
+
+# =============================================================================
+# Configure All Kubernetes Staging Nodes
+# =============================================================================
+- name: Configure Kubernetes staging nodes
+  hosts: kubernetes_staging
+  gather_facts: true
+  any_errors_fatal: true
+  vars_files:
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/staging/main.yaml
+    - ../group_vars/kubernetes/staging/master.yaml
+    - ../group_vars/kubernetes/staging/worker.yaml
+
+  pre_tasks:
+    - name: Validate localhost runtime cache exists
+      ansible.builtin.assert:
+        that:
+          - "'localhost' in hostvars"
+          - hostvars['localhost'].kubernetes_runtime_rke2_server_token is defined
+          - hostvars['localhost'].kubernetes_runtime_rke2_server_token | length > 0
+          - hostvars['localhost'].kubernetes_runtime_ssh_keys is defined
+          - hostvars['localhost'].kubernetes_runtime_ssh_keys | length >= 1
+        fail_msg: |
+          Required localhost runtime cache is missing.
+          Ensure the localhost Vault/bootstrap/deploy play ran before this play.
+      tags:
+        - configure
+        - kubernetes
+        - validate
+
+    - name: Set runtime secrets from localhost cache
+      ansible.builtin.set_fact:
+        rke2_server_token: "{{ hostvars['localhost'].kubernetes_runtime_rke2_server_token }}"
+        kubernetes_deploy_ssh_keys: "{{ hostvars['localhost'].kubernetes_runtime_ssh_keys }}"
+      no_log: true
+      tags:
+        - configure
+        - kubernetes
+
+    - name: Validate runtime secrets
+      ansible.builtin.assert:
+        that:
+          - rke2_server_token is defined
+          - rke2_server_token | length > 0
+          - kubernetes_deploy_ssh_keys is defined
+          - kubernetes_deploy_ssh_keys | length >= 1
+        fail_msg: "Failed to obtain runtime secrets from localhost Vault cache."
+      tags:
+        - configure
+        - kubernetes
+        - validate
+
+    - name: Resolve node role
+      ansible.builtin.set_fact:
+        kubernetes_configure_node_role: >-
+          {{
+            'master'
+            if inventory_hostname in groups['kubernetes_staging_control_plane']
+            else 'worker'
+          }}
+      tags:
+        - configure
+        - kubernetes
+
+    - name: Display node configuration information
+      ansible.builtin.debug:
+        msg: |
+          ========================================================
+          Configuring Kubernetes Node
+          ========================================================
+          Hostname: {{ inventory_hostname }}
+          IP Address: {{ ansible_host | default(inventory_hostname) }}
+          FQDN: {{ node_fqdn | default('Not set') }}
+          Groups: {{ group_names | join(', ') }}
+          Role: {{ kubernetes_configure_node_role }}
+
+          Distribution: {{ kubernetes_configure_distribution | default('rke2') }}
+          Version: {{ kubernetes_configure_version | default(kubernetes_rke2_version) }}
+          ========================================================
+      tags:
+        - configure
+        - kubernetes
+        - summary
+
+  tasks:
+    - name: Apply DNS resolver role
+      become: true
+      ansible.builtin.import_role:
+        name: dns-resolver
+      failed_when: false
+      tags:
+        - dns
+        - kubernetes
+
+    - name: Configure Kubernetes node
+      become: true
+      ansible.builtin.import_role:
+        name: kubernetes
+      vars:
+        kubernetes_role_phases: ["configure"]
+        kubernetes_rke2_cluster_group_name: "kubernetes_staging"
+        kubernetes_rke2_servers_group_name: "kubernetes_staging_control_plane"
+        kubernetes_rke2_agents_group_name: "kubernetes_staging_workers"
+      tags:
+        - configure
+        - kubernetes

@@ -1,0 +1,78 @@
+---
+# =============================================================================
+# Playbook: configure-proxmox-node.yaml
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Apply baseline configuration AND cluster orchestration to Proxmox VE nodes
+#   in a safe, deterministic order.
+#
+# Design guarantees:
+#   - Node hardening always runs first
+#   - Cluster bootstrap happens once
+#   - Join operations are serialized (REQUIRED by Proxmox)
+#   - Safe to re-run at any point
+# =============================================================================
+
+- name: Configure Proxmox VE nodes and cluster
+  hosts: proxmox
+  become: true
+  gather_facts: false
+  timeout: 7200
+
+  vars:
+    proxmox_node_playbook: true
+    ssh_role_manage_user_materials: false
+    # Permissions role defaults (normally from role defaults/main.yaml)
+    proxmox_permissions_enabled: true
+    proxmox_permissions_dev_mode: false
+    proxmox_api_token_output_dir: "{{ playbook_dir }}/../../.outputs/api-tokens"
+
+  vars_files:
+    - ../group_vars/all/ntp.yaml
+    - ../group_vars/all/chrony.yaml
+    - ../group_vars/proxmox/proxmox.yaml
+    - ../group_vars/proxmox/dns.yaml
+    - ../group_vars/proxmox/cluster.yaml
+    - ../group_vars/proxmox/certificate.yaml
+    - ../group_vars/proxmox/vault-certs.yaml
+    - ../group_vars/proxmox/networking.yaml
+    - ../group_vars/proxmox/storage.yaml
+    - ../group_vars/proxmox/sdn.yaml
+    - ../group_vars/all/ssh.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/proxmox/roles.yaml
+    - ../group_vars/proxmox/groups.yaml
+    - ../group_vars/proxmox/pools.yaml
+    - ../group_vars/proxmox/users.yaml
+    - ../group_vars/proxmox/vault-users.yaml
+
+  vars_prompt:
+    - name: proxmox_cluster_join_password
+      prompt: "Enter Proxmox cluster join password"
+      private: true
+      confirm: true
+
+  pre_tasks:
+    - name: Gather facts early with visible output
+      ansible.builtin.setup:
+        gather_timeout: 30
+
+  roles:
+    # -------------------------------------------------------------------------
+    # Phase 0: Gather facts early with timeout
+    # -------------------------------------------------------------------------
+    - role: ssh
+      tags: [ssh, common]
+
+    - role: proxmox
+      tags: [proxmox]
+
+  tasks:
+
+    # - name: reboot Proxmox VE node if required
+    #   ansible.builtin.reboot:
+    #     msg: "Rebooting to apply Proxmox VE configuration changes"
+    #     pre_reboot_delay: 5
+    #     reboot_timeout: 6000
+    #     test_command: whoami
+    #   tags: [proxmox, node, reboot]

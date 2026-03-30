@@ -1,3 +1,4 @@
+---
 kubernetes_dev:
   vars:
     ansible_user: "sinless777"

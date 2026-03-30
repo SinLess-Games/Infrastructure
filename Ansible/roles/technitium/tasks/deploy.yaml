@@ -1,0 +1,104 @@
+---
+# =============================================================================
+# Technitium Deploy Role - Tasks
+# =============================================================================
+# Purpose:
+#   - Render Terraform configuration for Technitium VMs
+#   - Execute Terraform via Taskfile
+#   - Use the shared proxmox-vm-cluster Terraform module
+# =============================================================================
+
+- name: Assert required Technitium deployment variables
+  ansible.builtin.assert:
+    that:
+      - technitium_target_nodes | length >= 3
+      - technitium_ip_addresses | length == technitium_node_count | int
+      - technitium_node_count | int >= 3
+    fail_msg: "Technitium deployment requires at least 3 target nodes and IPs matching node count"
+
+- name: Read Proxmox API token file for Terraform
+  ansible.builtin.slurp:
+    src: "{{ technitium_repo_root }}/{{ technitium_proxmox_api_token_file }}"
+  register: technitium_proxmox_token_file
+  no_log: true
+
+- name: Parse Proxmox API token values
+  ansible.builtin.set_fact:
+    technitium_proxmox_token_text: "{{ technitium_proxmox_token_file.content | b64decode | string }}"
+  no_log: true
+
+- name: Extract Proxmox API token ID and secret
+  ansible.builtin.set_fact:
+    technitium_proxmox_api_token_id: >-
+      {{ (technitium_proxmox_token_text
+        | regex_findall('(?m)^FULL_TOKENID=([^\n]+)'))
+        | first | default('') }}
+    technitium_proxmox_api_token_secret: >-
+      {{ (technitium_proxmox_token_text
+        | regex_findall('(?m)^TOKEN_SECRET=([^\n]+)'))
+        | first | default('') }}
+  no_log: true
+
+- name: Assert Proxmox API token values were parsed
+  ansible.builtin.assert:
+    that:
+      - technitium_proxmox_api_token_id is not none
+      - technitium_proxmox_api_token_secret is not none
+    fail_msg: "Failed to parse Proxmox API token ID/secret from token file"
+
+- name: Ensure Terraform output directory exists
+  ansible.builtin.file:
+    path: "{{ technitium_terraform_dir }}"
+    state: directory
+
+- name: Render Technitium Terraform module configuration
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/technitium/technitium-cluster.tf.j2"
+    dest: "{{ technitium_terraform_dir }}/technitium-cluster.tf"
+    mode: "0644"
+
+- name: Initialize Terraform (Taskfile)
+  ansible.builtin.command:
+    cmd: "task terraform:init"
+    chdir: "{{ technitium_repo_root }}"
+  environment:
+    TF_IN_AUTOMATION: "1"
+    TF_VAR_proxmox_api_url: "{{ technitium_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ technitium_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ technitium_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ technitium_proxmox_tls_insecure | ternary('true', 'false') }}"
+
+- name: Check if Technitium VMs already exist
+  ansible.builtin.command:
+    cmd: "ssh-keyscan -H {{ item }} 2>/dev/null"
+  loop: "{{ technitium_ip_addresses }}"
+  register: technitium_vm_check
+  failed_when: false
+  changed_when: false
+
+- name: Apply Terraform configuration (Taskfile)
+  ansible.builtin.command:
+    cmd: "task terraform:apply:auto"
+    chdir: "{{ technitium_repo_root }}"
+  environment:
+    TF_IN_AUTOMATION: "1"
+    TF_VAR_proxmox_api_url: "{{ technitium_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ technitium_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ technitium_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ technitium_proxmox_tls_insecure | ternary('true', 'false') }}"
+  register: terraform_result
+  ignore_errors: true
+
+- name: Skip terraform if VMs already exist
+  ansible.builtin.meta: noop
+  when: terraform_result is failed and 'already in use' in (terraform_result.stderr | default(''))
+
+- name: Wait for Technitium VMs to be accessible
+  ansible.builtin.pause:
+    seconds: 30
+
+- name: Wait for cloud-init configuration to complete
+  ansible.builtin.pause:
+    seconds: 10
+  tags:
+    - technitium-cloud-init

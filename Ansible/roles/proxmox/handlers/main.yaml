@@ -1,0 +1,45 @@
+---
+- name: Restart sshd
+  ansible.builtin.service:
+    name: ssh
+    state: restarted
+
+- name: Restart chrony
+  ansible.builtin.service:
+    name: chrony
+    state: restarted
+
+- name: restart proxmox-services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  become: true
+  loop:
+    - pvedaemon
+    - pveproxy
+  listen: restart proxmox-services
+
+- name: reload proxmox-services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: reloaded
+  become: true
+  loop:
+    - pvedaemon
+    - pveproxy
+  listen: reload proxmox-services
+
+- name: restart networking
+  ansible.builtin.command: ifreload -a
+  become: true
+  register: reload_result
+  failed_when: "'error' in reload_result.stderr | lower"
+  changed_when: true
+  when: proxmox_networking_restart_required | default(false) | bool
+  listen: restart networking
+
+- name: Reload Proxmox storage
+  ansible.builtin.shell: pvesm scan pve
+  become: true
+  listen: reload storage

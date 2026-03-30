@@ -14,6 +14,10 @@
 # - Deterministic, CA-based trust only
 # =============================================================================
 
+# Fixes:
+# - Read SSH CA pub key from target and set as fact for template rendering
+# =============================================================================
+
 # -----------------------------------------------------------------------------
 # Variables (expected)
 # -----------------------------------------------------------------------------
@@ -60,6 +64,18 @@
   ansible.builtin.fail:
     msg: "SSH CA public key not found at {{ ssh.known_hosts.trusted_user_ca_keys }}"
   when: not ssh__known_hosts_ca_pub.stat.exists
+
+# Read SSH CA pub key content from target for template rendering
+- name: Read SSH CA pub key content from target
+  ansible.builtin.slurp:
+    src: "{{ ssh.known_hosts.trusted_user_ca_keys }}"
+  register: ssh__ca_pub_slurp
+  become: true
+
+- name: Set ssh_ca_pub fact for template rendering
+  ansible.builtin.set_fact:
+    ssh_ca_pub: "{{ ssh__ca_pub_slurp.content | b64decode }}"
+  changed_when: false
 
 # -----------------------------------------------------------------------------
 # Deploy known_hosts via template

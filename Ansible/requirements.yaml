@@ -114,8 +114,7 @@ roles:
   # - staging clusters
   # - Proxmox-backed VMs or bare metal
   - name: lablabs.rke2
-    src: https://github.com/lablabs/ansible-role-rke2
-    version: "1.24.4"
+    version: "1.50.1"
 
   # ---------------------------------------------------------------------------
   # Proxmox VE: node/cluster configuration (Day-0 / Day-1)

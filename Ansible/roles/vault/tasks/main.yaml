@@ -1,0 +1,107 @@
+---
+- name: Run Vault deploy phase
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/defaults/deploy.yaml"
+    name: __vault_deploy_defaults
+  when: "'deploy' in vault_role_phases"
+  tags:
+    - vault
+    - deploy
+
+- name: Apply Vault deploy defaults
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (__vault_deploy_defaults | default({})) | dict2items }}"
+  when: "'deploy' in vault_role_phases"
+  tags:
+    - vault
+    - deploy
+
+- name: Include Vault deploy tasks
+  ansible.builtin.include_tasks: deploy.yaml
+  when: "'deploy' in vault_role_phases"
+  tags:
+    - vault
+    - deploy
+
+- name: Run Vault configure phase
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/defaults/configure.yaml"
+    name: __vault_configure_defaults
+  when: "'configure' in vault_role_phases"
+  tags:
+    - vault
+    - configure
+
+- name: Apply Vault configure defaults
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (__vault_configure_defaults | default({})) | dict2items }}"
+  when: "'configure' in vault_role_phases"
+  tags:
+    - vault
+    - configure
+
+- name: Include Vault configure tasks
+  ansible.builtin.include_tasks: configure-main.yaml
+  when: "'configure' in vault_role_phases"
+  tags:
+    - vault
+    - configure
+
+- name: Run Vault setup phase
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/defaults/setup.yaml"
+    name: __vault_setup_defaults
+  when: "'setup' in vault_role_phases"
+  tags:
+    - vault
+    - setup
+
+- name: Apply Vault setup defaults
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (__vault_setup_defaults | default({})) | dict2items }}"
+  when: "'setup' in vault_role_phases"
+  tags:
+    - vault
+    - setup
+
+- name: Include Vault setup tasks
+  ansible.builtin.include_tasks: setup.yaml
+  when: "'setup' in vault_role_phases"
+  tags:
+    - vault
+    - setup
+
+- name: Run Vault secrets phase
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/defaults/secrets.yaml"
+    name: __vault_secrets_defaults
+  when: "'secrets' in vault_role_phases"
+  tags:
+    - vault
+    - secrets
+
+- name: Apply Vault secrets defaults
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (__vault_secrets_defaults | default({})) | dict2items }}"
+  when: "'secrets' in vault_role_phases"
+  tags:
+    - vault
+    - secrets
+
+- name: Include Vault secrets tasks
+  ansible.builtin.include_tasks: secrets.yaml
+  when: "'secrets' in vault_role_phases"
+  tags:
+    - vault
+    - secrets
+
+- name: Run Vault users phase
+  ansible.builtin.include_tasks: users.yaml
+  when: "'users' in vault_role_phases"
+  tags:
+    - vault
+    - users

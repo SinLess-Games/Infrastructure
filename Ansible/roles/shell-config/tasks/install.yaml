@@ -1,10 +1,10 @@
 ---
 # =============================================================================
-# Install shell tooling (zsh, oh-my-zsh, starship)
+# Install shell tooling and remove starship
 # -----------------------------------------------------------------------------
 # - zsh: system package
 # - oh-my-zsh: per-user install (git clone, non-destructive)
-# - starship: package manager preferred, script fallback
+# - starship: removed when detected
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -30,7 +30,7 @@
     path: "{{ item.home_directory }}/.oh-my-zsh"
     state: directory
     mode: "0755"
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   when:
     - shell_install_oh_my_zsh
     - item.shell == '/bin/zsh'
@@ -41,7 +41,7 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     recurse: true
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   when:
     - shell_install_oh_my_zsh
     - item.shell == '/bin/zsh'
@@ -53,100 +53,39 @@
     dest: "{{ item.home_directory }}/.oh-my-zsh"
     version: master
     update: false
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   when:
     - shell_install_oh_my_zsh
     - item.shell == '/bin/zsh'
 
-
-
 # -----------------------------------------------------------------------------
-# Starship Prompt (robust install)
+# Starship cleanup
 # -----------------------------------------------------------------------------
 
-- name: Check for existing starship binary (common locations)
-  ansible.builtin.stat:
+- name: Remove starship package when requested
+  ansible.builtin.package:
+    name: starship
+    state: absent
+  when: shell_remove_starship | bool
+  failed_when: false
+
+- name: Remove starship binaries from common locations
+  ansible.builtin.file:
     path: "{{ item }}"
+    state: absent
   loop:
     - /usr/local/bin/starship
     - /usr/bin/starship
-  register: starship_bins
-  changed_when: false
+    - /home/linuxbrew/.linuxbrew/bin/starship
+    - /opt/homebrew/bin/starship
+  when: shell_remove_starship | bool
 
-- name: Set starship_installed fact
-  ansible.builtin.set_fact:
-    starship_installed: "{{ starship_bins.results | selectattr('stat.exists', 'equalto', true) | list | length > 0 }}"
-  changed_when: false
-
-- name: Install starship (package when supported, script fallback)
-  when:
-    - shell_install_starship | bool
-    - not starship_installed
-  block:
-
-    # Only attempt apt where Starship is actually expected to exist in the distro repos
-    # (per Starship docs: Ubuntu 25.04+ and Debian 13+)
-    - name: Install starship via apt (supported Debian/Ubuntu only)
-      become: true
-      ansible.builtin.apt:
-        name: starship
-        state: present
-        update_cache: true
-        cache_valid_time: 3600
-      register: starship_apt
-      failed_when: false
-      changed_when: starship_apt is changed
-      when: >
-        ansible_facts.os_family == "Debian" and (
-          (ansible_facts.distribution == "Ubuntu" and (ansible_facts.distribution_version is version('25.04', '>='))) or
-          (ansible_facts.distribution == "Debian" and ((ansible_facts.distribution_major_version | int) >= 13))
-        )
-
-    # Re-check after apt attempt (or if apt skipped)
-    - name: Check if starship is now installed
-      ansible.builtin.stat:
-        path: /usr/local/bin/starship
-      register: starship_after_apt_local
-      changed_when: false
-
-    - name: Check if starship is now installed (alt path)
-      ansible.builtin.stat:
-        path: /usr/bin/starship
-      register: starship_after_apt_usr
-      changed_when: false
-
-    - name: Set starship_bin_path fact
-      ansible.builtin.set_fact:
-        starship_bin_path: >-
-          {{
-            '/usr/local/bin/starship'
-            if starship_after_apt_local.stat.exists
-            else '/usr/bin/starship'
-          }}
-      when: starship_after_apt_local.stat.exists or starship_after_apt_usr.stat.exists
-      changed_when: false
-
-    - name: Install starship via official install script (fallback)
-      become: true
-      ansible.builtin.shell: |
-        set -euo pipefail
-        curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin
-      args:
-        executable: /bin/bash
-        creates: /usr/local/bin/starship
-      when: not (starship_after_apt_local.stat.exists or starship_after_apt_usr.stat.exists)
-
-    - name: Ensure starship is executable
-      become: true
-      ansible.builtin.file:
-        path: "{{ starship_bin_path | default('/usr/local/bin/starship') }}"
-        mode: "0755"
-      when: starship_after_apt_local.stat.exists or starship_after_apt_usr.stat.exists
-
-    - name: Validate starship install (must succeed)
-      ansible.builtin.command: "{{ starship_bin_path | default('/usr/local/bin/starship') }} --version"
-      register: starship_version
-      changed_when: false
-
-
+- name: Remove starship user config directories
+  ansible.builtin.file:
+    path: "{{ item.0.home_directory }}/{{ item.1 }}"
+    state: absent
+  loop: "{{ shell__resolved_users | product(['.config/starship', '.config/starship.toml']) | list }}"
+  loop_control:
+    label: "{{ item.0.name }} -> {{ item.1 }}"
+  when: shell_remove_starship | bool
 

@@ -1,0 +1,4 @@
+---
+technitium_role_phases:
+  - deploy
+  - configure

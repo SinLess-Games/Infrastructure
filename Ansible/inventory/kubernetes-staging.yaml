@@ -1,0 +1,37 @@
+---
+kubernetes_staging:
+  vars:
+    ansible_user: "sinless777"
+    ansible_ssh_private_key_file: "/home/sinless777/.ssh/id_ed25519"
+    ansible_python_interpreter: "/usr/bin/python3"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=yes -o PasswordAuthentication=no"
+    kubernetes_environment: "staging"
+  children:
+    kubernetes_staging_control_plane:
+      hosts:
+        k8s-staging-master-01:
+          ansible_host: 10.10.30.11
+          node_role: control-plane
+          node_fqdn: k8s-staging-master-01.staging.k8s.sinlessgames.com
+        k8s-staging-master-02:
+          ansible_host: 10.10.30.12
+          node_role: control-plane
+          node_fqdn: k8s-staging-master-02.staging.k8s.sinlessgames.com
+        k8s-staging-master-03:
+          ansible_host: 10.10.30.13
+          node_role: control-plane
+          node_fqdn: k8s-staging-master-03.staging.k8s.sinlessgames.com
+    kubernetes_staging_workers:
+      hosts:
+        k8s-staging-worker-01:
+          ansible_host: 10.10.30.20
+          node_role: worker
+          node_fqdn: k8s-staging-worker-01.staging.k8s.sinlessgames.com
+        k8s-staging-worker-02:
+          ansible_host: 10.10.30.21
+          node_role: worker
+          node_fqdn: k8s-staging-worker-02.staging.k8s.sinlessgames.com
+        k8s-staging-worker-03:
+          ansible_host: 10.10.30.22
+          node_role: worker
+          node_fqdn: k8s-staging-worker-03.staging.k8s.sinlessgames.com

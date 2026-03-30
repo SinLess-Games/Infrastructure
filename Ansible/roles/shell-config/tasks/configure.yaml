@@ -3,29 +3,16 @@
 # shell-config — configure
 # -----------------------------------------------------------------------------
 # Applies user-level shell configuration:
-#   - Starship config
 #   - Zsh environment files
+#   - Native prompt
 #   - Aliases
+#   - ~/bin commands from Ansible/files/bin_commands
 #
 # Templates are sourced from:
 #   Ansible/templates/
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Ensure XDG config directories exist
-# -----------------------------------------------------------------------------
-
-- name: Ensure XDG config directories exist
-  ansible.builtin.file:
-    path: "{{ item.0.home_directory }}/.config/{{ item.1 }}"
-    state: directory
-    owner: "{{ item.0.name }}"
-    group: "{{ item.0.name }}"
-    mode: "0755"
-  loop: "{{ shell_config_users | product(['starship']) | list }}"
-
-# -----------------------------------------------------------------------------
-# Starship configuration (default path)
 # -----------------------------------------------------------------------------
 - name: Ensure XDG config directory exists
   ansible.builtin.file:
@@ -34,19 +21,7 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0755"
-  loop: "{{ shell_config_users }}"
-
-- name: Install Starship config (default path)
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/starship/starship.toml.j2"
-    dest: "{{ item.home_directory }}/.config/starship.toml"
-    owner: "{{ item.name }}"
-    group: "{{ item.name }}"
-    mode: "0644"
-  loop: "{{ shell_config_users }}"
-  vars:
-    user: "{{ item }}"
-  when: shell_install_starship
+  loop: "{{ shell__resolved_users }}"
 
 # -----------------------------------------------------------------------------
 # Zsh environment files
@@ -59,7 +34,7 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0644"
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   vars:
     user: "{{ item }}"
   when: item.shell is defined and item.shell.endswith('zsh')
@@ -71,7 +46,19 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0644"
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
+  vars:
+    user: "{{ item }}"
+  when: item.shell is defined and item.shell.endswith('zsh')
+
+- name: Install .zsh_prompt
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/zsh/prompt.zsh.j2"
+    dest: "{{ item.home_directory }}/.zsh_prompt"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0644"
+  loop: "{{ shell__resolved_users }}"
   vars:
     user: "{{ item }}"
   when: item.shell is defined and item.shell.endswith('zsh')
@@ -83,7 +70,56 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0644"
-  loop: "{{ shell_config_users }}"
+  loop: "{{ shell__resolved_users }}"
   vars:
     user: "{{ item }}"
   when: item.shell is defined and item.shell.endswith('zsh')
+
+- name: Discover managed bin command files
+  ansible.builtin.find:
+    paths: "{{ shell_bin_commands_src }}"
+    file_type: file
+    recurse: true
+  register: shell_bin_command_files
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: shell_bin_commands_enabled | bool
+
+- name: Ensure user bin directories exist
+  ansible.builtin.file:
+    path: "{{ item.home_directory }}/{{ shell_bin_commands_dest }}"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0755"
+  loop: "{{ shell__resolved_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: shell_bin_commands_enabled | bool
+
+- name: Ensure nested bin command directories exist
+  ansible.builtin.file:
+    path: "{{ item.0.home_directory }}/{{ shell_bin_commands_dest }}/{{ (item.1.path | regex_replace('^.*/bin_commands/', '')) | dirname }}"
+    state: directory
+    owner: "{{ item.0.name }}"
+    group: "{{ item.0.name }}"
+    mode: "0755"
+  loop: "{{ shell__resolved_users | product(shell_bin_command_files.files | default([])) | list }}"
+  loop_control:
+    label: "{{ item.0.name }} -> {{ (item.1.path | regex_replace('^.*/bin_commands/', '')) | dirname }}"
+  when:
+    - shell_bin_commands_enabled | bool
+    - (item.1.path | regex_replace('^.*/bin_commands/', '')) | dirname != '.'
+
+- name: Copy managed bin commands
+  ansible.builtin.copy:
+    src: "{{ item.1.path }}"
+    dest: "{{ item.0.home_directory }}/{{ shell_bin_commands_dest }}/{{ item.1.path | regex_replace('^.*/bin_commands/', '') }}"
+    owner: "{{ item.0.name }}"
+    group: "{{ item.0.name }}"
+    mode: "0755"
+  loop: "{{ shell__resolved_users | product(shell_bin_command_files.files | default([])) | list }}"
+  loop_control:
+    label: "{{ item.0.name }} -> {{ item.1.path | regex_replace('^.*/bin_commands/', '') }}"
+  when: shell_bin_commands_enabled | bool

@@ -1,0 +1,296 @@
+---
+# Configure LVM thin pools from weighted disk allocation.
+
+- name: Ensure discovered disks variable exists
+  ansible.builtin.set_fact:
+    discovered_disks: "{{ discovered_disks | default([]) }}"
+
+- name: Initialize remaining disk list
+  ansible.builtin.set_fact:
+    proxmox_storage_remaining_disks: "{{ discovered_disks }}"
+  when: inventory_hostname in proxmox_storage_target_nodes
+
+- name: Initialize per-pool disk assignment map
+  ansible.builtin.set_fact:
+    proxmox_storage_disk_assignments: "{{ proxmox_storage_disk_assignments | default({}) | combine({item.name: []}) }}"
+  loop: "{{ proxmox_storage_pools_normalized }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: inventory_hostname in proxmox_storage_target_nodes
+
+- name: Assign fixed-count pools first
+  ansible.builtin.set_fact:
+    proxmox_storage_disk_assignments: >-
+      {{
+        proxmox_storage_disk_assignments | combine({
+          item.name: (
+            proxmox_storage_disk_assignments[item.name]
+            + (_selected_disks | map(attribute='path') | list)
+          )
+        })
+      }}
+    proxmox_storage_remaining_disks: "{{ _remaining_disks }}"
+  vars:
+    _requested_count_raw: "{{ [item.max_disks | int, proxmox_storage_remaining_disks | length] | min }}"
+    _requested_count: "{{ _requested_count_raw | int }}"
+    _selected_disks: >-
+      {{
+        (
+          proxmox_storage_remaining_disks[:(_requested_count | int)]
+          if item.prefer == 'largest'
+          else proxmox_storage_remaining_disks[-(_requested_count | int):]
+        )
+        if (_requested_count | int) > 0
+        else []
+      }}
+    _remaining_disks: >-
+      {{
+        (
+          proxmox_storage_remaining_disks[(_requested_count | int):]
+          if item.prefer == 'largest'
+          else proxmox_storage_remaining_disks[:(proxmox_storage_remaining_disks | length) - (_requested_count | int)]
+        )
+      }}
+  loop: "{{ proxmox_storage_pools_normalized }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - inventory_hostname in proxmox_storage_target_nodes
+    - (item.max_disks | string | length) > 0
+    - proxmox_storage_remaining_disks | length > 0
+
+- name: Build weighted sequence for pools without a disk cap
+  ansible.builtin.set_fact:
+    proxmox_storage_weighted_pool_sequence: >-
+      {%- set seq = [] -%}
+      {%- for pool in proxmox_storage_pools_normalized if (pool.max_disks | string | length) == 0 -%}
+      {%-   for _ in range(pool.weight | int) -%}
+      {%-     set _ignored = seq.append(pool.name) -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ seq }}
+  when: inventory_hostname in proxmox_storage_target_nodes
+
+- name: Assign remaining disks to uncapped pools using weighted round-robin
+  ansible.builtin.set_fact:
+    proxmox_storage_disk_assignments: >-
+      {{
+        proxmox_storage_disk_assignments | combine({
+          _pool_name: (proxmox_storage_disk_assignments[_pool_name] + [item.path])
+        })
+      }}
+  vars:
+    _pool_name: "{{ proxmox_storage_weighted_pool_sequence[_disk_index % (proxmox_storage_weighted_pool_sequence | length)] }}"
+  loop: "{{ proxmox_storage_remaining_disks }}"
+  loop_control:
+    index_var: _disk_index
+    label: "{{ item.path }}"
+  when:
+    - inventory_hostname in proxmox_storage_target_nodes
+    - proxmox_storage_remaining_disks | length > 0
+    - proxmox_storage_weighted_pool_sequence | length > 0
+
+- name: Show storage assignment
+  ansible.builtin.debug:
+    msg:
+      - "Disk assignment on {{ inventory_hostname }}"
+      - "{{ proxmox_storage_disk_assignments | to_nice_yaml }}"
+  when: inventory_hostname in proxmox_storage_target_nodes
+
+- name: Create LVM thin pools for assigned disks
+  ansible.builtin.shell: |
+    set -euo pipefail
+    disks="{{ proxmox_storage_disk_assignments[item.name] | join(' ') }}"
+    vg_name="{{ item.vg_name }}"
+    thin_name="{{ item.thinpool_name }}"
+    usable_disks=""
+    current_pvs=""
+
+    init_pv() {
+      local disk="$1"
+
+      wipefs -a -f "$disk" 2>/dev/null || true
+      mdadm --zero-superblock "$disk" 2>/dev/null || true
+      sgdisk --zap-all "$disk" 2>/dev/null || true
+      partprobe "$disk" 2>/dev/null || true
+      udevadm settle 2>/dev/null || true
+
+      pvcreate -y -ff --wipesignatures y "$disk" >/dev/null 2>&1 \
+        || pvcreate -y -ff "$disk" >/dev/null 2>&1 \
+        || pvcreate -y "$disk" >/dev/null 2>&1
+    }
+
+    if [ -z "$disks" ]; then
+      exit 0
+    fi
+
+    for disk in $disks; do
+      if pvs "$disk" >/dev/null 2>&1; then
+        usable_disks="$usable_disks $disk"
+        continue
+      fi
+
+      if init_pv "$disk"; then
+        usable_disks="$usable_disks $disk"
+      else
+        echo "WARN: Failed to initialize PV on $disk; skipping disk for pool $vg_name" >&2
+        lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT "$disk" 2>/dev/null >&2 || true
+      fi
+    done
+
+    set -- $usable_disks
+    if [ "$#" -eq 0 ]; then
+      echo "INFO: No usable disks available for pool $vg_name on {{ inventory_hostname }}; skipping"
+      exit 0
+    fi
+
+    current_pvs="$(pvs --noheadings -o pv_name --select "vg_name=$vg_name" 2>/dev/null | awk 'NF{print $1}')"
+
+    if ! vgs "$vg_name" >/dev/null 2>&1; then
+      vgcreate "$vg_name" "$1"
+      shift
+      current_pvs="$(pvs --noheadings -o pv_name --select "vg_name=$vg_name" 2>/dev/null | awk 'NF{print $1}')"
+    fi
+
+    for disk in "$@"; do
+      if printf '%s\n' "$current_pvs" | grep -Fxq "$disk"; then
+        continue
+      fi
+      vgextend "$vg_name" "$disk"
+      current_pvs="$(printf '%s\n%s\n' "$current_pvs" "$disk" | awk 'NF' | sort -u)"
+    done
+
+    if ! lvs "$vg_name/$thin_name" >/dev/null 2>&1; then
+      lvcreate -l 100%FREE -T "$vg_name/$thin_name"
+    fi
+  args:
+    executable: /bin/bash
+  become: true
+  register: proxmox_storage_lvm_create
+  changed_when: >-
+    ('Physical volume' in (proxmox_storage_lvm_create.stdout | default('')))
+    or ('Volume group' in (proxmox_storage_lvm_create.stdout | default('')))
+    or ('Logical volume' in (proxmox_storage_lvm_create.stdout | default('')))
+  loop: "{{ proxmox_storage_pools_normalized }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - inventory_hostname in proxmox_storage_target_nodes
+    - item.type == 'lvmthin'
+    - (proxmox_storage_disk_assignments[item.name] | default([]) | length) > 0
+
+- name: Create directory-backed storage volumes for assigned disks
+  ansible.builtin.shell: |
+    set -euo pipefail
+    disks="{{ proxmox_storage_disk_assignments[item.name] | join(' ') }}"
+    vg_name="{{ item.vg_name }}"
+    lv_name="{{ item.lv_name }}"
+    mount_path="{{ item.mount_path }}"
+    fs_type="{{ item.fs_type }}"
+    usable_disks=""
+    current_pvs=""
+    device_path="/dev/${vg_name}/${lv_name}"
+
+    init_pv() {
+      local disk="$1"
+
+      wipefs -a -f "$disk" 2>/dev/null || true
+      mdadm --zero-superblock "$disk" 2>/dev/null || true
+      sgdisk --zap-all "$disk" 2>/dev/null || true
+      partprobe "$disk" 2>/dev/null || true
+      udevadm settle 2>/dev/null || true
+
+      pvcreate -y -ff --wipesignatures y "$disk" >/dev/null 2>&1 \
+        || pvcreate -y -ff "$disk" >/dev/null 2>&1 \
+        || pvcreate -y "$disk" >/dev/null 2>&1
+    }
+
+    if [ -z "$disks" ]; then
+      exit 0
+    fi
+
+    for disk in $disks; do
+      if pvs "$disk" >/dev/null 2>&1; then
+        usable_disks="$usable_disks $disk"
+        continue
+      fi
+
+      if init_pv "$disk"; then
+        usable_disks="$usable_disks $disk"
+      else
+        echo "WARN: Failed to initialize PV on $disk; skipping disk for pool $vg_name" >&2
+        lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT "$disk" 2>/dev/null >&2 || true
+      fi
+    done
+
+    set -- $usable_disks
+    if [ "$#" -eq 0 ]; then
+      echo "INFO: No usable disks available for pool $vg_name on {{ inventory_hostname }}; skipping"
+      exit 0
+    fi
+
+    current_pvs="$(pvs --noheadings -o pv_name --select "vg_name=$vg_name" 2>/dev/null | awk 'NF{print $1}')"
+
+    if ! vgs "$vg_name" >/dev/null 2>&1; then
+      vgcreate "$vg_name" "$1"
+      shift
+      current_pvs="$(pvs --noheadings -o pv_name --select "vg_name=$vg_name" 2>/dev/null | awk 'NF{print $1}')"
+    fi
+
+    for disk in "$@"; do
+      if printf '%s\n' "$current_pvs" | grep -Fxq "$disk"; then
+        continue
+      fi
+      vgextend "$vg_name" "$disk"
+      current_pvs="$(printf '%s\n%s\n' "$current_pvs" "$disk" | awk 'NF' | sort -u)"
+    done
+
+    if ! lvs "$vg_name/$lv_name" >/dev/null 2>&1; then
+      lvcreate -n "$lv_name" -l 100%FREE "$vg_name"
+    fi
+
+    if ! blkid "$device_path" >/dev/null 2>&1; then
+      mkfs -t "$fs_type" -F "$device_path"
+    fi
+
+    mkdir -p "$mount_path"
+    uuid="$(blkid -s UUID -o value "$device_path")"
+    grep -Fq "UUID=$uuid $mount_path $fs_type defaults 0 2" /etc/fstab || \
+      echo "UUID=$uuid $mount_path $fs_type defaults 0 2" >> /etc/fstab
+    mountpoint -q "$mount_path" || mount "$mount_path"
+  args:
+    executable: /bin/bash
+  become: true
+  register: proxmox_storage_dir_create
+  changed_when: >-
+    ('Physical volume' in (proxmox_storage_dir_create.stdout | default('')))
+    or ('Volume group' in (proxmox_storage_dir_create.stdout | default('')))
+    or ('Logical volume' in (proxmox_storage_dir_create.stdout | default('')))
+    or ('Creating filesystem' in (proxmox_storage_dir_create.stdout | default('')))
+  loop: "{{ proxmox_storage_pools_normalized }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - inventory_hostname in proxmox_storage_target_nodes
+    - item.type == 'dir'
+    - (proxmox_storage_disk_assignments[item.name] | default([]) | length) > 0
+
+- name: Verify created LVM pools
+  ansible.builtin.shell: |
+    vgs --noheadings -o vg_name,vg_size "{{ item.vg_name }}" 2>/dev/null || true
+    lvs --noheadings -o lv_name,lv_size "{{ item.vg_name }}" 2>/dev/null || true
+  changed_when: false
+  become: true
+  loop: "{{ proxmox_storage_pools_normalized }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: proxmox_storage_lvm_verify
+  when: inventory_hostname in proxmox_storage_target_nodes
+
+- name: Display LVM verification
+  ansible.builtin.debug:
+    msg: "{{ item.item.name }} => {{ item.stdout_lines | default([]) }}"
+  loop: "{{ proxmox_storage_lvm_verify.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: inventory_hostname in proxmox_storage_target_nodes

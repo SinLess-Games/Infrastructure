@@ -1,0 +1,208 @@
+---
+# Vault Users Management Role
+# Manages Vault authentication and authorization for Ansible, Terraform, and admin users
+# Location: Ansible/roles/vault-users/tasks/main.yaml
+
+- name: "Load Vault root token for user management"
+  block:
+    - name: "Load root token from file using shell"
+      shell: |
+        cat /home/sinless777/Projects/Infrastructure/.outputs/vault/unseal-keys.json
+      register: vault_root_token_file_content
+      run_once: true
+      changed_when: false
+      become: false
+      delegate_to: localhost
+
+    - name: "Parse root token data"
+      set_fact:
+        vault_root_token_data: "{{ vault_root_token_file_content.stdout | from_json }}"
+      when: vault_root_token_file_content.stdout is defined
+      run_once: true
+
+    - name: "Set Vault configuration variables"
+      set_fact:
+        vault_addr: "https://{{ vault_keepalived_virtual_ip | default('10.10.10.180') }}:8200"
+        vault_vault_bin: "{{ vault_bin_dir | default('/usr/local/bin') }}/vault"
+        vault_token: "{{ vault_root_token_data.root_token }}"
+      run_once: true
+
+    - name: "Debug: root token loaded"
+      debug:
+        msg: "Root token loaded successfully: {{ vault_root_token_data.root_token[:10] }}... at {{ vault_addr }}"
+      when: vault_root_token_data is defined
+      run_once: true
+
+- name: "Configure Vault users and policies"
+  block:
+    - name: "Load Vault user configurations"
+      include_vars:
+        file: "{{ playbook_dir }}/../group_vars/vault/users.yaml"
+      become: false
+      run_once: true
+
+    - name: "Enable userpass auth method"
+      shell: |
+        export VAULT_ADDR="https://10.10.10.180:8200"
+        export VAULT_SKIP_VERIFY="true"
+        export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+        
+        /usr/local/bin/vault auth enable userpass 2>&1 || echo "Userpass auth method already enabled"
+      environment:
+        VAULT_SKIP_VERIFY: "true"
+      register: userpass_enable
+      changed_when: "'enabled' in userpass_enable.stdout"
+      run_once: true
+      delegate_to: "{{ groups['vault'][0] }}"
+      when:
+        - vault_users_enabled | bool
+        - vault_root_token_data is defined
+
+    - name: "Display vault users configuration"
+      debug:
+        msg: "Configuring users: {{ vault_users | map(attribute='name') | list }}"
+      run_once: true
+
+    - name: "Ensure output directory exists for token storage"
+      file:
+        path: "{{ vault_users_output_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: "Create Vault policies"
+      block:
+        - name: "Create policies from vault_user_policies"
+          shell: |
+            export VAULT_ADDR="https://10.10.10.180:8200"
+            export VAULT_SKIP_VERIFY="true"
+            export VAULT_TOKEN="{{ vault_root_token_data.root_token }}"
+            
+            cat > /tmp/policy_{{ item.key }}.hcl << 'POLICY_EOF'
+            {{ item.value }}
+            POLICY_EOF
+            
+            /usr/local/bin/vault policy write {{ item.key }} /tmp/policy_{{ item.key }}.hcl 2>&1 || echo "Policy already exists or update successful"
+            rm -f /tmp/policy_{{ item.key }}.hcl
+          environment:
+            VAULT_SKIP_VERIFY: "true"
+          loop: "{{ vault_user_policies | dict2items }}"
+          register: policy_creation
+          changed_when: "'written' in policy_creation.stdout or 'updated' in policy_creation.stdout"
+          no_log: true
+          run_once: true
+          delegate_to: "{{ groups['vault'][0] }}"
+          when:
+            - vault_users_enabled | bool
+            - vault_root_token_data is defined
+
+        - name: "Display policy creation results"
+          debug:
+            msg: "Created policy: {{ item.item.key }}"
+          loop: "{{ policy_creation.results }}"
+          when: policy_creation is defined
+          run_once: true
+
+    - name: "Create or update Vault users and generate tokens"
+      block:
+        - name: "Generate user creation script from template"
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../templates/vault/create_vault_user.sh.j2"
+            dest: "/tmp/create_vault_user_{{ item.name }}.sh"
+            mode: '0700'
+          loop: "{{ vault_users }}"
+          loop_control:
+            label: "{{ item.name }}"
+          when:
+            - vault_users_enabled | bool
+            - vault_root_token_data is defined
+
+        - name: "Execute user creation and token generation"
+          shell: |
+            /tmp/create_vault_user_{{ item.name }}.sh
+          environment:
+            VAULT_SKIP_VERIFY: "true"
+          loop: "{{ vault_users }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: user_creation
+          run_once: true
+          delegate_to: "{{ groups['vault'][0] }}"
+          when:
+            - vault_users_enabled | bool
+            - vault_root_token_data is defined
+
+        - name: "Cleanup temporary scripts"
+          file:
+            path: "/tmp/create_vault_user_{{ item.name }}.sh"
+            state: absent
+          loop: "{{ vault_users }}"
+          loop_control:
+            label: "{{ item.name }}"
+          delegate_to: "{{ groups['vault'][0] }}"
+          when:
+            - vault_users_enabled | bool
+
+        - name: "Debug: Show token creation output"
+          debug:
+            msg: "{{ item.stdout }}"
+          loop: "{{ user_creation.results }}"
+          run_once: true
+
+        - name: "Extract and save user tokens"
+          copy:
+            content: "{{ {
+              'username': item.item.name,
+              'description': item.item.description,
+              'policies': item.item.policies,
+              'token': (item.stdout | from_json).auth.client_token,
+              'token_accessor': (item.stdout | from_json).auth.accessor,
+              'token_ttl': (item.stdout | from_json).auth.lease_duration,
+              'token_renewable': (item.stdout | from_json).auth.renewable,
+              'created_at': ansible_date_time.iso8601
+            } | to_json(indent=2) }}"
+            dest: "{{ vault_users_output_dir }}/{{ item.item.name }}.json"
+            mode: '0600'
+          loop: "{{ user_creation.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          delegate_to: localhost
+          become: false
+          run_once: true
+          when:
+            - item.stdout is defined
+            - '"client_token" in item.stdout'
+
+        - name: "Display saved token locations"
+          debug:
+            msg: "User token saved to: {{ vault_users_output_dir }}/{{ item.item.name }}.json"
+          loop: "{{ user_creation.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          when:
+            - item.stdout is defined
+            - '"client_token" in item.stdout'
+          run_once: true
+
+    - name: "Display Vault users summary"
+      debug:
+        msg: |
+          Vault Users Configuration Complete
+          ====================================
+          
+          Users Created:
+          {% for user in vault_users %}
+            - {{ user.name }} ({{ user.description }})
+              Policies: {{ user.policies | join(', ') }}
+              Token: {{ vault_users_output_dir }}/{{ user.name }}.json
+          {% endfor %}
+          
+          Policies Created:
+          {% for policy in vault_user_policies %}
+            - {{ policy }}
+          {% endfor %}
+      run_once: true
+
+  when: vault_users_enabled | bool

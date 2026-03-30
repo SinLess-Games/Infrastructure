@@ -77,14 +77,51 @@ tasks:
           {{.ANSIBLE_DIR}}/playbooks/fix-apt-lock.yaml \
           --ask-pass {{.CLI_ARGS}}
   
-  setup-proxmox-nodes:
+  configure-proxmox:
     desc: "Configure the proxmox nodes"
     deps: [init]
     cmds:
       - |
         set -e
-        {{.VENV_DIR}}/bin/ansible-playbook "{{.ANSIBLE_DIR}}/playbooks/setup-proxmox-nodes.yaml" --ask-pass {{.CLI_ARGS}}
-      - task packer:download-isos
+        if [ -f .env ]; then
+          set -a
+          . ./.env
+          set +a
+        fi
+        OVERLAY_INVENTORY="$(mktemp --suffix=.yml)"
+        cleanup() {
+          rm -f "$OVERLAY_INVENTORY"
+        }
+        trap cleanup EXIT
+        yaml_quote() {
+          printf "%s" "$1" | sed "s/'/'\"'\"'/g; 1s/^/'/; \$s/\$/'/"
+        }
+        {
+          echo "---"
+          echo "proxmox:"
+          echo "  vars:"
+          if [ -n "${PROXMOX_SSH_PASSWORD:-}" ]; then
+            printf "    ansible_password: %s\n" "$(yaml_quote "$PROXMOX_SSH_PASSWORD")"
+            printf "    ansible_ssh_pass: %s\n" "$(yaml_quote "$PROXMOX_SSH_PASSWORD")"
+          fi
+          echo "  children:"
+          echo "    pve_nodes:"
+          echo "      hosts:"
+          for node in 01 02 03 04 05; do
+            eval "NODE_PASSWORD=\${PROXMOX_SSH_PASSWORD_PVE_${node}:-}"
+            if [ -n "${NODE_PASSWORD:-}" ]; then
+              echo "        pve-${node}:"
+              printf "          ansible_password: %s\n" "$(yaml_quote "$NODE_PASSWORD")"
+              printf "          ansible_ssh_pass: %s\n" "$(yaml_quote "$NODE_PASSWORD")"
+            fi
+          done
+        } > "$OVERLAY_INVENTORY"
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          -i "$OVERLAY_INVENTORY" \
+          {{.ANSIBLE_DIR}}/playbooks/configure-proxmox.yaml \
+          ${PROXMOX_CLUSTER_JOIN_PASSWORD:+-e proxmox_cluster_join_password="$PROXMOX_CLUSTER_JOIN_PASSWORD"} \
+          {{.CLI_ARGS}}
 
   setup-technitium:
     desc: "Setup Technitium DNS Server"
@@ -309,3 +346,44 @@ tasks:
         echo ""
         echo "=== Ingress Controllers ==="
         kubectl -n ingress-nginx get pods
+  
+  k8s:prod:
+    desc: "Deploy Kubernetes production cluster (Terraform + RKE2 + core addons + Flux bootstrap)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-kubernetes-prod.yaml \
+          {{.CLI_ARGS}}
+        test -f .outputs/kubernetes/prod/kubeconfig
+        echo "Saved kubeconfig: .outputs/kubernetes/prod/kubeconfig"
+  
+  k8s:prod:kubeconfig:
+    desc: "Print kubeconfig path for production cluster"
+    cmds:
+      - echo ".outputs/kubernetes/prod/kubeconfig"
+
+  k8s:prod:status:
+    desc: "Check production cluster status (requires kubeconfig)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export KUBECONFIG=$$(pwd)/.outputs/kubernetes/prod/kubeconfig
+        if ! [ -f "$$KUBECONFIG" ]; then
+          echo "Kubeconfig not found. Deploy cluster first with: task ansible:k8s:prod"
+          exit 1
+        fi
+        echo "=== Cluster Nodes ==="
+        kubectl get nodes -o wide
+        echo ""
+        echo "=== Cilium Status ==="
+        kubectl -n kube-system get pods -l k8s-app=cilium
+        echo ""
+        echo "=== Ingress Controllers ==="
+        kubectl -n ingress-nginx get pods
+  
+  

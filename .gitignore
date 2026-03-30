@@ -1,4 +1,5 @@
 Packer/proxmox-templates/variables.auto.pkrvars.hcl
+/.env
 
 .outputs/
 Ansible/.venv/
@@ -25,3 +26,5 @@ Terraform/terraform.tfstate.1772233972.backup
 Terraform/.terraform.tfstate.lock.info
 Terraform/tfplan
 terraform.tfstate
+Ansible/roles/lablabs.rke2
+.secrets/

@@ -1,0 +1,32 @@
+---
+# =============================================================================
+# Kubernetes Development Control Plane Variables
+# =============================================================================
+
+kubernetes_master:
+  count: 1
+  vmid_start: 300
+  name_prefix: "k8s-dev-cp"
+  cpu_cores: 4
+  cpu_sockets: 1
+  memory_mb: 8192
+  disk_size: "100G"
+  clone_template: "debian-13-template"
+  target_nodes:
+    - "pve-01"
+  startup_order: 10
+
+kubernetes_master_ips:
+  - "10.10.20.11"
+
+kubernetes_control_plane_group_name: "kubernetes_dev_control_plane"
+kubernetes_control_plane_first_host: "k8s-dev-master-01"
+kubernetes_control_plane_first_ip: "10.10.20.11"
+
+kubernetes_rke2_cluster_group_name: "kubernetes_dev"
+kubernetes_rke2_servers_group_name: "kubernetes_dev_control_plane"
+kubernetes_rke2_agents_group_name: "kubernetes_dev_workers"
+
+kubernetes_rke2_server_node_labels:
+  - "node-role.kubernetes.io/control-plane=true"
+  - "topology.kubernetes.io/environment=dev"

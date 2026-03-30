@@ -1,0 +1,60 @@
+---
+# Task: Create Proxmox resource pools
+
+- name: "Create resource pools"
+  block:
+    - name: "Check if proxmox_pools is defined"
+      assert:
+        that:
+          - proxmox_pools is defined
+          - proxmox_pools | type_debug == 'dict'
+        fail_msg: "proxmox_pools must be defined in group_vars"
+
+    - name: "Create pool: {{ item.key }}"
+      shell: |
+        set -euo pipefail
+
+        pool_name="{{ item.key }}"
+        pool_comment={{ (item.value.comment | default('')) | quote }}
+        pool_exists=$(pveum pool list --output-format json | POOL="$pool_name" python3 -c 'import json, os, sys; pool=os.environ.get("POOL"); data=json.load(sys.stdin); print("YES" if any(p.get("poolid")==pool for p in data) else "NO")')
+
+        if [ "$pool_exists" = "NO" ]; then
+          if [ -n "$pool_comment" ]; then
+            pveum pool add "$pool_name" -comment "$pool_comment"
+          else
+            pveum pool add "$pool_name"
+          fi
+          echo "CHANGED"
+        else
+          echo "UNCHANGED"
+        fi
+      register: pool_result
+      changed_when: "'CHANGED' in pool_result.stdout"
+      loop: "{{ proxmox_pools | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      delegate_to: "{{ groups['pve_nodes'] | first }}"
+      become: true
+      run_once: true
+      when: not proxmox_permissions_dev_mode
+      tags:
+        - proxmox
+        - permissions
+        - pools
+
+    - name: "[DEV MODE] Display pool creation (simulated): {{ item.key }}"
+      debug:
+        msg: "Would create pool: {{ item.key }} with comment: {{ item.value.comment | default('none') }}"
+      loop: "{{ proxmox_pools | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: proxmox_permissions_dev_mode
+      tags:
+        - proxmox
+        - permissions
+        - pools
+
+  tags:
+    - proxmox
+    - permissions
+    - pools

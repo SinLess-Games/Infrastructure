@@ -1,0 +1,20 @@
+---
+# =============================================================================
+# packages — install-brew-packages
+# -----------------------------------------------------------------------------
+# Installs Homebrew formulae once Linuxbrew is available.
+# =============================================================================
+
+- name: Install requested Homebrew formulae
+  become: false
+  community.general.homebrew:
+    name: "{{ packages_role_brew_packages }}"
+    state: present
+    path: "{{ packages_homebrew_prefix }}/bin"
+  environment:
+    HOME: "{{ lookup('env', 'HOME') }}"
+    USER: "{{ packages_homebrew_user }}"
+    HOMEBREW_PREFIX: "{{ packages_homebrew_prefix }}"
+    HOMEBREW_CELLAR: "{{ packages_homebrew_prefix }}/Cellar"
+    HOMEBREW_REPOSITORY: "{{ packages_homebrew_prefix }}/Homebrew"
+    PATH: "{{ packages_homebrew_prefix }}/bin:{{ packages_homebrew_prefix }}/sbin:{{ ansible_env.PATH }}"

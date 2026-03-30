@@ -1,0 +1,23 @@
+version: '3'
+
+tasks:
+  default:
+    desc: Collect Proxmox, Ceph, and networking logs from the Proxmox inventory
+    cmds:
+      - task: collect-logs
+
+  collect-logs:
+    desc: Run the Proxmox log collector script
+    vars:
+      INVENTORY: '{{default (joinPath .ROOT_DIR "Ansible/inventory/proxmox.yaml") .INVENTORY}}'
+      OUTPUT_ROOT: '{{default (joinPath .ROOT_DIR ".logs/proxmox") .OUTPUT_ROOT}}'
+    cmds:
+      - >-
+        python3 {{joinPath .ROOT_DIR "scripts/python/collect-proxmox-logs.py"}}
+        --inventory {{.INVENTORY}}
+        --output-root {{.OUTPUT_ROOT}}
+        {{.CLI_ARGS}}
+    sources:
+      - '{{joinPath .ROOT_DIR "scripts/python/collect-proxmox-logs.py"}}'
+      - '{{.INVENTORY}}'
+    silent: false
