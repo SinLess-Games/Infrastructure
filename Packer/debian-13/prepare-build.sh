@@ -24,8 +24,8 @@ PROXMOX_ENDPOINT="${PROXMOX_ENDPOINT:-https://proxmox.local.sinlessgames.com}"
 PROXMOX_NODE="${PROXMOX_NODE:-pve-01}"
 PROXMOX_ISO_STORAGE="${PROXMOX_ISO_STORAGE:-ISOs}"
 
-DEBIAN_ISO="debian-13.3.0-amd64-netinst.iso"
-DEBIAN_CHECKSUM="c9f09d24b7e834e6834f2ffa565b33d6f1f540d04bd25c79ad9953bc79a8ac02"
+DEBIAN_ISO="debian-13.4.0-amd64-netinst.iso"
+DEBIAN_CHECKSUM="0b813535dd76f2ea96eff908c65e8521512c92a0631fd41c95756ffd7d4896dc"
 TEMP_ISO="/tmp/${DEBIAN_ISO}"
 
 echo -e "${BLUE}Configuration:${NC}"

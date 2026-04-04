@@ -14,6 +14,11 @@ vault_users_enabled: true
 # Output directory for generated tokens
 vault_users_output_dir: "{{ playbook_dir }}/../../.outputs/vault"
 
+# Proxmox API Configuration
+vault_proxmox_api_url: "{{ infra_proxmox_api_url }}"
+vault_proxmox_api_token_file: "{{ infra_proxmox_api_token_file }}"
+vault_proxmox_tls_insecure: "{{ infra_proxmox_tls_insecure }}"
+
 # Secrets engine configuration (Terraform vault-setup role)
 vault_setup_kv_mounts: "{{ vault_kv_mounts }}"
 vault_setup_engine_mounts: "{{ vault_engine_mounts }}"
@@ -89,6 +94,10 @@ vault_unseal_keys_output_dir: "{{ playbook_dir }}/../../.outputs/vault"
 vault_unseal_keys_file: "unseal-keys.json"
 vault_unseal_keys_backup: true
 vault_unseal_keys_backup_vault: true
+
+# Always allow the configure phase to initialize a brand-new cluster.
+# The role still checks Vault's actual init state before attempting init.
+vault_initialize: true
 
 # Auto-unseal (Transit) configuration
 # Keep `vault_seal_type: "shamir"` until you run migration.

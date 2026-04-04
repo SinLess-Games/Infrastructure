@@ -1,0 +1,869 @@
+[1;32mdebian-13.proxmox-iso.debian13: output will be in this color.[0m
+
+[1;32m==> debian-13.proxmox-iso.debian13: Creating VM[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Starting VM[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Starting HTTP server on port 8812[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Waiting 15s for boot[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Typing the boot command[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Waiting for SSH to become available...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Connected to SSH![0m
+[1;32m==> debian-13.proxmox-iso.debian13: Pausing 30s before the next provisioner...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Provisioning with shell script: /tmp/packer-shell221542992[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Waiting for system to stabilize...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Provisioning with shell script: ./scripts/update-system.sh[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + echo 'Updating system packages...'[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + apt-get update[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Updating system packages...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Hit:1 http://security.debian.org/debian-security trixie-security InRelease[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Hit:2 http://deb.debian.org/debian trixie InRelease[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Hit:3 http://deb.debian.org/debian trixie-updates InRelease[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading package lists...[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + apt-get install -y linux-headers-generic build-essential[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading package lists...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Building dependency tree...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading state information...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: The following additional packages will be installed:[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   binutils binutils-common binutils-x86-64-linux-gnu cpp cpp-14[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   cpp-14-x86-64-linux-gnu cpp-x86-64-linux-gnu dpkg-dev fakeroot g++ g++-14[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   g++-14-x86-64-linux-gnu g++-x86-64-linux-gnu gcc gcc-14[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   gcc-14-x86-64-linux-gnu gcc-x86-64-linux-gnu libalgorithm-diff-perl[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libalgorithm-diff-xs-perl libalgorithm-merge-perl libasan8 libbinutils[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libc-dev-bin libc6-dev libcc1-0 libcrypt-dev libctf-nobfd0 libctf0[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libdpkg-perl libdw1t64 libfakeroot libfile-fcntllock-perl libgcc-14-dev[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libgomp1 libgprofng0 libhwasan0 libisl23 libitm1 liblsan0 libmpc3 libmpfr6[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libquadmath0 libsframe1 libstdc++-14-dev libtsan2 libubsan1[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   linux-headers-6.12.74+deb13+1-amd64 linux-headers-6.12.74+deb13+1-common[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   linux-kbuild-6.12.74+deb13+1 linux-libc-dev make manpages-dev pahole patch[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   rpcsvc-proto sq[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Suggested packages:[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   binutils-doc gprofng-gui binutils-gold cpp-doc gcc-14-locales cpp-14-doc[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   debian-keyring debian-tag2upload-keyring g++-multilib g++-14-multilib[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   gcc-14-doc gcc-multilib autoconf automake libtool flex bison gdb gcc-doc[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   gcc-14-multilib gdb-x86-64-linux-gnu libc-devtools glibc-doc git bzr[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libstdc++-14-doc make-doc ed diffutils-doc[0m
+[1;32m==> debian-13.proxmox-iso.debian13: The following NEW packages will be installed:[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   binutils binutils-common binutils-x86-64-linux-gnu build-essential cpp[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   cpp-14 cpp-14-x86-64-linux-gnu cpp-x86-64-linux-gnu dpkg-dev fakeroot g++[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   g++-14 g++-14-x86-64-linux-gnu g++-x86-64-linux-gnu gcc gcc-14[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   gcc-14-x86-64-linux-gnu gcc-x86-64-linux-gnu libalgorithm-diff-perl[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libalgorithm-diff-xs-perl libalgorithm-merge-perl libasan8 libbinutils[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libc-dev-bin libc6-dev libcc1-0 libcrypt-dev libctf-nobfd0 libctf0[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libdpkg-perl libdw1t64 libfakeroot libfile-fcntllock-perl libgcc-14-dev[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libgomp1 libgprofng0 libhwasan0 libisl23 libitm1 liblsan0 libmpc3 libmpfr6[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libquadmath0 libsframe1 libstdc++-14-dev libtsan2 libubsan1[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   linux-headers-6.12.74+deb13+1-amd64 linux-headers-6.12.74+deb13+1-common[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   linux-headers-amd64 linux-kbuild-6.12.74+deb13+1 linux-libc-dev make[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   manpages-dev pahole patch rpcsvc-proto sq[0m
+[1;32m==> debian-13.proxmox-iso.debian13: 0 upgraded, 58 newly installed, 0 to remove and 0 not upgraded.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Need to get 98.0 MB of archives.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: After this operation, 389 MB of additional disk space will be used.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:1 http://deb.debian.org/debian trixie/main amd64 libsframe1 amd64 2.44-3 [78.4 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:2 http://security.debian.org/debian-security trixie-security/main amd64 linux-libc-dev all 6.12.74-2 [2,746 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:3 http://deb.debian.org/debian trixie/main amd64 binutils-common amd64 2.44-3 [2,509 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:4 http://security.debian.org/debian-security trixie-security/main amd64 linux-headers-6.12.74+deb13+1-common all 6.12.74-2 [11.0 MB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:5 http://deb.debian.org/debian trixie/main amd64 libbinutils amd64 2.44-3 [534 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:6 http://deb.debian.org/debian trixie/main amd64 libgprofng0 amd64 2.44-3 [808 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:7 http://deb.debian.org/debian trixie/main amd64 libctf-nobfd0 amd64 2.44-3 [156 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:8 http://deb.debian.org/debian trixie/main amd64 libctf0 amd64 2.44-3 [88.6 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:9 http://deb.debian.org/debian trixie/main amd64 binutils-x86-64-linux-gnu amd64 2.44-3 [1,014 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:10 http://deb.debian.org/debian trixie/main amd64 binutils amd64 2.44-3 [265 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:11 http://deb.debian.org/debian trixie/main amd64 libc-dev-bin amd64 2.41-12+deb13u2 [59.4 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:12 http://deb.debian.org/debian trixie/main amd64 libcrypt-dev amd64 1:4.4.38-1 [119 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:13 http://deb.debian.org/debian trixie/main amd64 rpcsvc-proto amd64 1.4.3-1 [63.3 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:14 http://deb.debian.org/debian trixie/main amd64 libc6-dev amd64 2.41-12+deb13u2 [1,996 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:15 http://security.debian.org/debian-security trixie-security/main amd64 linux-kbuild-6.12.74+deb13+1 amd64 6.12.74-2 [1,624 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:16 http://security.debian.org/debian-security trixie-security/main amd64 linux-headers-6.12.74+deb13+1-amd64 amd64 6.12.74-2 [2,950 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:17 http://security.debian.org/debian-security trixie-security/main amd64 linux-headers-amd64 amd64 6.12.74-2 [1,412 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:18 http://deb.debian.org/debian trixie/main amd64 libisl23 amd64 0.27-1 [659 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:19 http://deb.debian.org/debian trixie/main amd64 libmpfr6 amd64 4.2.2-1 [729 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:20 http://deb.debian.org/debian trixie/main amd64 libmpc3 amd64 1.3.1-1+b3 [52.2 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:21 http://deb.debian.org/debian trixie/main amd64 cpp-14-x86-64-linux-gnu amd64 14.2.0-19 [11.0 MB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:22 http://deb.debian.org/debian trixie/main amd64 cpp-14 amd64 14.2.0-19 [1,280 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:23 http://deb.debian.org/debian trixie/main amd64 cpp-x86-64-linux-gnu amd64 4:14.2.0-1 [4,840 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:24 http://deb.debian.org/debian trixie/main amd64 cpp amd64 4:14.2.0-1 [1,568 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:25 http://deb.debian.org/debian trixie/main amd64 libcc1-0 amd64 14.2.0-19 [42.8 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:26 http://deb.debian.org/debian trixie/main amd64 libgomp1 amd64 14.2.0-19 [137 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:27 http://deb.debian.org/debian trixie/main amd64 libitm1 amd64 14.2.0-19 [26.0 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:28 http://deb.debian.org/debian trixie/main amd64 libasan8 amd64 14.2.0-19 [2,725 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:29 http://deb.debian.org/debian trixie/main amd64 liblsan0 amd64 14.2.0-19 [1,204 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:30 http://deb.debian.org/debian trixie/main amd64 libtsan2 amd64 14.2.0-19 [2,460 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:31 http://deb.debian.org/debian trixie/main amd64 libubsan1 amd64 14.2.0-19 [1,074 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:32 http://deb.debian.org/debian trixie/main amd64 libhwasan0 amd64 14.2.0-19 [1,488 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:33 http://deb.debian.org/debian trixie/main amd64 libquadmath0 amd64 14.2.0-19 [145 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:34 http://deb.debian.org/debian trixie/main amd64 libgcc-14-dev amd64 14.2.0-19 [2,672 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:35 http://deb.debian.org/debian trixie/main amd64 gcc-14-x86-64-linux-gnu amd64 14.2.0-19 [21.4 MB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:36 http://deb.debian.org/debian trixie/main amd64 gcc-14 amd64 14.2.0-19 [540 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:37 http://deb.debian.org/debian trixie/main amd64 gcc-x86-64-linux-gnu amd64 4:14.2.0-1 [1,436 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:38 http://deb.debian.org/debian trixie/main amd64 gcc amd64 4:14.2.0-1 [5,136 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:39 http://deb.debian.org/debian trixie/main amd64 libstdc++-14-dev amd64 14.2.0-19 [2,376 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:40 http://deb.debian.org/debian trixie/main amd64 g++-14-x86-64-linux-gnu amd64 14.2.0-19 [12.1 MB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:41 http://deb.debian.org/debian trixie/main amd64 g++-14 amd64 14.2.0-19 [22.5 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:42 http://deb.debian.org/debian trixie/main amd64 g++-x86-64-linux-gnu amd64 4:14.2.0-1 [1,200 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:43 http://deb.debian.org/debian trixie/main amd64 g++ amd64 4:14.2.0-1 [1,344 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:44 http://deb.debian.org/debian trixie/main amd64 make amd64 4.4.1-2 [463 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:45 http://deb.debian.org/debian trixie/main amd64 libdpkg-perl all 1.22.22 [651 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:46 http://deb.debian.org/debian trixie/main amd64 patch amd64 2.8-2 [134 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:47 http://deb.debian.org/debian trixie/main amd64 dpkg-dev all 1.22.22 [1,337 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:48 http://deb.debian.org/debian trixie/main amd64 build-essential amd64 12.12 [4,624 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:49 http://deb.debian.org/debian trixie/main amd64 libfakeroot amd64 1.37.1.1-1 [29.6 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:50 http://deb.debian.org/debian trixie/main amd64 fakeroot amd64 1.37.1.1-1 [76.0 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:51 http://deb.debian.org/debian trixie/main amd64 libalgorithm-diff-perl all 1.201-1 [43.3 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:52 http://deb.debian.org/debian trixie/main amd64 libalgorithm-diff-xs-perl amd64 0.04-9 [11.1 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:53 http://deb.debian.org/debian trixie/main amd64 libalgorithm-merge-perl all 0.08-5 [11.8 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:54 http://deb.debian.org/debian trixie/main amd64 libdw1t64 amd64 0.192-4 [255 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:55 http://deb.debian.org/debian trixie/main amd64 libfile-fcntllock-perl amd64 0.22-4+b4 [34.6 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:56 http://deb.debian.org/debian trixie/main amd64 pahole amd64 1.30-1 [259 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:57 http://deb.debian.org/debian trixie/main amd64 manpages-dev all 6.9.1-1 [2,122 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:58 http://deb.debian.org/debian trixie/main amd64 sq amd64 1.3.1-2+b2 [5,653 kB][0m
+[1;31m==> debian-13.proxmox-iso.debian13: debconf: unable to initialize frontend: Dialog[0m
+[1;31m==> debian-13.proxmox-iso.debian13: debconf: (TERM is not set, so the dialog frontend is not usable.)[0m
+[1;31m==> debian-13.proxmox-iso.debian13: debconf: falling back to frontend: Readline[0m
+[1;31m==> debian-13.proxmox-iso.debian13: debconf: unable to initialize frontend: Readline[0m
+[1;31m==> debian-13.proxmox-iso.debian13: debconf: (This frontend requires a controlling tty.)[0m
+[1;31m==> debian-13.proxmox-iso.debian13: debconf: falling back to frontend: Teletype[0m
+[1;31m==> debian-13.proxmox-iso.debian13: debconf: unable to initialize frontend: Teletype[0m
+[1;31m==> debian-13.proxmox-iso.debian13: debconf: (This frontend requires a controlling tty.)[0m
+[1;31m==> debian-13.proxmox-iso.debian13: debconf: falling back to frontend: Noninteractive[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Fetched 98.0 MB in 15s (6,676 kB/s)[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libsframe1:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: (Reading database ... 34674 files and directories currently installed.)[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../00-libsframe1_2.44-3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libsframe1:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package binutils-common:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../01-binutils-common_2.44-3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking binutils-common:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libbinutils:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../02-libbinutils_2.44-3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libbinutils:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libgprofng0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../03-libgprofng0_2.44-3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libgprofng0:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libctf-nobfd0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../04-libctf-nobfd0_2.44-3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libctf-nobfd0:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libctf0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../05-libctf0_2.44-3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libctf0:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package binutils-x86-64-linux-gnu.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../06-binutils-x86-64-linux-gnu_2.44-3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking binutils-x86-64-linux-gnu (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package binutils.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../07-binutils_2.44-3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking binutils (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libc-dev-bin.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../08-libc-dev-bin_2.41-12+deb13u2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libc-dev-bin (2.41-12+deb13u2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package linux-libc-dev.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../09-linux-libc-dev_6.12.74-2_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking linux-libc-dev (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libcrypt-dev:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../10-libcrypt-dev_1%3a4.4.38-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libcrypt-dev:amd64 (1:4.4.38-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package rpcsvc-proto.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../11-rpcsvc-proto_1.4.3-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking rpcsvc-proto (1.4.3-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libc6-dev:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../12-libc6-dev_2.41-12+deb13u2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libc6-dev:amd64 (2.41-12+deb13u2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libisl23:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../13-libisl23_0.27-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libisl23:amd64 (0.27-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libmpfr6:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../14-libmpfr6_4.2.2-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libmpfr6:amd64 (4.2.2-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libmpc3:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../15-libmpc3_1.3.1-1+b3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libmpc3:amd64 (1.3.1-1+b3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package cpp-14-x86-64-linux-gnu.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../16-cpp-14-x86-64-linux-gnu_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking cpp-14-x86-64-linux-gnu (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package cpp-14.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../17-cpp-14_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking cpp-14 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package cpp-x86-64-linux-gnu.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../18-cpp-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking cpp-x86-64-linux-gnu (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package cpp.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../19-cpp_4%3a14.2.0-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking cpp (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libcc1-0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../20-libcc1-0_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libcc1-0:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libgomp1:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../21-libgomp1_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libgomp1:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libitm1:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../22-libitm1_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libitm1:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libasan8:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../23-libasan8_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libasan8:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package liblsan0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../24-liblsan0_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking liblsan0:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libtsan2:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../25-libtsan2_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libtsan2:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libubsan1:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../26-libubsan1_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libubsan1:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libhwasan0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../27-libhwasan0_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libhwasan0:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libquadmath0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../28-libquadmath0_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libquadmath0:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libgcc-14-dev:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../29-libgcc-14-dev_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libgcc-14-dev:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package gcc-14-x86-64-linux-gnu.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../30-gcc-14-x86-64-linux-gnu_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking gcc-14-x86-64-linux-gnu (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package gcc-14.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../31-gcc-14_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking gcc-14 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package gcc-x86-64-linux-gnu.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../32-gcc-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking gcc-x86-64-linux-gnu (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package gcc.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../33-gcc_4%3a14.2.0-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking gcc (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libstdc++-14-dev:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../34-libstdc++-14-dev_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libstdc++-14-dev:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package g++-14-x86-64-linux-gnu.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../35-g++-14-x86-64-linux-gnu_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking g++-14-x86-64-linux-gnu (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package g++-14.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../36-g++-14_14.2.0-19_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking g++-14 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package g++-x86-64-linux-gnu.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../37-g++-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking g++-x86-64-linux-gnu (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package g++.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../38-g++_4%3a14.2.0-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking g++ (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package make.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../39-make_4.4.1-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking make (4.4.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libdpkg-perl.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../40-libdpkg-perl_1.22.22_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libdpkg-perl (1.22.22) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package patch.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../41-patch_2.8-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking patch (2.8-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package dpkg-dev.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../42-dpkg-dev_1.22.22_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking dpkg-dev (1.22.22) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package build-essential.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../43-build-essential_12.12_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking build-essential (12.12) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libfakeroot:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../44-libfakeroot_1.37.1.1-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libfakeroot:amd64 (1.37.1.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package fakeroot.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../45-fakeroot_1.37.1.1-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking fakeroot (1.37.1.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libalgorithm-diff-perl.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../46-libalgorithm-diff-perl_1.201-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libalgorithm-diff-perl (1.201-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libalgorithm-diff-xs-perl.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../47-libalgorithm-diff-xs-perl_0.04-9_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libalgorithm-diff-xs-perl (0.04-9) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libalgorithm-merge-perl.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../48-libalgorithm-merge-perl_0.08-5_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libalgorithm-merge-perl (0.08-5) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libdw1t64:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../49-libdw1t64_0.192-4_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libdw1t64:amd64 (0.192-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libfile-fcntllock-perl.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../50-libfile-fcntllock-perl_0.22-4+b4_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libfile-fcntllock-perl (0.22-4+b4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package linux-headers-6.12.74+deb13+1-common.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../51-linux-headers-6.12.74+deb13+1-common_6.12.74-2_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking linux-headers-6.12.74+deb13+1-common (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package pahole.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../52-pahole_1.30-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking pahole (1.30-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package linux-kbuild-6.12.74+deb13+1.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../53-linux-kbuild-6.12.74+deb13+1_6.12.74-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking linux-kbuild-6.12.74+deb13+1 (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package linux-headers-6.12.74+deb13+1-amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../54-linux-headers-6.12.74+deb13+1-amd64_6.12.74-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking linux-headers-6.12.74+deb13+1-amd64 (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package linux-headers-amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../55-linux-headers-amd64_6.12.74-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking linux-headers-amd64 (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package manpages-dev.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../56-manpages-dev_6.9.1-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking manpages-dev (6.9.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package sq.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../57-sq_1.3.1-2+b2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking sq (1.3.1-2+b2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up manpages-dev (6.9.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libfile-fcntllock-perl (0.22-4+b4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libalgorithm-diff-perl (1.201-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up binutils-common:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up linux-libc-dev (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libctf-nobfd0:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up sq (1.3.1-2+b2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libgomp1:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libsframe1:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libfakeroot:amd64 (1.37.1.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libdw1t64:amd64 (0.192-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up fakeroot (1.37.1.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: update-alternatives: using /usr/bin/fakeroot-sysv to provide /usr/bin/fakeroot (fakeroot) in auto mode[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up rpcsvc-proto (1.4.3-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up make (4.4.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libmpfr6:amd64 (4.2.2-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libquadmath0:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libmpc3:amd64 (1.3.1-1+b3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up patch (2.8-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up pahole (1.30-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libdpkg-perl (1.22.22) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libubsan1:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libhwasan0:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libcrypt-dev:amd64 (1:4.4.38-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libasan8:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libtsan2:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libbinutils:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libisl23:amd64 (0.27-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up linux-headers-6.12.74+deb13+1-common (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libc-dev-bin (2.41-12+deb13u2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libalgorithm-diff-xs-perl (0.04-9) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libcc1-0:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up liblsan0:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libitm1:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libalgorithm-merge-perl (0.08-5) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libctf0:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up linux-kbuild-6.12.74+deb13+1 (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libgprofng0:amd64 (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up cpp-14-x86-64-linux-gnu (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up cpp-14 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libc6-dev:amd64 (2.41-12+deb13u2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libgcc-14-dev:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libstdc++-14-dev:amd64 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up binutils-x86-64-linux-gnu (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up cpp-x86-64-linux-gnu (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up binutils (2.44-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up dpkg-dev (1.22.22) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up cpp (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up gcc-14-x86-64-linux-gnu (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up gcc-x86-64-linux-gnu (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up gcc-14 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up linux-headers-6.12.74+deb13+1-amd64 (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up g++-14-x86-64-linux-gnu (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up g++-x86-64-linux-gnu (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up g++-14 (14.2.0-19) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up linux-headers-amd64 (6.12.74-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up gcc (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up g++ (4:14.2.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: update-alternatives: using /usr/bin/g++ to provide /usr/bin/c++ (c++) in auto mode[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up build-essential (12.12) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Processing triggers for man-db (2.13.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Processing triggers for libc-bin (2.41-12+deb13u2) ...[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + echo 'Performing upgrade...'[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Performing upgrade...[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + DEBIAN_FRONTEND=noninteractive[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + apt-get upgrade -y[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading package lists...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Building dependency tree...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading state information...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Calculating upgrade...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: 0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: System update complete.[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + echo 'System update complete.'[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Provisioning with shell script: ./scripts/install-cloud-init.sh[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + echo 'Installing cloud-init and qemu-guest-agent...'[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + DEBIAN_FRONTEND=noninteractive[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Installing cloud-init and qemu-guest-agent...[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + apt-get install -y cloud-init cloud-initramfs-growroot qemu-guest-agent[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading package lists...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Building dependency tree...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading state information...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: qemu-guest-agent is already the newest version (1:10.0.8+ds-0+deb13u1+b1).[0m
+[1;32m==> debian-13.proxmox-iso.debian13: The following additional packages will be installed:[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   cloud-guest-utils cloud-image-utils cloud-utils distro-info eatmydata gdisk[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   genisoimage ibverbs-providers libaio1t64 libblkio1 libboost-iostreams1.83.0[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libboost-thread1.83.0 libcryptsetup12 libcurl3t64-gnutls libeatmydata1[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libfmt10 libgfapi0 libgfrpc0 libgfxdr0 libglusterfs0 libibverbs1 libiscsi7[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libldap-common libldap2 libnfs14 libnghttp3-9 libngtcp2-16[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libngtcp2-crypto-gnutls8 libnl-3-200 libnl-route-3-200 librados2 librbd1[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   librdmacm1t64 librtmp1 libsasl2-2 libsasl2-modules libsasl2-modules-db[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libssh-4 libssh2-1t64 libyaml-0-2 netcat-openbsd python-babel-localedata[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-arrow python3-attr python3-babel python3-bcrypt python3-blinker[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-cffi-backend python3-configobj python3-cryptography python3-dateutil[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-fqdn python3-isoduration python3-jinja2 python3-json-pointer[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-jsonpatch python3-jsonschema python3-jsonschema-specifications[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-jwt python3-markupsafe python3-oauthlib python3-referencing[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-rfc3339-validator python3-rfc3986-validator python3-rfc3987[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-rpds-py python3-typeshed python3-uritemplate python3-webcolors[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-yaml qemu-block-extra qemu-utils sudo[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Suggested packages:[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   mtools btrfs-progs python3-passlib xfsprogs shunit2 wodim cdrkit-doc[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libsasl2-modules-gssapi-mit | libsasl2-modules-gssapi-heimdal[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libsasl2-modules-ldap libsasl2-modules-otp libsasl2-modules-sql[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python-arrow-doc python-attr-doc python-blinker-doc python-configobj-doc[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python-cryptography-doc python3-cryptography-vectors python-jinja2-doc[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python-jsonschema-doc python-jwt-doc python3-crypto[0m
+[1;32m==> debian-13.proxmox-iso.debian13: The following NEW packages will be installed:[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   cloud-guest-utils cloud-image-utils cloud-init cloud-initramfs-growroot[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   cloud-utils distro-info eatmydata gdisk genisoimage ibverbs-providers[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libaio1t64 libblkio1 libboost-iostreams1.83.0 libboost-thread1.83.0[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libcryptsetup12 libcurl3t64-gnutls libeatmydata1 libfmt10 libgfapi0[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libgfrpc0 libgfxdr0 libglusterfs0 libibverbs1 libiscsi7 libldap-common[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libldap2 libnfs14 libnghttp3-9 libngtcp2-16 libngtcp2-crypto-gnutls8[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libnl-3-200 libnl-route-3-200 librados2 librbd1 librdmacm1t64 librtmp1[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libsasl2-2 libsasl2-modules libsasl2-modules-db libssh-4 libssh2-1t64[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   libyaml-0-2 netcat-openbsd python-babel-localedata python3-arrow[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-attr python3-babel python3-bcrypt python3-blinker[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-cffi-backend python3-configobj python3-cryptography python3-dateutil[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-fqdn python3-isoduration python3-jinja2 python3-json-pointer[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-jsonpatch python3-jsonschema python3-jsonschema-specifications[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-jwt python3-markupsafe python3-oauthlib python3-referencing[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-rfc3339-validator python3-rfc3986-validator python3-rfc3987[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-rpds-py python3-typeshed python3-uritemplate python3-webcolors[0m
+[1;32m==> debian-13.proxmox-iso.debian13:   python3-yaml qemu-block-extra qemu-utils sudo[0m
+[1;32m==> debian-13.proxmox-iso.debian13: 0 upgraded, 75 newly installed, 0 to remove and 0 not upgraded.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Need to get 38.4 MB of archives.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: After this operation, 134 MB of additional disk space will be used.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:1 http://deb.debian.org/debian trixie/main amd64 sudo amd64 1.9.16p2-3+deb13u1 [2,087 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:2 http://deb.debian.org/debian trixie/main amd64 cloud-guest-utils all 0.33-1 [27.9 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:3 http://deb.debian.org/debian trixie/main amd64 genisoimage amd64 9:1.1.11-4 [334 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:4 http://deb.debian.org/debian trixie/main amd64 libaio1t64 amd64 0.3.113-8+b1 [14.9 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:5 http://deb.debian.org/debian trixie/main amd64 qemu-utils amd64 1:10.0.8+ds-0+deb13u1+b1 [2,011 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:6 http://deb.debian.org/debian trixie/main amd64 cloud-image-utils all 0.33-1 [28.0 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:7 http://deb.debian.org/debian trixie/main amd64 gdisk amd64 1.0.10-2 [230 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:8 http://deb.debian.org/debian trixie/main amd64 netcat-openbsd amd64 1.229-1 [42.5 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:9 http://deb.debian.org/debian trixie/main amd64 python3-configobj all 5.0.9-1 [34.0 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:10 http://deb.debian.org/debian trixie/main amd64 python3-markupsafe amd64 2.1.5-1+b3 [14.0 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:11 http://deb.debian.org/debian trixie/main amd64 python3-jinja2 all 3.1.6-1 [107 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:12 http://deb.debian.org/debian trixie/main amd64 python3-json-pointer all 2.4-3 [14.6 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:13 http://deb.debian.org/debian trixie/main amd64 python3-jsonpatch all 1.32-5 [12.1 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:14 http://deb.debian.org/debian trixie/main amd64 python3-attr all 25.3.0-1 [69.5 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:15 http://deb.debian.org/debian trixie/main amd64 python3-rpds-py amd64 0.21.0-2+b1 [257 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:16 http://deb.debian.org/debian trixie/main amd64 python3-referencing all 0.36.2-1 [23.7 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:17 http://deb.debian.org/debian trixie/main amd64 python3-jsonschema-specifications all 2023.12.1-2 [9,020 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:18 http://deb.debian.org/debian trixie/main amd64 python3-jsonschema all 4.19.2-6 [71.4 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:19 http://deb.debian.org/debian trixie/main amd64 python3-blinker all 1.9.0-1 [12.6 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:20 http://deb.debian.org/debian trixie/main amd64 python3-bcrypt amd64 4.2.0-2.1+b1 [211 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:21 http://deb.debian.org/debian trixie/main amd64 python3-cffi-backend amd64 1.17.1-3 [93.4 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:22 http://deb.debian.org/debian trixie/main amd64 python3-cryptography amd64 43.0.0-3+deb13u1 [942 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:23 http://deb.debian.org/debian trixie/main amd64 python3-jwt all 2.10.1-2 [31.3 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:24 http://deb.debian.org/debian trixie/main amd64 python3-oauthlib all 3.2.2-3 [95.6 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:25 http://deb.debian.org/debian trixie/main amd64 libyaml-0-2 amd64 0.2.5-2 [52.5 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:26 http://deb.debian.org/debian trixie/main amd64 python3-yaml amd64 6.0.2-1+b2 [136 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:27 http://deb.debian.org/debian trixie/main amd64 cloud-init all 25.1.4-1+deb13u1 [661 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:28 http://deb.debian.org/debian trixie/main amd64 cloud-utils all 0.33-1 [12.9 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:29 http://deb.debian.org/debian trixie/main amd64 cloud-initramfs-growroot all 0.18.debian14 [4,996 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:30 http://deb.debian.org/debian trixie/main amd64 distro-info amd64 1.13 [18.9 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:31 http://deb.debian.org/debian trixie/main amd64 libeatmydata1 amd64 131-2+b1 [7,044 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:32 http://deb.debian.org/debian trixie/main amd64 eatmydata all 131-2 [7,532 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:33 http://deb.debian.org/debian trixie/main amd64 libnl-3-200 amd64 3.7.0-2 [59.4 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:34 http://deb.debian.org/debian trixie/main amd64 libnl-route-3-200 amd64 3.7.0-2 [182 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:35 http://deb.debian.org/debian trixie/main amd64 libibverbs1 amd64 56.1-1 [62.4 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:36 http://deb.debian.org/debian trixie/main amd64 ibverbs-providers amd64 56.1-1 [357 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:37 http://deb.debian.org/debian trixie/main amd64 libblkio1 amd64 1.5.0-2 [250 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:38 http://deb.debian.org/debian trixie/main amd64 libboost-iostreams1.83.0 amd64 1.83.0-4.2 [254 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:39 http://deb.debian.org/debian trixie/main amd64 libboost-thread1.83.0 amd64 1.83.0-4.2 [270 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:40 http://deb.debian.org/debian trixie/main amd64 libcryptsetup12 amd64 2:2.7.5-2 [254 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:41 http://deb.debian.org/debian trixie/main amd64 libsasl2-modules-db amd64 2.1.28+dfsg1-9 [19.8 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:42 http://deb.debian.org/debian trixie/main amd64 libsasl2-2 amd64 2.1.28+dfsg1-9 [57.5 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:43 http://deb.debian.org/debian trixie/main amd64 libldap2 amd64 2.6.10+dfsg-1 [194 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:44 http://deb.debian.org/debian trixie/main amd64 libnghttp3-9 amd64 1.8.0-1 [67.7 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:45 http://deb.debian.org/debian trixie/main amd64 libngtcp2-16 amd64 1.11.0-1 [131 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:46 http://deb.debian.org/debian trixie/main amd64 libngtcp2-crypto-gnutls8 amd64 1.11.0-1 [29.3 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:47 http://deb.debian.org/debian trixie/main amd64 librtmp1 amd64 2.4+20151223.gitfa8646d.1-2+b5 [58.8 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:48 http://deb.debian.org/debian trixie/main amd64 libssh2-1t64 amd64 1.11.1-1 [245 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:49 http://deb.debian.org/debian trixie/main amd64 libcurl3t64-gnutls amd64 8.14.1-2+deb13u2 [383 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:50 http://deb.debian.org/debian trixie/main amd64 libfmt10 amd64 10.1.1+ds1-4 [127 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:51 http://deb.debian.org/debian trixie/main amd64 libgfxdr0 amd64 11.1-6 [3,181 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:52 http://deb.debian.org/debian trixie/main amd64 libglusterfs0 amd64 11.1-6 [3,417 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:53 http://deb.debian.org/debian trixie/main amd64 libgfrpc0 amd64 11.1-6 [3,206 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:54 http://deb.debian.org/debian trixie/main amd64 libgfapi0 amd64 11.1-6 [3,243 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:55 http://deb.debian.org/debian trixie/main amd64 librdmacm1t64 amd64 56.1-1 [70.4 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:56 http://deb.debian.org/debian trixie/main amd64 libiscsi7 amd64 1.20.0-4 [69.7 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:57 http://deb.debian.org/debian trixie/main amd64 libldap-common all 2.6.10+dfsg-1 [35.1 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:58 http://deb.debian.org/debian trixie/main amd64 libnfs14 amd64 5.0.2-1+b2 [106 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:59 http://deb.debian.org/debian trixie/main amd64 librados2 amd64 18.2.7+ds-1 [3,586 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:60 http://deb.debian.org/debian trixie/main amd64 librbd1 amd64 18.2.7+ds-1 [2,507 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:61 http://deb.debian.org/debian trixie/main amd64 libsasl2-modules amd64 2.1.28+dfsg1-9 [66.7 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:62 http://deb.debian.org/debian trixie/main amd64 libssh-4 amd64 0.11.2-1+deb13u1 [209 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:63 http://deb.debian.org/debian trixie/main amd64 python-babel-localedata all 2.17.0-1 [6,050 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:64 http://deb.debian.org/debian trixie/main amd64 python3-dateutil all 2.9.0-4 [79.4 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:65 http://deb.debian.org/debian trixie/main amd64 python3-typeshed all 0.0~git20241223.ea91db2-1 [1,530 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:66 http://deb.debian.org/debian trixie/main amd64 python3-arrow all 1.3.0-1.1 [64.7 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:67 http://deb.debian.org/debian trixie/main amd64 python3-babel all 2.17.0-1 [117 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:68 http://deb.debian.org/debian trixie/main amd64 python3-fqdn all 1.5.1-2 [7,592 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:69 http://deb.debian.org/debian trixie/main amd64 python3-isoduration all 20.11.0+git20211126.ae0bd61-2 [12.3 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:70 http://deb.debian.org/debian trixie/main amd64 python3-rfc3339-validator all 0.1.4-2 [4,060 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:71 http://deb.debian.org/debian trixie/main amd64 python3-rfc3986-validator all 0.1.1-2 [4,884 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:72 http://deb.debian.org/debian trixie/main amd64 python3-rfc3987 all 1.3.8-3 [8,884 B][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:73 http://deb.debian.org/debian trixie/main amd64 python3-uritemplate all 4.1.1-3 [10.6 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:74 http://deb.debian.org/debian trixie/main amd64 python3-webcolors all 1.13-1 [15.3 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Get:75 http://deb.debian.org/debian trixie/main amd64 qemu-block-extra amd64 1:10.0.8+ds-0+deb13u1+b1 [126 kB][0m
+[1;32m==> debian-13.proxmox-iso.debian13: Fetched 38.4 MB in 14s (2,682 kB/s)[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package sudo.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: (Reading database ... 60311 files and directories currently installed.)[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../00-sudo_1.9.16p2-3+deb13u1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking sudo (1.9.16p2-3+deb13u1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package cloud-guest-utils.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../01-cloud-guest-utils_0.33-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking cloud-guest-utils (0.33-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package genisoimage.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../02-genisoimage_9%3a1.1.11-4_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking genisoimage (9:1.1.11-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libaio1t64:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../03-libaio1t64_0.3.113-8+b1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libaio1t64:amd64 (0.3.113-8+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package qemu-utils.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../04-qemu-utils_1%3a10.0.8+ds-0+deb13u1+b1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking qemu-utils (1:10.0.8+ds-0+deb13u1+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package cloud-image-utils.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../05-cloud-image-utils_0.33-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking cloud-image-utils (0.33-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package gdisk.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../06-gdisk_1.0.10-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking gdisk (1.0.10-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package netcat-openbsd.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../07-netcat-openbsd_1.229-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking netcat-openbsd (1.229-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-configobj.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../08-python3-configobj_5.0.9-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-configobj (5.0.9-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-markupsafe.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../09-python3-markupsafe_2.1.5-1+b3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-markupsafe (2.1.5-1+b3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-jinja2.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../10-python3-jinja2_3.1.6-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-jinja2 (3.1.6-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-json-pointer.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../11-python3-json-pointer_2.4-3_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-json-pointer (2.4-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-jsonpatch.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../12-python3-jsonpatch_1.32-5_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-jsonpatch (1.32-5) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-attr.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../13-python3-attr_25.3.0-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-attr (25.3.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-rpds-py.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../14-python3-rpds-py_0.21.0-2+b1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-rpds-py (0.21.0-2+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-referencing.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../15-python3-referencing_0.36.2-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-referencing (0.36.2-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-jsonschema-specifications.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../16-python3-jsonschema-specifications_2023.12.1-2_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-jsonschema-specifications (2023.12.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-jsonschema.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../17-python3-jsonschema_4.19.2-6_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-jsonschema (4.19.2-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-blinker.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../18-python3-blinker_1.9.0-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-blinker (1.9.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-bcrypt.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../19-python3-bcrypt_4.2.0-2.1+b1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-bcrypt (4.2.0-2.1+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-cffi-backend:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../20-python3-cffi-backend_1.17.1-3_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-cffi-backend:amd64 (1.17.1-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-cryptography.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../21-python3-cryptography_43.0.0-3+deb13u1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-cryptography (43.0.0-3+deb13u1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-jwt.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../22-python3-jwt_2.10.1-2_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-jwt (2.10.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-oauthlib.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../23-python3-oauthlib_3.2.2-3_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-oauthlib (3.2.2-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libyaml-0-2:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../24-libyaml-0-2_0.2.5-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libyaml-0-2:amd64 (0.2.5-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-yaml.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../25-python3-yaml_6.0.2-1+b2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-yaml (6.0.2-1+b2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package cloud-init.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../26-cloud-init_25.1.4-1+deb13u1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking cloud-init (25.1.4-1+deb13u1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package cloud-utils.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../27-cloud-utils_0.33-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking cloud-utils (0.33-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package cloud-initramfs-growroot.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../28-cloud-initramfs-growroot_0.18.debian14_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking cloud-initramfs-growroot (0.18.debian14) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package distro-info.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../29-distro-info_1.13_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking distro-info (1.13) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libeatmydata1:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../30-libeatmydata1_131-2+b1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libeatmydata1:amd64 (131-2+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package eatmydata.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../31-eatmydata_131-2_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking eatmydata (131-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libnl-3-200:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../32-libnl-3-200_3.7.0-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libnl-3-200:amd64 (3.7.0-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libnl-route-3-200:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../33-libnl-route-3-200_3.7.0-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libnl-route-3-200:amd64 (3.7.0-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libibverbs1:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../34-libibverbs1_56.1-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libibverbs1:amd64 (56.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package ibverbs-providers:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../35-ibverbs-providers_56.1-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking ibverbs-providers:amd64 (56.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libblkio1:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../36-libblkio1_1.5.0-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libblkio1:amd64 (1.5.0-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libboost-iostreams1.83.0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../37-libboost-iostreams1.83.0_1.83.0-4.2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libboost-iostreams1.83.0:amd64 (1.83.0-4.2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libboost-thread1.83.0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../38-libboost-thread1.83.0_1.83.0-4.2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libboost-thread1.83.0:amd64 (1.83.0-4.2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libcryptsetup12:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../39-libcryptsetup12_2%3a2.7.5-2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libcryptsetup12:amd64 (2:2.7.5-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libsasl2-modules-db:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../40-libsasl2-modules-db_2.1.28+dfsg1-9_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libsasl2-modules-db:amd64 (2.1.28+dfsg1-9) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libsasl2-2:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../41-libsasl2-2_2.1.28+dfsg1-9_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libsasl2-2:amd64 (2.1.28+dfsg1-9) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libldap2:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../42-libldap2_2.6.10+dfsg-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libldap2:amd64 (2.6.10+dfsg-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libnghttp3-9:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../43-libnghttp3-9_1.8.0-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libnghttp3-9:amd64 (1.8.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libngtcp2-16:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../44-libngtcp2-16_1.11.0-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libngtcp2-16:amd64 (1.11.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libngtcp2-crypto-gnutls8:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../45-libngtcp2-crypto-gnutls8_1.11.0-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libngtcp2-crypto-gnutls8:amd64 (1.11.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package librtmp1:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../46-librtmp1_2.4+20151223.gitfa8646d.1-2+b5_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b5) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libssh2-1t64:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../47-libssh2-1t64_1.11.1-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libssh2-1t64:amd64 (1.11.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libcurl3t64-gnutls:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../48-libcurl3t64-gnutls_8.14.1-2+deb13u2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libcurl3t64-gnutls:amd64 (8.14.1-2+deb13u2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libfmt10:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../49-libfmt10_10.1.1+ds1-4_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libfmt10:amd64 (10.1.1+ds1-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libgfxdr0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../50-libgfxdr0_11.1-6_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libgfxdr0:amd64 (11.1-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libglusterfs0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../51-libglusterfs0_11.1-6_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libglusterfs0:amd64 (11.1-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libgfrpc0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../52-libgfrpc0_11.1-6_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libgfrpc0:amd64 (11.1-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libgfapi0:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../53-libgfapi0_11.1-6_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libgfapi0:amd64 (11.1-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package librdmacm1t64:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../54-librdmacm1t64_56.1-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking librdmacm1t64:amd64 (56.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libiscsi7:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../55-libiscsi7_1.20.0-4_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libiscsi7:amd64 (1.20.0-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libldap-common.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../56-libldap-common_2.6.10+dfsg-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libldap-common (2.6.10+dfsg-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libnfs14:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../57-libnfs14_5.0.2-1+b2_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libnfs14:amd64 (5.0.2-1+b2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package librados2.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../58-librados2_18.2.7+ds-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking librados2 (18.2.7+ds-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package librbd1.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../59-librbd1_18.2.7+ds-1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking librbd1 (18.2.7+ds-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libsasl2-modules:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../60-libsasl2-modules_2.1.28+dfsg1-9_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libsasl2-modules:amd64 (2.1.28+dfsg1-9) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package libssh-4:amd64.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../61-libssh-4_0.11.2-1+deb13u1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking libssh-4:amd64 (0.11.2-1+deb13u1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python-babel-localedata.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../62-python-babel-localedata_2.17.0-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python-babel-localedata (2.17.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-dateutil.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../63-python3-dateutil_2.9.0-4_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-dateutil (2.9.0-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-typeshed.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../64-python3-typeshed_0.0~git20241223.ea91db2-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-typeshed (0.0~git20241223.ea91db2-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-arrow.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../65-python3-arrow_1.3.0-1.1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-arrow (1.3.0-1.1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-babel.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../66-python3-babel_2.17.0-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-babel (2.17.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-fqdn.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../67-python3-fqdn_1.5.1-2_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-fqdn (1.5.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-isoduration.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../68-python3-isoduration_20.11.0+git20211126.ae0bd61-2_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-isoduration (20.11.0+git20211126.ae0bd61-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-rfc3339-validator.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../69-python3-rfc3339-validator_0.1.4-2_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-rfc3339-validator (0.1.4-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-rfc3986-validator.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../70-python3-rfc3986-validator_0.1.1-2_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-rfc3986-validator (0.1.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-rfc3987.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../71-python3-rfc3987_1.3.8-3_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-rfc3987 (1.3.8-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-uritemplate.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../72-python3-uritemplate_4.1.1-3_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-uritemplate (4.1.1-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package python3-webcolors.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../73-python3-webcolors_1.13-1_all.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking python3-webcolors (1.13-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Selecting previously unselected package qemu-block-extra.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Preparing to unpack .../74-qemu-block-extra_1%3a10.0.8+ds-0+deb13u1+b1_amd64.deb ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Unpacking qemu-block-extra (1:10.0.8+ds-0+deb13u1+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up genisoimage (9:1.1.11-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up distro-info (1.13) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-attr (25.3.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-jwt (2.10.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libyaml-0-2:amd64 (0.2.5-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-bcrypt (4.2.0-2.1+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libsasl2-modules:amd64 (2.1.28+dfsg1-9) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-rfc3339-validator (0.1.4-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up netcat-openbsd (1.229-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: update-alternatives: using /bin/nc.openbsd to provide /bin/nc (nc) in auto mode[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libboost-thread1.83.0:amd64 (1.83.0-4.2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-yaml (6.0.2-1+b2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libldap-common (2.6.10+dfsg-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-markupsafe (2.1.5-1+b3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python-babel-localedata (2.17.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libnfs14:amd64 (5.0.2-1+b2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-uritemplate (4.1.1-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libsasl2-modules-db:amd64 (2.1.28+dfsg1-9) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libglusterfs0:amd64 (11.1-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up gdisk (1.0.10-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-fqdn (1.5.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-jinja2 (3.1.6-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-webcolors (1.13-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-configobj (5.0.9-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-typeshed (0.0~git20241223.ea91db2-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b5) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libboost-iostreams1.83.0:amd64 (1.83.0-4.2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-rfc3987 (1.3.8-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-rfc3986-validator (0.1.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up sudo (1.9.16p2-3+deb13u1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libsasl2-2:amd64 (2.1.28+dfsg1-9) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libssh-4:amd64 (0.11.2-1+deb13u1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libnghttp3-9:amd64 (1.8.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-rpds-py (0.21.0-2+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libaio1t64:amd64 (0.3.113-8+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libblkio1:amd64 (1.5.0-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-json-pointer (2.4-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libeatmydata1:amd64 (131-2+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libnl-3-200:amd64 (3.7.0-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libcryptsetup12:amd64 (2:2.7.5-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-dateutil (2.9.0-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libngtcp2-16:amd64 (1.11.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up qemu-utils (1:10.0.8+ds-0+deb13u1+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libssh2-1t64:amd64 (1.11.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up cloud-guest-utils (0.33-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libldap2:amd64 (2.6.10+dfsg-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libfmt10:amd64 (10.1.1+ds1-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libngtcp2-crypto-gnutls8:amd64 (1.11.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-cffi-backend:amd64 (1.17.1-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libgfxdr0:amd64 (11.1-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-referencing (0.36.2-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-blinker (1.9.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up eatmydata (131-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-arrow (1.3.0-1.1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-babel (2.17.0-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: update-alternatives: using /usr/bin/pybabel-python3 to provide /usr/bin/pybabel (pybabel) in auto mode[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-jsonpatch (1.32-5) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: update-alternatives: using /usr/bin/json-patch-jsondiff to provide /usr/bin/jsondiff (jsondiff) in auto mode[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libcurl3t64-gnutls:amd64 (8.14.1-2+deb13u2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-isoduration (20.11.0+git20211126.ae0bd61-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up cloud-image-utils (0.33-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libnl-route-3-200:amd64 (3.7.0-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-cryptography (43.0.0-3+deb13u1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-jsonschema-specifications (2023.12.1-2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libgfrpc0:amd64 (11.1-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up cloud-utils (0.33-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libibverbs1:amd64 (56.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up ibverbs-providers:amd64 (56.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-oauthlib (3.2.2-3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up python3-jsonschema (4.19.2-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libgfapi0:amd64 (11.1-6) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up cloud-initramfs-growroot (0.18.debian14) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up librdmacm1t64:amd64 (56.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up libiscsi7:amd64 (1.20.0-4) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up librados2 (18.2.7+ds-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up cloud-init (25.1.4-1+deb13u1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Created symlink '/etc/systemd/system/cloud-init.target.wants/cloud-config.service' → '/usr/lib/systemd/system/cloud-config.service'.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Created symlink '/etc/systemd/system/cloud-init.target.wants/cloud-final.service' → '/usr/lib/systemd/system/cloud-final.service'.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Created symlink '/etc/systemd/system/cloud-config.target.wants/cloud-init-hotplugd.socket' → '/usr/lib/systemd/system/cloud-init-hotplugd.socket'.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Created symlink '/etc/systemd/system/cloud-init.target.wants/cloud-init-local.service' → '/usr/lib/systemd/system/cloud-init-local.service'.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Created symlink '/etc/systemd/system/cloud-init.target.wants/cloud-init-main.service' → '/usr/lib/systemd/system/cloud-init-main.service'.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Created symlink '/etc/systemd/system/cloud-init.target.wants/cloud-init-network.service' → '/usr/lib/systemd/system/cloud-init-network.service'.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up librbd1 (18.2.7+ds-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting up qemu-block-extra (1:10.0.8+ds-0+deb13u1+b1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Processing triggers for libc-bin (2.41-12+deb13u2) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Processing triggers for man-db (2.13.1-1) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Processing triggers for initramfs-tools (0.148.3) ...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: update-initramfs: Generating /boot/initrd.img-6.12.74+deb13+1-amd64[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + echo 'Configuring cloud-init...'[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + cat[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Configuring cloud-init...[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + echo 'cloud-init installation complete.'[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + echo 'Starting qemu-guest-agent...'[0m
+[1;32m==> debian-13.proxmox-iso.debian13: cloud-init installation complete.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Starting qemu-guest-agent...[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + systemctl start qemu-guest-agent[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Provisioning with shell script: ./scripts/cleanup.sh[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + echo 'Cleaning up system for template...'[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + cloud-init clean -s -l[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Cleaning up system for template...[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + rm -f /etc/machine-id /var/lib/dbus/machine-id[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + touch /etc/machine-id[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + rm -f /etc/ssh/ssh_host_ecdsa_key /etc/ssh/ssh_host_ecdsa_key.pub /etc/ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key.pub[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + ssh-keygen -A[0m
+[1;32m==> debian-13.proxmox-iso.debian13: ssh-keygen: generating new host keys: RSA ECDSA ED25519[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + history -c[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + cat /dev/null[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + DEBIAN_FRONTEND=noninteractive[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + apt-get clean[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + DEBIAN_FRONTEND=noninteractive[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + apt-get autoclean -y[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading package lists...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Building dependency tree...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading state information...[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + DEBIAN_FRONTEND=noninteractive[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + apt-get autoremove -y[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading package lists...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Building dependency tree...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Reading state information...[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + rm -rf /tmp/script_1470.sh /tmp/ssh-Z8lKBZICZF /tmp/systemd-private-c91deaad048c4892ae9e03cd7fa2b8f3-systemd-logind.service-kPPpLz[0m
+[1;32m==> debian-13.proxmox-iso.debian13: 0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + rm -rf /var/tmp/systemd-private-c91deaad048c4892ae9e03cd7fa2b8f3-systemd-logind.service-vEIDMK[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + rm -rf /var/log/alternatives.log /var/log/apt /var/log/btmp /var/log/dpkg.log /var/log/installer /var/log/journal /var/log/lastlog /var/log/private /var/log/README /var/log/runit /var/log/wtmp /var/log/wtmp.db[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + rm -rf '/root/.cache/*'[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + rm -f '/var/lib/dhcp/*'[0m
+[1;31m==> debian-13.proxmox-iso.debian13: + echo 'Template cleanup complete.'[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Template cleanup complete.[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Setting a 5m0s timeout for the next provisioner...[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Provisioning with shell script: /tmp/packer-shell1524235854[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Stopping VM[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Converting VM to template[0m
+[1;32m==> debian-13.proxmox-iso.debian13: Adding a cloud-init cdrom in storage pool vm_disks_05[0m
+[1;32mBuild 'debian-13.proxmox-iso.debian13' finished after 13 minutes 53 seconds.[0m
+
+==> Wait completed after 13 minutes 53 seconds
+
+==> Builds finished. The artifacts of successful builds are:
+--> debian-13.proxmox-iso.debian13: A template was created: 9005

@@ -18,7 +18,7 @@ vault_module_source: "./modules/proxmox-vm-cluster"
 vault_proxmox_api_url: "{{ infra_proxmox_api_url }}"
 vault_proxmox_tls_insecure: "{{ infra_proxmox_tls_insecure }}"
 vault_proxmox_api_token_file: "{{ infra_proxmox_api_token_file }}"
-vault_proxmox_api_token_file_ansible: "{{ infra_proxmox_api_token_file_ansible }}"
+vault_proxmox_api_token_file_ansible: "{{ infra_proxmox_api_token_file }}"
 
 # =============================================================================
 # Cluster Identity
@@ -28,7 +28,9 @@ vault_cluster_name: "vault-cluster"
 vault_environment: "prod"
 
 # =============================================================================
-# Proxmox Placement (HA Distribution)
+# Proxmox Placement
+# NOTE: For node-local storage, each target node must have its own template.
+# Set per-node template names in vault_clone_template_by_node.
 # =============================================================================
 
 vault_target_nodes:
@@ -42,7 +44,7 @@ vault_target_nodes:
 
 vault_node_count: 3
 vault_node_name_prefix: "vault"
-vault_vm_id_start: 200
+vault_vm_id_start: 100
 
 # =============================================================================
 # Network Configuration (VLAN 1 - 10.10.10.0/24)
@@ -54,25 +56,47 @@ vault_gateway: "10.10.10.1"
 vault_cidr_subnet: "/24"
 vault_nameservers: "10.10.10.1 1.1.1.1"
 
+# DNS servers for Vault nodes.
+# Keep the primary internal resolver first, but include public fallback
+# servers within the first three entries because libc resolvers generally
+# only honor the first three nameservers in /etc/resolv.conf.
+vault_dns_servers:
+  - "10.10.10.12"
+  - "1.1.1.1"
+  - "1.0.0.1"
+  - "10.10.10.13"
+  - "10.10.10.9"
+  - "10.10.10.20"
+  - "8.8.8.8"
+  - "9.9.9.9"
+
 vault_ip_addresses:
-  - "10.10.10.2"
-  - "10.10.10.3"
-  - "10.10.10.4"
+  - "10.10.10.6"
+  - "10.10.10.7"
+  - "10.10.10.8"
 
 vault_cluster_nodes:
   - name: "vault-01"
-    ip_address: "10.10.10.2"
+    ip_address: "10.10.10.6"
   - name: "vault-02"
-    ip_address: "10.10.10.3"
+    ip_address: "10.10.10.7"
   - name: "vault-03"
-    ip_address: "10.10.10.4"
+    ip_address: "10.10.10.8"
 
 # =============================================================================
 # Proxmox Template and Storage
 # =============================================================================
 
 vault_clone_template: "debian-13-template"
+vault_clone_template_by_node:
+  pve-01: "debian-13-template-pve-01"
+  pve-04: "debian-13-template-pve-04"
+  pve-05: "debian-13-template-pve-05"
 vault_storage: "VM_Disks"
+vault_storage_by_node:
+  pve-01: "vm_disks_01"
+  pve-04: "vm_disks_04"
+  pve-05: "vm_disks_05"
 
 # =============================================================================
 # Resource Allocation
@@ -134,8 +158,10 @@ vault_backup_schedule: "0 2 * * *"
 
 vault_start_at_node_boot: true
 vault_agent_enabled: true
-vault_protection: true
+vault_protection: false
 vault_startup_order: 10
+vault_rebuild_existing: false
+vault_force_create: false
 
 # =============================================================================
 # Tags and Metadata

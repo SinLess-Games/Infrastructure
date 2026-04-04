@@ -1,5 +1,4 @@
-#!/bin/bash
-# Notification script for becoming BACKUP in Vault VRRP
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "[$(date)] - Vault node has become BACKUP" | logger -t vault-ha
-echo "[$(date)] - Vault node has become BACKUP" >> /var/log/vault/keepalived-notifications.log
+logger -t keepalived "Vault VIP transitioned to BACKUP on {{ inventory_hostname }}"

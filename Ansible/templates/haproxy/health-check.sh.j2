@@ -29,7 +29,7 @@ exit $?
 {% elif routing_profile == 'vault' %}
 # Health check script for Vault - used by Keepalived
 
-VAULT_ADDR="{{ vault_api_addr_protocol }}://{{ ansible_host | default(inventory_hostname) }}:{{ vault_api_addr_port }}"
+VAULT_ADDR="{{ vault_local_api_addr }}"
 VAULT_SKIP_VERIFY="true"
 
 HEALTH_JSON=$(curl -sk --connect-timeout 2 "${VAULT_ADDR}/v1/sys/health" 2>/dev/null)

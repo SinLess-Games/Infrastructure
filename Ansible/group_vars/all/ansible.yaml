@@ -3,17 +3,15 @@
 # Shared Ansible and infrastructure defaults
 # =============================================================================
 
-ansible_python_interpreter: "/usr/bin/python3"
-
 infra_bootstrap_default_user: "sinless777"
 infra_bootstrap_ansible_user: "{{ infra_bootstrap_default_user }}"
 infra_bootstrap_ssh_keys:
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA7g0acAC3ORT/DUzu3ftMtRW6MlVWuWZ7qqd4tNHLcY automation@sinlessgames"
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKDoqYKB+akwuGHSAJWn6EeXR70zIg9oZXuP60Al1mOS breakglass@sinlessgames"
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEMakhAavnUU1qkhadP1tNtmwG7tsu49siUyMIEcKKn9 root@sinlessgames"
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ0Ch6BKvYa5V+7su2oXhf8jRBgBdRKvoqd0UKVtt1mS sinless777@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO5jGUWSRk4oxTDyqkbP8cfTbtqER/29w8tLntd9TLfw automation@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHPanKC7fvxWDzI7auEU+4QGHaS4lv23A4tOyT99xkNe breakglass@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPtmSC6SiSmvPi/WY4i7GQLVzU5iP6IGTr3ZPvCTp5X+ root@sinlessgames"
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFEuW5hJOZnj7fojtnmT/je0+OQ4dud3WxcZyhex0VOj sinless777@sinlessgames"
 
-infra_proxmox_api_url: "https://10.10.10.15:8006/api2/json"
+infra_proxmox_api_url: "https://10.10.10.14:8006/api2/json"
 infra_proxmox_tls_insecure: true
 infra_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
 infra_proxmox_api_token_file_ansible: ".outputs/api-tokens/ansible-prov-api-token.txt"

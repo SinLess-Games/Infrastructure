@@ -7,7 +7,7 @@
 {% set haproxy_global_ca_base = true %}
 {% set haproxy_global_ssl_defaults = true %}
 {% set haproxy_global_maxconn = 40000 %}
-{% include 'haproxy/global.j2' %}
+{% include 'global.j2' %}
 
 defaults
     log     global
@@ -21,7 +21,7 @@ defaults
     timeout connect 5000
     timeout client  50000
     timeout server  50000
-{% include 'haproxy/errorfiles.j2' %}
+{% include 'errorfiles.j2' %}
 
 listen stats
     bind *:{{ haproxy_stats_port }}
@@ -78,7 +78,7 @@ backend minio_console_backend
 # Managed by Ansible - DO NOT EDIT MANUALLY
 
 {% set haproxy_global_maxconn = 1000 %}
-{% include 'haproxy/global.j2' %}
+{% include 'global.j2' %}
 
 defaults
     mode tcp
@@ -88,7 +88,7 @@ defaults
     timeout connect 5000
     timeout client 50000
     timeout server 50000
-{% include 'haproxy/errorfiles.j2' %}
+{% include 'errorfiles.j2' %}
 
 listen stats
     mode http
@@ -119,7 +119,7 @@ listen postgres-standby
 # HAProxy configuration for Vault load balancing
 
 {% set haproxy_global_lua_load = '/etc/haproxy/terraform-vault-auth.lua' %}
-{% include 'haproxy/global.j2' %}
+{% include 'global.j2' %}
 
 defaults
   log     global
@@ -152,11 +152,11 @@ listen vault-api-443
   default-server inter 10s fall 3 rise 2
 {% if vault_cluster_nodes is defined and vault_cluster_nodes | length > 0 %}
 {% for node in vault_cluster_nodes %}
-  server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }}
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_service_api_port }}
 {% endfor %}
 {% else %}
 {% for host in groups['vault'] %}
-  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_api_addr_port }}
+  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_service_api_port }}
 {% endfor %}
 {% endif %}
 
@@ -167,11 +167,11 @@ listen vault-api-8200
   default-server inter 10s fall 3 rise 2
 {% if vault_cluster_nodes is defined and vault_cluster_nodes | length > 0 %}
 {% for node in vault_cluster_nodes %}
-  server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }}
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_service_api_port }}
 {% endfor %}
 {% else %}
 {% for host in groups['vault'] %}
-  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_api_addr_port }}
+  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_service_api_port }}
 {% endfor %}
 {% endif %}
 
@@ -182,11 +182,11 @@ listen vault-cluster
   default-server inter 10s fall 3 rise 2
 {% if vault_cluster_nodes is defined and vault_cluster_nodes | length > 0 %}
 {% for node in vault_cluster_nodes %}
-  server {{ node.name }} {{ node.ip_address }}:{{ vault_cluster_addr_port }}
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_service_cluster_port }}
 {% endfor %}
 {% else %}
 {% for host in groups['vault'] %}
-  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_cluster_addr_port }}
+  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_service_cluster_port }}
 {% endfor %}
 {% endif %}
 
@@ -206,11 +206,11 @@ backend vault-kv-api
   http-response lua.unwrap_vault_response
 {% if vault_cluster_nodes is defined and vault_cluster_nodes | length > 0 %}
 {% for node in vault_cluster_nodes %}
-  server {{ node.name }} {{ node.ip_address }}:{{ vault_api_addr_port }} check ssl verify none
+  server {{ node.name }} {{ node.ip_address }}:{{ vault_service_api_port }} check ssl verify none
 {% endfor %}
 {% else %}
 {% for host in groups['vault'] %}
-  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_api_addr_port }} check ssl verify none
+  server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].inventory_hostname) }}:{{ vault_service_api_port }} check ssl verify none
 {% endfor %}
 {% endif %}
 {% else %}

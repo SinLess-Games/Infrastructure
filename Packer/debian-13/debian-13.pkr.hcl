@@ -10,7 +10,7 @@ packer {
 
 # Packer variables
 variable "proxmox_endpoint" {
-  description = "Proxmox API endpoint URL"
+  description = "Proxmox API endpoint URL (for example: https://pve-01:8006/api2/json)"
   type        = string
 }
 
@@ -27,8 +27,19 @@ variable "proxmox_api_token_secret" {
 }
 
 variable "proxmox_node" {
-  description = "Proxmox node for building VMs"
+  description = "Proxmox cluster node name for VM build placement (for example: pve-01, not an IP address)"
   type        = string
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9._-]*$", var.proxmox_node)) && !can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", var.proxmox_node))
+    error_message = "Proxmox node must be a Proxmox node name (for example pve-01), not an IP address."
+  }
+}
+
+variable "proxmox_insecure_skip_tls_verify" {
+  description = "Skip TLS verification when connecting to Proxmox API"
+  type        = bool
+  default     = true
 }
 
 variable "proxmox_iso_storage" {
@@ -40,13 +51,19 @@ variable "proxmox_iso_storage" {
 variable "proxmox_vm_storage" {
   description = "Proxmox VM disk storage pool"
   type        = string
-  default     = "vmdisks"
+  default     = "vm_disks_01"
 }
 
 variable "vm_name" {
   description = "VM template name"
   type        = string
   default     = "debian-13-template"
+}
+
+variable "vm_id" {
+  description = "VM/template ID"
+  type        = number
+  default     = 9000
 }
 
 variable "vm_memory" {
@@ -76,26 +93,26 @@ variable "debian_version" {
 variable "debian_iso_url" {
   description = "Debian ISO URL"
   type        = string
-  default     = "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.3.0-amd64-netinst.iso"
+  default     = "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.4.0-amd64-netinst.iso"
 }
 
 variable "debian_iso_checksum" {
   description = "Debian ISO checksum"
   type        = string
-  default     = "sha256:c9f09d24b7e834e6834f2ffa565b33d6f1f540d04bd25c79ad9953bc79a8ac02"
+  default     = "sha256:0b813535dd76f2ea96eff908c65e8521512c92a0631fd41c95756ffd7d4896dc"
 }
 
 # Packer source
 source "proxmox-iso" "debian13" {
   # Proxmox connection
   proxmox_url              = var.proxmox_endpoint
-  insecure_skip_tls_verify = true
   username                 = var.proxmox_api_token_id
   token                    = var.proxmox_api_token_secret
   node                     = var.proxmox_node
+  insecure_skip_tls_verify = var.proxmox_insecure_skip_tls_verify
 
   # VM Configuration
-  vm_id   = 9000
+  vm_id   = var.vm_id
   vm_name = var.vm_name
   memory  = var.vm_memory
   cores   = var.vm_cores
@@ -126,8 +143,12 @@ source "proxmox-iso" "debian13" {
     memory = 16
   }
 
-  # ISO configuration  
-  iso_file = "${var.proxmox_iso_storage}:iso/debian-13.3.0-amd64-netinst.iso"
+  # ISO configuration
+  boot_iso {
+    type     = "scsi"
+    iso_file = "${var.proxmox_iso_storage}:iso/debian-13.4.0-amd64-netinst.iso"
+    unmount  = true
+  }
 
   # Boot and firmware
   bios = "seabios"
@@ -168,8 +189,6 @@ source "proxmox-iso" "debian13" {
   template_name        = var.vm_name
   template_description = "Debian ${var.debian_version} template built by Packer"
 
-  # Enable template mode
-  unmount_iso = true
 }
 
 # Build configuration

@@ -68,6 +68,28 @@ inc() {
 # Helper Functions
 # ============================================================================
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=5)
+SCP_OPTS=(-o BatchMode=yes -o ConnectTimeout=5)
+
+extract_inventory_host_ip() {
+  local inventory_file=$1
+  local host_name=$2
+
+  [[ -f "${inventory_file}" ]] || return 1
+
+  awk -v host="${host_name}" '
+    $1 == host ":" { in_host=1; next }
+    in_host && $1 == "ansible_host:" { print $2; exit }
+    in_host && $1 ~ /^[A-Za-z0-9_.-]+:$/ { in_host=0 }
+  ' "${inventory_file}"
+}
+
+extract_host_from_url() {
+  local url=$1
+  local host
+
+  host=$(echo "${url}" | sed -E 's#^[a-zA-Z]+://##; s#/.*$##; s/:.*$##')
+  [[ -n "${host}" ]] && echo "${host}"
+}
 
 fetch_url() {
   local url=$1
@@ -146,8 +168,44 @@ resolve_checksum() {
       }')
   fi
   if [[ -z "${expected}" ]]; then
-    log_error "Could not find checksum for ${iso_filename} in ${sums_url}"
-    return 1
+    # Debian point releases move over time; auto-resolve latest matching netinst ISO.
+    if [[ "${iso_filename}" =~ ^(debian-[0-9]+)\.[0-9.]+-amd64-netinst\.iso$ ]]; then
+      local debian_series="${BASH_REMATCH[1]}"
+      local fallback_line
+      fallback_line=$(echo "${sums}" | awk -v series="${debian_series}" '
+        {
+          file=$2
+          gsub(/^\*/,"",file)
+          gsub(/^\.\//,"",file)
+          if (file ~ ("^" series "\\.[0-9.]+-amd64-netinst\\.iso$")) {
+            print file "|" $1
+            exit
+          }
+        }
+        $0 ~ /^SHA256 \(/ {
+          line=$0
+          sub(/^SHA256 \(/,"",line)
+          split(line, parts, /\) = /)
+          file=parts[1]
+          hash=parts[2]
+          if (file ~ ("^" series "\\.[0-9.]+-amd64-netinst\\.iso$")) {
+            print file "|" hash
+            exit
+          }
+        }
+      ')
+
+      if [[ -n "${fallback_line}" ]]; then
+        resolved_filename="${fallback_line%%|*}"
+        expected="${fallback_line##*|}"
+        log_warning "${iso_filename} not found in checksums; using ${resolved_filename}"
+      fi
+    fi
+
+    if [[ -z "${expected}" ]]; then
+      log_error "Could not find checksum for ${iso_filename} in ${sums_url}"
+      return 1
+    fi
   fi
 
   echo "${expected}"
@@ -158,20 +216,55 @@ resolve_checksum() {
 # ============================================================================
 PROXMOX_NODE="${PROXMOX_NODE:-pve-01}"
 PROXMOX_ENDPOINT="${PROXMOX_ENDPOINT:-https://proxmox.local.sinlessgames.com}"
-PROXMOX_ISO_PATH="${PROXMOX_ISO_PATH:-/mnt/pve/ISOs}"
+PROXMOX_ISO_PATH="${PROXMOX_ISO_PATH:-}"
 PROXMOX_ISO_PATH_BASE="${PROXMOX_ISO_PATH}"
-PROXMOX_STORAGE_ID="${PROXMOX_STORAGE_ID:-ISOs}"
+PROXMOX_STORAGE_ID="${PROXMOX_STORAGE_ID:-local}"
+PROXMOX_INVENTORY_FILE="${PROXMOX_INVENTORY_FILE:-../Ansible/inventory/proxmox.yaml}"
 
 # Try to resolve node IP (fallback to node name if resolution fails)
 PROXMOX_NODE_IP="${PROXMOX_NODE_IP:-$(getent hosts "${PROXMOX_NODE}" 2>/dev/null | awk '{print $1}')}"
+
+if [[ -z "${PROXMOX_NODE_IP}" ]]; then
+  PROXMOX_NODE_IP="$(extract_inventory_host_ip "${PROXMOX_INVENTORY_FILE}" "${PROXMOX_NODE}" 2>/dev/null || true)"
+fi
+
+if [[ -z "${PROXMOX_NODE_IP}" ]]; then
+  PROXMOX_ENDPOINT_HOST="$(extract_host_from_url "${PROXMOX_ENDPOINT}")"
+  if [[ -n "${PROXMOX_ENDPOINT_HOST}" ]]; then
+    PROXMOX_NODE_IP="$(getent hosts "${PROXMOX_ENDPOINT_HOST}" 2>/dev/null | awk '{print $1}' | head -n1)"
+  fi
+fi
+
 [[ -z "${PROXMOX_NODE_IP}" ]] && PROXMOX_NODE_IP="${PROXMOX_NODE}"
 
 detect_remote_iso_path() {
-  # For 'dir' storage, ISO images typically live under template/iso
-  if ssh "${SSH_OPTS[@]}" "root@${PROXMOX_NODE_IP}" \
-    "test -d '${PROXMOX_ISO_PATH}/template/iso'" > /dev/null 2>&1; then
-    PROXMOX_ISO_PATH="${PROXMOX_ISO_PATH}/template/iso"
+  local storage_base=""
+
+  # Prefer resolving storage base directly from Proxmox storage id.
+  storage_base=$(ssh "${SSH_OPTS[@]}" "root@${PROXMOX_NODE_IP}" \
+    "pvesm path '${PROXMOX_STORAGE_ID}' 2>/dev/null" | tr -d '\r' | tail -n1)
+
+  if [[ -n "${storage_base}" ]]; then
+    PROXMOX_ISO_PATH_BASE="${storage_base}"
+  elif [[ -n "${PROXMOX_ISO_PATH}" ]]; then
+    PROXMOX_ISO_PATH_BASE="${PROXMOX_ISO_PATH}"
+  else
+    PROXMOX_ISO_PATH_BASE="/var/lib/vz"
   fi
+
+  # If caller already passed a template/iso path, keep it.
+  if [[ "${PROXMOX_ISO_PATH_BASE}" =~ /template/iso/?$ ]]; then
+    PROXMOX_ISO_PATH="${PROXMOX_ISO_PATH_BASE%/}"
+  else
+    PROXMOX_ISO_PATH="${PROXMOX_ISO_PATH_BASE%/}/template/iso"
+  fi
+
+  # Ensure target exists so remote wget/scp destination is valid.
+  ssh "${SSH_OPTS[@]}" "root@${PROXMOX_NODE_IP}" \
+    "mkdir -p '${PROXMOX_ISO_PATH}'" > /dev/null 2>&1 || {
+      log_error "Could not create/access ISO directory on ${PROXMOX_NODE}: ${PROXMOX_ISO_PATH}"
+      exit 1
+    }
 }
 
 warn_misplaced_isos() {
@@ -190,7 +283,7 @@ warn_misplaced_isos() {
 declare -A ISO_SOURCES=(
   # Debian netinst ISOs (lightweight, minimal)
   ["debian-12"]="debian-12.13.0-amd64-netinst.iso|AUTO|https://cloudfront.debian.net/cdimage/archive/latest-oldstable/amd64/iso-cd/|SHA256SUMS"
-  ["debian-13"]="debian-13.3.0-amd64-netinst.iso|AUTO|https://cloudfront.debian.net/cdimage/release/current/amd64/iso-cd/|SHA256SUMS"
+  ["debian-13"]="debian-13.4.0-amd64-netinst.iso|AUTO|https://cloudfront.debian.net/cdimage/release/current/amd64/iso-cd/|SHA256SUMS"
   
   # ========== COMMENTED EXAMPLES - Uncomment and fill in values to enable ==========
   # Ubuntu Server ISOs (fill in actual checksum from official Ubuntu downloads)
@@ -236,7 +329,9 @@ download_iso() {
   local iso_url=$(echo "$iso_info" | cut -d'|' -f3)
   local iso_sums=$(echo "$iso_info" | cut -d'|' -f4)
   local expected_checksum
+  local resolved_filename="${iso_filename}"
   expected_checksum="$(resolve_checksum "${iso_filename}" "${iso_checksum}" "${iso_url}" "${iso_sums}")" || return 1
+  iso_filename="${resolved_filename}"
   
   print_section "Downloading ${COLOR_BOLD_CYAN}${iso_name}${COLOR_RESET}"
   log_debug "Filename: ${iso_filename}"
@@ -315,12 +410,12 @@ download_iso() {
 
     # Copy to Proxmox ISOs storage via SSH
     log_info "Copying to Proxmox node ${COLOR_CYAN}${PROXMOX_NODE}${COLOR_RESET} (${PROXMOX_NODE_IP})..."
-    if scp "/tmp/${iso_filename}" "root@${PROXMOX_NODE_IP}:${PROXMOX_ISO_PATH}/" > /dev/null 2>&1; then
+    if scp "${SCP_OPTS[@]}" "/tmp/${iso_filename}" "root@${PROXMOX_NODE_IP}:${PROXMOX_ISO_PATH}/" > /dev/null 2>&1; then
       log_success "Copied to ${PROXMOX_ISO_PATH}/"
     else
       log_warning "Could not copy via SCP to ${PROXMOX_ISO_PATH}/"
       log_info "Attempting alternate path..."
-      if scp "/tmp/${iso_filename}" "root@${PROXMOX_NODE_IP}:/iso/" > /dev/null 2>&1; then
+      if scp "${SCP_OPTS[@]}" "/tmp/${iso_filename}" "root@${PROXMOX_NODE_IP}:/iso/" > /dev/null 2>&1; then
         log_success "Copied to /iso/ (alternate path)"
       else
         log_error "Could not copy ISO to Proxmox node ${PROXMOX_NODE} (${PROXMOX_NODE_IP})"

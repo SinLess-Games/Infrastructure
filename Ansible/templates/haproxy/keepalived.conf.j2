@@ -6,7 +6,7 @@
 
 {% set keepalived_router_id_value = 'minio_' ~ inventory_hostname %}
 {% set keepalived_script_user = 'root' %}
-{% include 'haproxy/keepalived-global-defs.j2' %}
+{% include 'keepalived-global-defs.j2' %}
 
 vrrp_script check_haproxy {
     script "/etc/keepalived/check_haproxy.sh"
@@ -42,7 +42,7 @@ vrrp_instance MINIO_VIP {
 
 {% set keepalived_router_id_value = inventory_hostname %}
 {% set keepalived_script_user = 'root' %}
-{% include 'haproxy/keepalived-global-defs.j2' %}
+{% include 'keepalived-global-defs.j2' %}
 
 vrrp_script check_haproxy {
     script "/usr/local/bin/check-haproxy.sh"
@@ -78,7 +78,7 @@ vrrp_instance VI_{{ postgres_keepalived_vrid }} {
 
 {% set keepalived_router_id_value = 'vault-ha' %}
 {% set keepalived_script_user = 'vault' %}
-{% include 'haproxy/keepalived-global-defs.j2' %}
+{% include 'keepalived-global-defs.j2' %}
 
 vrrp_script check_vault {
   script "/usr/local/bin/check-vault-health.sh"

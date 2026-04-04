@@ -23,12 +23,14 @@ variable "node_role" {
 variable "nodes" {
   description = "VM definitions"
   type = list(object({
-    name        = string
-    vmid        = number
-    target_node = string
-    ip_address  = string
-    hostname    = optional(string)
-    fqdn        = optional(string)
+    name           = string
+    vmid           = number
+    target_node    = string
+    clone_template = optional(string)
+    ip_address     = string
+    hostname       = optional(string)
+    fqdn           = optional(string)
+    storage        = optional(string)
   }))
 }
 

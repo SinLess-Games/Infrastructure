@@ -1,5 +1,5 @@
-#!/bin/bash
-# Notification script for FAULT state in Vault VRRP
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "[$(date)] - Vault node entered FAULT state" | logger -t vault-ha
-echo "[$(date)] - Vault node entered FAULT state" >> /var/log/vault/keepalived-notifications.log
+logger -t keepalived "Vault VIP entered FAULT on {{ inventory_hostname }}"
+systemctl restart haproxy || true

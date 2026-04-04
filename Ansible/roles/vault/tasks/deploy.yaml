@@ -1,105 +1,253 @@
 ---
-# =============================================================================
-# Vault Deploy Role - Tasks
-# =============================================================================
-# Purpose:
-#   - Render Terraform configuration for Vault VMs
-#   - Execute Terraform via Taskfile
-#   - Use the shared proxmox-vm-cluster Terraform module
-# =============================================================================
-
 - name: Assert required Vault deployment variables
   ansible.builtin.assert:
     that:
-      - vault_target_nodes | length >= 3
+      - vault_target_nodes | length == vault_node_count | int
+      - vault_cluster_nodes | length == vault_node_count | int
       - vault_ip_addresses | length == vault_node_count | int
       - vault_node_count | int >= 3
       - (vault_node_count | int) % 2 == 1
-    fail_msg: "Vault deployment requires an odd node count >= 3, at least 3 target nodes, and IPs matching node count"
+    fail_msg: >-
+      Vault deployment requires an odd node count >= 3, plus matching node, target,
+      and IP definitions in group_vars/vault/vault-vms.yaml.
 
-- name: Read Proxmox API token file for Terraform
+- name: Read Proxmox API token file for Vault deployment
   ansible.builtin.slurp:
-    src: "{{ vault_repo_root }}/{{ vault_proxmox_api_token_file }}"
+    src: "{{ vault_repo_root }}/{{ vault_proxmox_api_token_file_ansible | default(vault_proxmox_api_token_file) }}"
   register: vault_proxmox_token_file
   no_log: true
 
-- name: Parse Proxmox API token values
+- name: Decode Proxmox API token file contents
   ansible.builtin.set_fact:
     vault_proxmox_token_text: "{{ vault_proxmox_token_file.content | b64decode | string }}"
   no_log: true
 
-- name: Extract Proxmox API token ID and secret
+- name: Parse Proxmox API connection details
   ansible.builtin.set_fact:
-    vault_proxmox_api_token_id: >-
-      {{ (vault_proxmox_token_text
-        | regex_findall('(?m)^FULL_TOKENID=([^\n]+)'))
-        | first | default('') }}
+    vault_proxmox_api_host: "{{ vault_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    vault_proxmox_api_port: "{{ (vault_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    vault_proxmox_api_token_full_id: >-
+      {{
+        (
+          vault_proxmox_token_text.split('FULL_TOKENID=')[1].splitlines()[0].strip()
+          if 'FULL_TOKENID=' in vault_proxmox_token_text
+          else ''
+        )
+      }}
     vault_proxmox_api_token_secret: >-
-      {{ (vault_proxmox_token_text
-        | regex_findall('(?m)^TOKEN_SECRET=([^\n]+)'))
-        | first | default('') }}
+      {{
+        (
+          vault_proxmox_token_text.split('TOKEN_SECRET=')[1].splitlines()[0].strip()
+          if 'TOKEN_SECRET=' in vault_proxmox_token_text
+          else ''
+        )
+      }}
   no_log: true
 
-- name: Assert Proxmox API token values were parsed
+- name: Derive Proxmox token user and token name
+  ansible.builtin.set_fact:
+    vault_proxmox_api_user: >-
+      {{
+        vault_proxmox_api_token_full_id.split('!')[0]
+        if ('!' in vault_proxmox_api_token_full_id)
+        else (vault_proxmox_api_user | default(''))
+      }}
+    vault_proxmox_api_token_id: >-
+      {{
+        vault_proxmox_api_token_full_id.split('!')[1]
+        if ('!' in vault_proxmox_api_token_full_id)
+        else ''
+      }}
+  no_log: true
+
+- name: Assert Proxmox token parsing succeeded
   ansible.builtin.assert:
     that:
-      - vault_proxmox_api_token_id is not none
-      - vault_proxmox_api_token_secret is not none
-    fail_msg: "Failed to parse Proxmox API token ID/secret from token file"
+      - vault_proxmox_api_user | length > 0
+      - vault_proxmox_api_token_id | length > 0
+      - vault_proxmox_api_token_secret | length > 0
+    fail_msg: "Failed to parse Vault Proxmox API credentials from the configured token file."
 
-- name: Ensure Terraform output directory exists
-  ansible.builtin.file:
-    path: "{{ vault_terraform_dir }}"
-    state: directory
+- name: Build Vault VM plan
+  ansible.builtin.set_fact:
+    vault_vm_plan: "{{ (vault_vm_plan | default([])) + [ {
+      'index': item,
+      'name': (vault_cluster_nodes[item].name | default(vault_node_name_prefix ~ '-' ~ '%02d' | format(item + 1))),
+      'target_node': vault_target_nodes[item],
+      'ip_address': (vault_cluster_nodes[item].ip_address | default(vault_ip_addresses[item])),
+      'vmid': (vault_vm_id_start | int + item),
+      'storage': (vault_storage_by_node[vault_target_nodes[item]] | default(vault_storage)),
+      'clone_template': (vault_clone_template_by_node[vault_target_nodes[item]] | default(vault_clone_template)),
+      'startup_order': (vault_startup_order | int + item)
+    } ] }}"
+  loop: "{{ range(0, vault_node_count | int) | list }}"
 
-- name: Render Vault Terraform module configuration
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/vault/vault-cluster.tf.j2"
-    dest: "{{ vault_terraform_dir }}/vault-cluster.tf"
-    mode: "0644"
+- name: Query current Vault VMs from Proxmox
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ vault_proxmox_api_host }}"
+    api_port: "{{ vault_proxmox_api_port }}"
+    api_user: "{{ vault_proxmox_api_user }}"
+    api_token_id: "{{ vault_proxmox_api_token_id }}"
+    api_token_secret: "{{ vault_proxmox_api_token_secret }}"
+    validate_certs: "{{ not (vault_proxmox_tls_insecure | bool) }}"
+    type: qemu
+    config: current
+  register: vault_proxmox_vms_current
+  retries: "{{ vault_proxmox_api_retries | int }}"
+  delay: "{{ vault_proxmox_api_retry_delay | int }}"
+  until: vault_proxmox_vms_current is succeeded
 
-- name: Initialize Terraform (Taskfile)
-  ansible.builtin.command:
-    cmd: "task terraform:init"
-    chdir: "{{ vault_repo_root }}"
-  environment:
-    TF_IN_AUTOMATION: "1"
-    TF_VAR_proxmox_api_url: "{{ vault_proxmox_api_url }}"
-    TF_VAR_proxmox_api_token_id: "{{ vault_proxmox_api_token_id }}"
-    TF_VAR_proxmox_api_token_secret: "{{ vault_proxmox_api_token_secret }}"
-    TF_VAR_proxmox_tls_insecure: "{{ vault_proxmox_tls_insecure | ternary('true', 'false') }}"
+- name: Build existing Vault VM ID list
+  ansible.builtin.set_fact:
+    vault_existing_vmids: "{{ vault_proxmox_vms_current.proxmox_vms | default([]) | map(attribute='vmid') | list }}"
 
-- name: Check if Vault VMs already exist
-  ansible.builtin.command:
-    cmd: "ssh-keyscan -H {{ item }} 2>/dev/null"
-  loop: "{{ vault_ip_addresses }}"
-  register: vault_vm_check
-  failed_when: false
-  changed_when: false
+- name: Create Vault VMs on Proxmox from templates
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ vault_proxmox_api_host }}"
+    api_port: "{{ vault_proxmox_api_port }}"
+    api_user: "{{ vault_proxmox_api_user }}"
+    api_token_id: "{{ vault_proxmox_api_token_id }}"
+    api_token_secret: "{{ vault_proxmox_api_token_secret }}"
+    validate_certs: "{{ not (vault_proxmox_tls_insecure | bool) }}"
+    node: "{{ item.target_node }}"
+    newid: "{{ item.vmid }}"
+    name: "{{ item.name }}"
+    clone: "{{ item.clone_template }}"
+    full: true
+    storage: "{{ item.storage }}"
+    format: qcow2
+    timeout: "{{ vault_proxmox_clone_timeout }}"
+    onboot: "{{ vault_start_at_node_boot | bool }}"
+    protection: "{{ vault_protection | bool }}"
+    agent: "{{ vault_agent_enabled | ternary('enabled=1', '0') }}"
+    cores: "{{ vault_cpu_cores | int }}"
+    sockets: "{{ vault_cpu_sockets | int }}"
+    memory: "{{ vault_memory_mb | int }}"
+    ciuser: "{{ vault_default_user }}"
+    cipassword: "{{ vault_default_password }}"
+    sshkeys: "{{ vault_ssh_keys | join('\n') }}"
+    nameservers: >-
+      {{
+        vault_dns_servers | join(' ')
+        if (vault_dns_servers is sequence and vault_dns_servers is not string)
+        else vault_dns_servers
+      }}
+    searchdomains: "{{ vault_domain }}"
+    scsihw: virtio-scsi-single
+    net:
+      net0: >-
+        virtio,bridge={{ vault_network_bridge }}{% if (vault_vlan_id | int) > 0 %},tag={{ vault_vlan_id }}{% endif %}
+    ipconfig:
+      ipconfig0: "ip={{ item.ip_address }}{{ vault_cidr_subnet }},gw={{ vault_gateway }}"
+    tags: "{{ vault_tags }}"
+    description: "{{ vault_description }}"
+    startup: "order={{ item.startup_order }}"
+    state: present
+  loop: "{{ vault_vm_plan }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.vmid not in vault_existing_vmids
 
-- name: Apply Terraform configuration (Taskfile)
-  ansible.builtin.command:
-    cmd: "task terraform:apply:auto"
-    chdir: "{{ vault_repo_root }}"
-  environment:
-    TF_IN_AUTOMATION: "1"
-    TF_VAR_proxmox_api_url: "{{ vault_proxmox_api_url }}"
-    TF_VAR_proxmox_api_token_id: "{{ vault_proxmox_api_token_id }}"
-    TF_VAR_proxmox_api_token_secret: "{{ vault_proxmox_api_token_secret }}"
-    TF_VAR_proxmox_tls_insecure: "{{ vault_proxmox_tls_insecure | ternary('true', 'false') }}"
-  register: terraform_result
-  ignore_errors: true
+- name: Update existing Vault VMs on Proxmox
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ vault_proxmox_api_host }}"
+    api_port: "{{ vault_proxmox_api_port }}"
+    api_user: "{{ vault_proxmox_api_user }}"
+    api_token_id: "{{ vault_proxmox_api_token_id }}"
+    api_token_secret: "{{ vault_proxmox_api_token_secret }}"
+    validate_certs: "{{ not (vault_proxmox_tls_insecure | bool) }}"
+    node: "{{ item.target_node }}"
+    vmid: "{{ item.vmid }}"
+    name: "{{ item.name }}"
+    timeout: "{{ vault_proxmox_clone_timeout }}"
+    onboot: "{{ vault_start_at_node_boot | bool }}"
+    protection: "{{ vault_protection | bool }}"
+    agent: "{{ vault_agent_enabled | ternary('enabled=1', '0') }}"
+    cores: "{{ vault_cpu_cores | int }}"
+    sockets: "{{ vault_cpu_sockets | int }}"
+    memory: "{{ vault_memory_mb | int }}"
+    ciuser: "{{ vault_default_user }}"
+    cipassword: "{{ vault_default_password }}"
+    sshkeys: "{{ vault_ssh_keys | join('\n') }}"
+    nameservers: >-
+      {{
+        vault_dns_servers | join(' ')
+        if (vault_dns_servers is sequence and vault_dns_servers is not string)
+        else vault_dns_servers
+      }}
+    searchdomains: "{{ vault_domain }}"
+    net:
+      net0: >-
+        virtio,bridge={{ vault_network_bridge }}{% if (vault_vlan_id | int) > 0 %},tag={{ vault_vlan_id }}{% endif %}
+    ipconfig:
+      ipconfig0: "ip={{ item.ip_address }}{{ vault_cidr_subnet }},gw={{ vault_gateway }}"
+    tags: "{{ vault_tags }}"
+    description: "{{ vault_description }}"
+    startup: "order={{ item.startup_order }}"
+    update: true
+    state: present
+  loop: "{{ vault_vm_plan }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.vmid in vault_existing_vmids
 
-- name: Skip terraform if VMs already exist
-  ansible.builtin.meta: noop
-  when: terraform_result is failed and 'already in use' in (terraform_result.stderr | default(''))
+- name: Refresh Vault VM information after provisioning
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ vault_proxmox_api_host }}"
+    api_port: "{{ vault_proxmox_api_port }}"
+    api_user: "{{ vault_proxmox_api_user }}"
+    api_token_id: "{{ vault_proxmox_api_token_id }}"
+    api_token_secret: "{{ vault_proxmox_api_token_secret }}"
+    validate_certs: "{{ not (vault_proxmox_tls_insecure | bool) }}"
+    type: qemu
+    config: current
+  register: vault_proxmox_vms_after
+  retries: "{{ vault_proxmox_api_retries | int }}"
+  delay: "{{ vault_proxmox_api_retry_delay | int }}"
+  until: vault_proxmox_vms_after is succeeded
 
-- name: Wait for Vault VMs to be accessible
-  ansible.builtin.pause:
-    seconds: 30
+- name: Resize Vault root disks when needed
+  community.proxmox.proxmox_disk:
+    api_host: "{{ vault_proxmox_api_host }}"
+    api_port: "{{ vault_proxmox_api_port }}"
+    api_user: "{{ vault_proxmox_api_user }}"
+    api_token_id: "{{ vault_proxmox_api_token_id }}"
+    api_token_secret: "{{ vault_proxmox_api_token_secret }}"
+    validate_certs: "{{ not (vault_proxmox_tls_insecure | bool) }}"
+    vmid: "{{ item.vmid }}"
+    disk: "{{ vault_disk_name }}"
+    state: resized
+    size: "+{{ vault_resize_amount_gb }}G"
+  vars:
+    vault_vm_config: >-
+      {{
+        (vault_proxmox_vms_after.proxmox_vms | default([])
+        | selectattr('vmid', 'equalto', item.vmid)
+        | first)
+      }}
+    vault_disk_name: "{{ 'scsi0' if (vault_vm_config.config.scsi0 is defined) else 'virtio0' }}"
+    vault_current_disk_config: "{{ vault_vm_config.config[vault_disk_name] | default('') }}"
+    vault_current_disk_size_gb: "{{ ((vault_current_disk_config | regex_search('size=(\\d+)', '\\1') | first | default('0')) | int) }}"
+    vault_target_disk_size_gb: "{{ vault_disk_size | regex_replace('[^0-9]', '') | int }}"
+    vault_resize_amount_gb: "{{ (vault_target_disk_size_gb | int) - (vault_current_disk_size_gb | int) }}"
+  when: (vault_resize_amount_gb | int) > 0
+  loop: "{{ vault_vm_plan }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-- name: Wait for cloud-init configuration to complete
-  ansible.builtin.pause:
-    seconds: 10
-  tags:
-    - vault-cloud-init
+- name: Start Vault VMs
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ vault_proxmox_api_host }}"
+    api_port: "{{ vault_proxmox_api_port }}"
+    api_user: "{{ vault_proxmox_api_user }}"
+    api_token_id: "{{ vault_proxmox_api_token_id }}"
+    api_token_secret: "{{ vault_proxmox_api_token_secret }}"
+    validate_certs: "{{ not (vault_proxmox_tls_insecure | bool) }}"
+    node: "{{ item.target_node }}"
+    vmid: "{{ item.vmid }}"
+    name: "{{ item.name }}"
+    state: started
+    timeout: "{{ vault_proxmox_clone_timeout }}"
+  loop: "{{ vault_vm_plan }}"
+  loop_control:
+    label: "{{ item.name }}"

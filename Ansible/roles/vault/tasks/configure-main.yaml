@@ -1,122 +1,1001 @@
 ---
-# vault-configure role - Main task orchestrator
-# This file includes all sub-task files in the proper order
+- name: Ensure localhost output directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ vault_unseal_keys_output_dir }}"
+    - "{{ vault_users_output_dir }}"
+    - "{{ vault_user_passwords_dir }}"
+    - "{{ vault_tls_local_dir }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
 
-- name: "Pre-configuration validation and setup"
-  include_tasks: pre-tasks.yaml
-  tags:
-    - "vault"
-    - "vault-configure"
+- name: Build per-node Vault runtime facts
+  ansible.builtin.set_fact:
+    vault_node_index: "{{ groups['vault'].index(inventory_hostname) }}"
+    vault_keepalived_priority_effective: >-
+      {{
+        (
+          vault_cluster_nodes
+          | selectattr('name', 'equalto', inventory_hostname)
+          | map(attribute='keepalived_priority')
+          | list
+          | first
+          | default((vault_keepalived_priority | int) - ((groups['vault'].index(inventory_hostname)) * (vault_keepalived_priority_step | int)))
+        ) | int
+      }}
+    vault_peer_nodes: "{{ (groups['vault'] | default([])) | reject('equalto', inventory_hostname) | list }}"
 
-- name: "Configure system settings"
-  include_tasks: system-config.yaml
-  tags:
-    - "vault"
-    - "system"
-    - "configure"
+- name: Install Vault prerequisites
+  ansible.builtin.apt:
+    name:
+      - unzip
+      - jq
+      - curl
+      - ca-certificates
+      - keepalived
+      - haproxy
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
 
-- name: "Setup Vault user and directories"
-  include_tasks: user-and-directories.yaml
-  tags:
-    - "vault"
-    - "vault-user"
+- name: Ensure Vault group exists
+  ansible.builtin.group:
+    name: "{{ vault_group }}"
+    system: true
 
-- name: "Install Vault binary"
-  include_tasks: install.yaml
-  tags:
-    - "vault"
-    - "vault-install"
+- name: Ensure Vault user exists
+  ansible.builtin.user:
+    name: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    system: true
+    home: "{{ vault_home }}"
+    shell: /usr/sbin/nologin
+    create_home: false
 
-- name: "Configure TLS Certificates"
-  include_tasks: tls.yaml
-  tags:
-    - "vault"
-    - "vault-tls"
-    - "vault-certs"
+- name: Ensure Vault directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(vault_user) }}"
+    group: "{{ item.group | default(vault_group) }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ vault_home }}", mode: "0750" }
+    - { path: "{{ vault_home }}/tls", mode: "0750" }
+    - { path: "{{ vault_home }}/policies", mode: "0750" }
+    - { path: "{{ vault_data_dir }}", mode: "0750" }
+    - { path: "{{ vault_log_dir }}", mode: "0750" }
+    - { path: "{{ vault_backup_snapshots_dir }}", mode: "0750" }
+    - { path: "{{ vault_plugin_directory }}", mode: "0750" }
 
-- name: "Build and distribute Vault CA bundle"
-  include_tasks: ca-bundle.yaml
-  tags:
-    - "vault"
-    - "vault-tls"
-    - "vault-ca-bundle"
+- name: Download Vault binary archive
+  ansible.builtin.get_url:
+    url: "{{ vault_download_url }}"
+    dest: "/tmp/{{ vault_archive_name }}"
+    mode: "0644"
 
-- name: "Configure Vault core settings"
-  include_tasks: configure.yaml
-  tags:
-    - "vault"
-    - "vault-configure"
+- name: Install Vault binary
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ vault_archive_name }}"
+    dest: "/usr/local/bin"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
 
-# HA/VIP first so clients have a stable address before starting Vault everywhere
-# (Also useful if your Vault config uses api_addr/cluster_addr pointing at the VIP/DNS)
-- name: "Setup Keepalived for Virtual IP"
-  include_tasks: keepalived.yaml
-  tags:
-    - "vault"
-    - "vault-ha"
-    - "vault-keepalived"
+- name: Allow Vault to lock memory when mlock is enabled
+  community.general.capabilities:
+    path: "{{ vault_bin_path }}"
+    capability: cap_ipc_lock=ep
+    state: present
+  when: not (vault_disable_mlock | bool)
 
-- name: "Setup HAProxy load balancing"
-  include_tasks: haproxy.yaml
-  tags:
-    - "vault"
-    - "vault-ha"
-    - "vault-haproxy"
+- name: Enable non-local bind for HA VIP listeners
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: "1"
+    state: present
+    sysctl_set: true
+    reload: true
+  when: vault_keepalived_enabled | bool
 
-- name: "Manage Vault systemd service"
-  include_tasks: service.yaml
-  tags:
-    - "vault"
-    - "vault-service"
+- name: Generate Vault CA private key on localhost
+  community.crypto.openssl_privatekey:
+    path: "{{ vault_tls_local_dir }}/ca.key"
+    size: "{{ vault_tls_key_size }}"
+    type: RSA
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  run_once: true
 
-- name: "Initialize and unseal Vault"
-  include_tasks: initialize.yaml
-  tags:
-    - "vault"
-    - "vault-init"
-    - "vault-unseal"
+- name: Generate Vault CA certificate signing request on localhost
+  community.crypto.openssl_csr:
+    path: "{{ vault_tls_local_dir }}/ca.csr"
+    privatekey_path: "{{ vault_tls_local_dir }}/ca.key"
+    common_name: "{{ vault_tls_ca_common_name }}"
+    basic_constraints:
+      - "CA:TRUE"
+    basic_constraints_critical: true
+    key_usage:
+      - keyCertSign
+      - cRLSign
+    key_usage_critical: true
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  run_once: true
 
-- name: "Ensure leader is unsealed before cluster join"
-  include_tasks: unseal-all.yaml
-  when: inventory_hostname == groups['vault'][0]
-  tags:
-    - "vault"
-    - "vault-unseal"
+- name: Generate Vault CA certificate on localhost
+  community.crypto.x509_certificate:
+    path: "{{ vault_tls_local_dir }}/ca.crt"
+    privatekey_path: "{{ vault_tls_local_dir }}/ca.key"
+    csr_path: "{{ vault_tls_local_dir }}/ca.csr"
+    provider: selfsigned
+    selfsigned_not_after: "+{{ vault_tls_ca_days }}d"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  run_once: true
 
-# Join followers after the leader is initialized and unsealed
-- name: "Setup Raft cluster"
-  include_tasks: cluster.yaml
-  tags:
-    - "vault"
-    - "vault-raft"
+- name: Generate Vault node private keys on localhost
+  community.crypto.openssl_privatekey:
+    path: "{{ vault_tls_local_dir }}/{{ inventory_hostname }}.key"
+    size: "{{ vault_tls_key_size }}"
+    type: RSA
+    mode: "0600"
+  delegate_to: localhost
+  become: false
 
-- name: "Unseal all follower nodes after cluster join"
-  include_tasks: unseal-all.yaml
-  tags:
-    - "vault"
-    - "vault-unseal"
+- name: Generate Vault node certificate signing requests on localhost
+  community.crypto.openssl_csr:
+    path: "{{ vault_tls_local_dir }}/{{ inventory_hostname }}.csr"
+    privatekey_path: "{{ vault_tls_local_dir }}/{{ inventory_hostname }}.key"
+    common_name: "{{ inventory_hostname }}"
+    subject_alt_name:
+      - "DNS:{{ inventory_hostname }}"
+      - "DNS:{{ inventory_hostname }}.{{ vault_domain }}"
+      - "DNS:{{ vault_cluster_hostname }}"
+      - "IP:{{ ansible_host | default(inventory_hostname) }}"
+      - "IP:{{ vault_keepalived_virtual_ip }}"
+    extended_key_usage:
+      - serverAuth
+      - clientAuth
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    mode: "0644"
+  delegate_to: localhost
+  become: false
 
-- name: "Generate CA using Vault PKI"
-  include_tasks: vault-pki-ca.yaml
-  tags:
-    - "vault"
-    - "vault-pki"
-    - "vault-ca"
+- name: Sign Vault node certificates on localhost
+  community.crypto.x509_certificate:
+    path: "{{ vault_tls_local_dir }}/{{ inventory_hostname }}.crt"
+    csr_path: "{{ vault_tls_local_dir }}/{{ inventory_hostname }}.csr"
+    ownca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    ownca_privatekey_path: "{{ vault_tls_local_dir }}/ca.key"
+    provider: ownca
+    ownca_not_after: "+{{ vault_tls_cert_days }}d"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
 
-- name: "Flush handlers before final unseal"
-  meta: flush_handlers
-  tags:
-    - "vault"
-    - "vault-unseal"
+- name: Copy Vault TLS assets to nodes
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - src: "{{ vault_tls_local_dir }}/ca.crt"
+      dest: "{{ vault_tls_ca_cert_file }}"
+      owner: root
+      group: root
+      mode: "0644"
+    - src: "{{ vault_tls_local_dir }}/{{ inventory_hostname }}.crt"
+      dest: "{{ vault_tls_cert_file }}"
+      owner: "{{ vault_user }}"
+      group: "{{ vault_group }}"
+      mode: "0644"
+    - src: "{{ vault_tls_local_dir }}/{{ inventory_hostname }}.key"
+      dest: "{{ vault_tls_key_file }}"
+      owner: "{{ vault_user }}"
+      group: "{{ vault_group }}"
+      mode: "0600"
+  notify: Restart vault
 
-- name: "Final unseal after all configuration"
-  include_tasks: unseal-all.yaml
-  tags:
-    - "vault"
-    - "vault-unseal"
+- name: Render Vault configuration
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/vault/vault.hcl.j2"
+    dest: "{{ vault_home }}/vault.hcl"
+    owner: root
+    group: "{{ vault_group }}"
+    mode: "0640"
+  notify: Restart vault
 
-- name: "Post-configuration summary"
-  include_tasks: post-tasks.yaml
-  tags:
-    - "vault"
-    - "always"
+- name: Render Vault systemd service
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/vault/vault.service.j2"
+    dest: "/etc/systemd/system/{{ vault_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart vault
+
+- name: Render HAProxy Lua helper for Vault
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/vault/terraform-vault-auth.lua.j2"
+    dest: /etc/haproxy/terraform-vault-auth.lua
+    owner: root
+    group: root
+    mode: "0644"
+  when: vault_haproxy_enabled | bool
+  notify: Restart haproxy
+
+- name: Build HAProxy combined PEM
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cat {{ vault_tls_cert_file }} {{ vault_tls_key_file }} > /etc/haproxy/vault-combined.pem
+    chown haproxy:haproxy /etc/haproxy/vault-combined.pem
+    chmod 0600 /etc/haproxy/vault-combined.pem
+  args:
+    executable: /bin/bash
+  when: vault_haproxy_enabled | bool
+  changed_when: true
+  notify: Restart haproxy
+
+- name: Render Vault HAProxy configuration
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/haproxy/haproxy.cfg.j2"
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    routing_profile: vault
+  when: vault_haproxy_enabled | bool
+  notify: Restart haproxy
+
+- name: Render Vault health-check script
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/haproxy/health-check.sh.j2"
+    dest: /usr/local/bin/check-vault-health.sh
+    owner: root
+    group: root
+    mode: "0755"
+  vars:
+    routing_profile: vault
+  when: vault_keepalived_enabled | bool
+
+- name: Render Vault VIP notification scripts
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/vault/{{ item }}"
+    dest: "/usr/local/bin/{{ item | regex_replace('\\.j2$', '') }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - vault-vip-master.sh.j2
+    - vault-vip-backup.sh.j2
+    - vault-vip-fault.sh.j2
+  when: vault_keepalived_enabled | bool
+
+- name: Render Vault Keepalived configuration
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/haproxy/keepalived.conf.j2"
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    routing_profile: vault
+    vault_keepalived_priority: "{{ vault_keepalived_priority_effective }}"
+  when: vault_keepalived_enabled | bool
+  notify: Restart keepalived
+
+- name: Flush Vault service handlers before bootstrap
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure HAProxy service state
+  ansible.builtin.systemd:
+    name: haproxy
+    enabled: "{{ vault_haproxy_enabled | bool }}"
+    state: "{{ vault_haproxy_enabled | bool | ternary('started', 'stopped') }}"
+  when: vault_haproxy_enabled | bool
+
+- name: Ensure Keepalived service state
+  ansible.builtin.systemd:
+    name: keepalived
+    enabled: "{{ vault_keepalived_enabled | bool }}"
+    state: "{{ vault_keepalived_enabled | bool | ternary('started', 'stopped') }}"
+  when: vault_keepalived_enabled | bool
+
+- name: Ensure Vault service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ vault_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for Vault listener to answer on each node
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host | default(inventory_hostname) }}"
+    port: "{{ vault_service_api_port }}"
+    timeout: 300
+    delay: 5
+  delegate_to: localhost
+  become: false
+
+- name: Check Vault status on node
+  ansible.builtin.command:
+    cmd: "{{ vault_bin_path }} status -format=json"
+  register: vault_status_cmd
+  failed_when: false
+  changed_when: false
+  environment:
+    VAULT_ADDR: "{{ vault_local_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_cert_file }}"
+
+- name: Set Vault status fact
+  ansible.builtin.set_fact:
+    vault_status_json: "{{ (vault_status_cmd.stdout | default('{}')) | from_json if (vault_status_cmd.stdout | default('') | length > 0) else {} }}"
+
+- name: Check current Vault status on primary
+  ansible.builtin.command:
+    cmd: "{{ vault_bin_path }} status -format=json"
+  register: vault_primary_status_cmd
+  failed_when: false
+  changed_when: false
+  environment:
+    VAULT_ADDR: "{{ vault_local_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_cert_file }}"
+  delegate_to: "{{ vault_primary_host }}"
+  run_once: true
+
+- name: Parse primary Vault status
+  ansible.builtin.set_fact:
+    vault_primary_status_json: >-
+      {{
+        (vault_primary_status_cmd.stdout | default('{}')) | from_json
+        if (vault_primary_status_cmd.stdout | default('') | length > 0)
+        else {}
+      }}
+  run_once: true
+
+- name: Initialize Vault cluster on primary
+  ansible.builtin.command:
+    cmd: >-
+      {{ vault_bin_path }} operator init
+      -format=json
+      -key-shares={{ vault_key_shares }}
+      -key-threshold={{ vault_key_threshold }}
+  register: vault_init_cmd
+  no_log: true
+  changed_when: true
+  environment:
+    VAULT_ADDR: "{{ vault_local_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_cert_file }}"
+  delegate_to: "{{ vault_primary_host }}"
+  run_once: true
+  when:
+    - vault_initialize | bool
+    - not (vault_primary_status_json.initialized | default(false))
+
+- name: Persist Vault bootstrap data on localhost
+  ansible.builtin.copy:
+    content: "{{ vault_init_cmd.stdout }}"
+    dest: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  when: vault_init_cmd is changed
+
+- name: Ensure Vault bootstrap data exists locally
+  ansible.builtin.stat:
+    path: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
+  register: vault_bootstrap_file
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Assert Vault bootstrap data is available
+  ansible.builtin.assert:
+    that:
+      - vault_bootstrap_file.stat.exists
+    fail_msg: >-
+      Vault is already initialized but {{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}
+      is missing. The role needs that file to unseal nodes and finish bootstrap tasks.
+  run_once: true
+
+- name: Load Vault bootstrap data from localhost
+  ansible.builtin.slurp:
+    src: "{{ vault_unseal_keys_output_dir }}/{{ vault_unseal_keys_file }}"
+  register: vault_bootstrap_file_content
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Cache Vault bootstrap data on localhost
+  ansible.builtin.set_fact:
+    vault_bootstrap_data: "{{ vault_bootstrap_file_content.content | b64decode | from_json }}"
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  no_log: true
+
+- name: Unseal primary Vault node when needed
+  ansible.builtin.shell: |
+    set -euo pipefail
+    {% for key in hostvars['localhost'].vault_bootstrap_data.unseal_keys_b64[:vault_key_threshold | int] %}
+    {{ vault_bin_path }} operator unseal {{ key | quote }}
+    {% endfor %}
+  args:
+    executable: /bin/bash
+  environment:
+    VAULT_ADDR: "{{ vault_local_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_cert_file }}"
+  no_log: true
+  changed_when: true
+  when:
+    - inventory_hostname == vault_primary_host
+    - vault_status_json.sealed | default(true)
+
+- name: Wait for primary Vault node to become active
+  ansible.builtin.uri:
+    url: "{{ vault_leader_api_addr }}/v1/sys/health"
+    method: GET
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code:
+      - 200
+      - 429
+      - 472
+      - 473
+    return_content: true
+  register: vault_primary_health
+  delegate_to: localhost
+  become: false
+  until: vault_primary_health.status in [200, 429, 472, 473]
+  retries: "{{ vault_cluster_join_retries }}"
+  delay: "{{ vault_cluster_join_delay }}"
+  when: inventory_hostname != vault_primary_host
+
+- name: Refresh Vault status before follower join
+  ansible.builtin.command:
+    cmd: "{{ vault_bin_path }} status -format=json"
+  register: vault_status_before_join_cmd
+  failed_when: false
+  changed_when: false
+  environment:
+    VAULT_ADDR: "{{ vault_local_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_cert_file }}"
+  when: inventory_hostname != vault_primary_host
+
+- name: Parse follower status before join
+  ansible.builtin.set_fact:
+    vault_status_before_join_json: >-
+      {{
+        (vault_status_before_join_cmd.stdout | default('{}')) | from_json
+        if (vault_status_before_join_cmd.stdout | default('') | length > 0)
+        else {}
+      }}
+  when: inventory_hostname != vault_primary_host
+
+- name: Join follower to Raft cluster
+  ansible.builtin.command:
+    cmd: "{{ vault_bin_path }} operator raft join {{ vault_leader_api_addr }}"
+  register: vault_raft_join_cmd
+  failed_when:
+    - vault_raft_join_cmd.rc != 0
+    - "'already' not in (vault_raft_join_cmd.stderr | default('') | lower)"
+    - "'already' not in (vault_raft_join_cmd.stdout | default('') | lower)"
+  changed_when:
+    - vault_raft_join_cmd.rc == 0
+    - "'already' not in (vault_raft_join_cmd.stderr | default('') | lower)"
+    - "'already' not in (vault_raft_join_cmd.stdout | default('') | lower)"
+  environment:
+    VAULT_ADDR: "{{ vault_local_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_cert_file }}"
+  when:
+    - inventory_hostname != vault_primary_host
+    - not (vault_status_before_join_json.initialized | default(false))
+
+- name: Refresh follower Vault status after join
+  ansible.builtin.command:
+    cmd: "{{ vault_bin_path }} status -format=json"
+  register: vault_status_after_join_cmd
+  failed_when: false
+  changed_when: false
+  environment:
+    VAULT_ADDR: "{{ vault_local_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_cert_file }}"
+  when: inventory_hostname != vault_primary_host
+
+- name: Parse follower status after join
+  ansible.builtin.set_fact:
+    vault_status_after_join_json: >-
+      {{
+        (vault_status_after_join_cmd.stdout | default('{}')) | from_json
+        if (vault_status_after_join_cmd.stdout | default('') | length > 0)
+        else {}
+      }}
+  when: inventory_hostname != vault_primary_host
+
+- name: Unseal follower Vault nodes when needed
+  ansible.builtin.shell: |
+    set -euo pipefail
+    {% for key in hostvars['localhost'].vault_bootstrap_data.unseal_keys_b64[:vault_key_threshold | int] %}
+    {{ vault_bin_path }} operator unseal {{ key | quote }}
+    {% endfor %}
+  args:
+    executable: /bin/bash
+  environment:
+    VAULT_ADDR: "{{ vault_local_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_cert_file }}"
+  no_log: true
+  changed_when: true
+  when:
+    - inventory_hostname != vault_primary_host
+    - vault_status_after_join_json.sealed | default(true)
+
+- name: Verify Raft cluster peers from primary
+  ansible.builtin.command:
+    cmd: "{{ vault_bin_path }} operator raft list-peers -format=json"
+  register: vault_raft_peers_cmd
+  changed_when: false
+  environment:
+    VAULT_ADDR: "{{ vault_local_api_addr }}"
+    VAULT_CACERT: "{{ vault_tls_ca_cert_file }}"
+    VAULT_TOKEN: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+  delegate_to: "{{ vault_primary_host }}"
+  run_once: true
+  no_log: true
+
+- name: Assert all Vault nodes joined the Raft cluster
+  ansible.builtin.assert:
+    that:
+      - ((vault_raft_peers_cmd.stdout | from_json).data.config.servers | length) == (groups['vault'] | length)
+    fail_msg: "Vault Raft cluster membership did not converge to the full inventory."
+  run_once: true
+
+- name: Render Vault bootstrap summary on localhost
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/vault/bootstrap.yaml.j2"
+    dest: "{{ vault_unseal_keys_output_dir }}/bootstrap.yaml"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Query enabled audit devices
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/audit"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code: 200
+    return_content: true
+  register: vault_audit_devices
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Enable Vault audit logging
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/audit/file"
+    method: PUT
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      type: file
+      options:
+        file_path: "{{ vault_audit_log_file }}"
+    status_code: 204
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - vault_enable_audit_logging | bool
+    - "'file/' not in ((vault_audit_devices.json.data | default({})) | dict2items | map(attribute='key') | list)"
+  no_log: true
+
+- name: Query enabled auth methods
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/auth"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code: 200
+    return_content: true
+  register: vault_auth_list
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Build Vault auth backend and mount lists
+  ansible.builtin.set_fact:
+    vault_auth_backend_methods: >-
+      {{
+        (vault_auth_methods | default([]))
+        | rejectattr('type', 'equalto', 'totp')
+        | list
+      }}
+    vault_auth_mount_methods: >-
+      {{
+        (vault_auth_methods | default([]))
+        | selectattr('type', 'equalto', 'totp')
+        | list
+      }}
+  run_once: true
+
+- name: Enable configured auth methods
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/auth/{{ item.path }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      type: "{{ item.type }}"
+    status_code: 204
+  loop: "{{ vault_auth_backend_methods | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: (item.path ~ '/') not in (vault_auth_list.json.data | default({}) | dict2items | map(attribute='key') | list)
+  no_log: true
+
+- name: Query enabled secrets engines
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/mounts"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code: 200
+    return_content: true
+  register: vault_mount_list
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Enable auth method mounts that are backed by secrets engines
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/mounts/{{ item.path }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      type: "{{ item.type }}"
+      description: "{{ item.description | default('Vault auth-related secrets engine') }}"
+    status_code: 204
+  loop: "{{ vault_auth_mount_methods | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: (item.path ~ '/') not in (vault_mount_list.json.data | default({}) | dict2items | map(attribute='key') | list)
+  no_log: true
+
+- name: Enable configured KV mounts
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/mounts/{{ item.key }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      type: kv
+      description: "{{ item.value.description | default('KV v2 secrets engine') }}"
+      options: "{{ item.value.options | default({'version': '2'}) }}"
+    status_code: 204
+  loop: "{{ vault_kv_mounts | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: (item.key ~ '/') not in (vault_mount_list.json.data | default({}) | dict2items | map(attribute='key') | list)
+  no_log: true
+
+- name: Enable configured non-KV mounts
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/mounts/{{ item.key }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      type: "{{ item.value.type }}"
+      description: "{{ item.value.description | default('Vault secrets engine') }}"
+      options: "{{ item.value.options | default(omit) }}"
+    status_code: 204
+  loop: "{{ vault_engine_mounts | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: (item.key ~ '/') not in (vault_mount_list.json.data | default({}) | dict2items | map(attribute='key') | list)
+  no_log: true
+
+- name: Query existing transit keys
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/{{ item.0.key }}/keys/{{ key_item.name }}"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code:
+      - 200
+      - 404
+    return_content: true
+  loop: "{{ vault_transit_configs | default({}) | dict2items | subelements('value.keys', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.key }}/{{ item.1.name }}"
+  vars:
+    key_item: "{{ item.1 }}"
+  register: vault_transit_key_status
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Create configured transit keys
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/{{ item.item.0.key }}/keys/{{ item.item.1.name }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      type: "{{ item.item.1.type | default('aes256-gcm96') }}"
+      exportable: "{{ item.item.1.exportable | default(false) }}"
+    status_code:
+      - 200
+      - 204
+  loop: "{{ vault_transit_key_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.0.key }}/{{ item.item.1.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: item.status == 404
+  no_log: true
+
+- name: Query existing Vault policies
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/policies/acl/{{ item.key }}"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code:
+      - 200
+      - 404
+    return_content: true
+  loop: "{{ vault_user_policies | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: vault_policy_status
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Write configured Vault policies
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/policies/acl/{{ item.item.key }}"
+    method: PUT
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      policy: "{{ item.item.value }}"
+    status_code: 204
+  loop: "{{ vault_policy_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - item.status == 404 or (item.json.data.policy | default('')) != item.item.value
+  no_log: true
+
+- name: Build Vault user credential map
+  ansible.builtin.set_fact:
+    vault_user_credentials: >-
+      {{
+        (vault_user_credentials | default({}))
+        | combine({
+            item.name: {
+              'description': item.description | default(''),
+              'policies': item.policies | default([]),
+              'password': lookup(
+                'ansible.builtin.password',
+                vault_user_passwords_dir ~ '/' ~ item.name ~ '.txt length=' ~ (vault_user_password_length | string) ~ ' chars=' ~ vault_user_password_charset
+              )
+            }
+          }, recursive=True)
+      }}
+  loop: "{{ vault_users | default([]) }}"
+  run_once: true
+  no_log: true
+
+- name: Query current Vault userpass users
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/auth/userpass/users?list=true"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code:
+      - 200
+      - 404
+    return_content: true
+  register: vault_userpass_list
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  when: vault_users_enabled | bool
+
+- name: Create or update Vault users
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/auth/userpass/users/{{ item.name }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      password: "{{ vault_user_credentials[item.name].password }}"
+      token_policies: "{{ (item.policies | default([])) | join(',') }}"
+    status_code:
+      - 200
+      - 204
+  loop: "{{ vault_users | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: vault_users_enabled | bool
+  no_log: true
+
+- name: Check whether user token files already exist
+  ansible.builtin.stat:
+    path: "{{ vault_users_output_dir }}/{{ item.name }}.json"
+  loop: "{{ vault_users | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: vault_user_token_files
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: vault_users_enabled | bool
+
+- name: Issue Vault user tokens when needed
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/auth/token/create"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      display_name: "{{ vault_user_token_display_name_prefix }}-{{ item.item.name }}"
+      policies: "{{ item.item.policies | default([]) }}"
+      ttl: "{{ vault_user_token_ttl }}"
+      renewable: true
+      meta:
+        username: "{{ item.item.name }}"
+        managed_by: ansible
+    status_code: 200
+    return_content: true
+  loop: "{{ vault_user_token_files.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  register: vault_user_tokens
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - vault_users_enabled | bool
+    - vault_force_rotate_user_tokens | bool or not (item.stat.exists | default(false))
+  no_log: true
+
+- name: Persist Vault user credential files
+  ansible.builtin.copy:
+    dest: "{{ vault_users_output_dir }}/{{ item.name }}.json"
+    mode: "0600"
+    content: >-
+      {{
+        {
+          'username': item.name,
+          'description': item.description | default(''),
+          'policies': item.policies | default([]),
+          'password': vault_user_credentials[item.name].password,
+          'token': (
+            (
+              vault_user_tokens.results | default([])
+              | selectattr('item.item.name', 'equalto', item.name)
+              | map(attribute='json.auth.client_token')
+              | list
+              | first
+            )
+            | default(
+              (
+                lookup('ansible.builtin.file', vault_users_output_dir ~ '/' ~ item.name ~ '.json', errors='ignore')
+                | default('{}', true)
+                | from_json
+              ).token | default('')
+            )
+          ),
+          'token_accessor': (
+            (
+              vault_user_tokens.results | default([])
+              | selectattr('item.item.name', 'equalto', item.name)
+              | map(attribute='json.auth.accessor')
+              | list
+              | first
+            ) | default('')
+          ),
+          'created_at': ansible_date_time.iso8601
+        } | to_nice_json
+      }}
+  loop: "{{ vault_users | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: vault_users_enabled | bool
+  no_log: true
+
+- name: Write configured KV secrets
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/secrets/data/{{ item.key }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      data: "{{ item.value.data | default({}) }}"
+    status_code:
+      - 200
+      - 204
+  loop: "{{ secrets | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: (vault_kv_mounts | default({}))['secrets'] is defined
+  no_log: true

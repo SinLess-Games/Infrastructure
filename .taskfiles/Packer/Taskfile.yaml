@@ -34,6 +34,48 @@ tasks:
       - echo "Starting Debian 13 template build (estimated 25-35 minutes)..."
       - packer build -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl debian-13.pkr.hcl 2>&1 | tee build.log
 
+  build:debian-13:pve-01:
+    desc: "Build Debian 13 template on pve-01 (vm_disks_01)"
+    dir: "{{.PACKER_DIR}}/debian-13"
+    preconditions:
+      - sh: test -f debian-13.pkr.hcl
+        msg: "Packer template not found: {{.PACKER_DIR}}/debian-13/debian-13.pkr.hcl"
+      - sh: test -f ../credentials.pkvars.hcl
+        msg: "Credentials file not found: {{.PACKER_DIR}}/credentials.pkvars.hcl"
+    cmds:
+      - echo "Validating Packer configuration for pve-01..."
+      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl -var "proxmox_node=pve-01" -var "proxmox_vm_storage=vm_disks_01" -var "vm_id=9010" -var "vm_name=debian-13-template-pve-01" debian-13.pkr.hcl
+      - echo "Building Debian 13 template on pve-01 (estimated 25-35 minutes)..."
+      - packer build -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl -var "proxmox_node=pve-01" -var "proxmox_vm_storage=vm_disks_01" -var "vm_id=9010" -var "vm_name=debian-13-template-pve-01" debian-13.pkr.hcl 2>&1 | tee build-pve-01.log
+
+  build:debian-13:pve-04:
+    desc: "Build Debian 13 template on pve-04 (vm_disks_04)"
+    dir: "{{.PACKER_DIR}}/debian-13"
+    preconditions:
+      - sh: test -f debian-13.pkr.hcl
+        msg: "Packer template not found: {{.PACKER_DIR}}/debian-13/debian-13.pkr.hcl"
+      - sh: test -f ../credentials.pkvars.hcl
+        msg: "Credentials file not found: {{.PACKER_DIR}}/credentials.pkvars.hcl"
+    cmds:
+      - echo "Validating Packer configuration for pve-04..."
+      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl -var "proxmox_node=pve-04" -var "proxmox_vm_storage=vm_disks_04" -var "vm_id=9004" -var "vm_name=debian-13-template-pve-04" debian-13.pkr.hcl
+      - echo "Building Debian 13 template on pve-04 (estimated 25-35 minutes)..."
+      - packer build -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl -var "proxmox_node=pve-04" -var "proxmox_vm_storage=vm_disks_04" -var "vm_id=9004" -var "vm_name=debian-13-template-pve-04" debian-13.pkr.hcl 2>&1 | tee build-pve-04.log
+
+  build:debian-13:pve-05:
+    desc: "Build Debian 13 template on pve-05 (vm_disks_05)"
+    dir: "{{.PACKER_DIR}}/debian-13"
+    preconditions:
+      - sh: test -f debian-13.pkr.hcl
+        msg: "Packer template not found: {{.PACKER_DIR}}/debian-13/debian-13.pkr.hcl"
+      - sh: test -f ../credentials.pkvars.hcl
+        msg: "Credentials file not found: {{.PACKER_DIR}}/credentials.pkvars.hcl"
+    cmds:
+      - echo "Validating Packer configuration for pve-05..."
+      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl -var "proxmox_node=pve-05" -var "proxmox_vm_storage=vm_disks_05" -var "vm_id=9005" -var "vm_name=debian-13-template-pve-05" debian-13.pkr.hcl
+      - echo "Building Debian 13 template on pve-05 (estimated 25-35 minutes)..."
+      - packer build -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl -var "proxmox_node=pve-05" -var "proxmox_vm_storage=vm_disks_05" -var "vm_id=9005" -var "vm_name=debian-13-template-pve-05" debian-13.pkr.hcl 2>&1 | tee build-pve-05.log
+
   build:debian-12:
     desc: "Build Debian 12 template using Packer"
     dir: "{{.PACKER_DIR}}/debian-12"
@@ -90,35 +132,3 @@ tasks:
     cmds:
       - packer inspect debian-12.pkr.hcl
 
-  build:flatcar:
-    desc: "Build Flatcar Container Linux template"
-    dir: "{{.PACKER_DIR}}/flatcar"
-    preconditions:
-      - sh: test -f flatcar.pkr.hcl
-        msg: "Packer template not found: {{.PACKER_DIR}}/flatcar/flatcar.pkr.hcl"
-      - sh: test -f ../credentials.pkvars.hcl
-        msg: "Credentials file not found: {{.PACKER_DIR}}/credentials.pkvars.hcl"
-    cmds:
-      - echo "Validating Packer configuration..."
-      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl flatcar.pkr.hcl
-      - echo "Starting Flatcar template build (estimated 5-10 minutes)..."
-      - packer build -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl flatcar.pkr.hcl 2>&1 | tee build.log
-
-  validate:flatcar:
-    desc: "Validate Flatcar Packer configuration without building"
-    dir: "{{.PACKER_DIR}}/flatcar"
-    preconditions:
-      - sh: test -f flatcar.pkr.hcl
-        msg: "Packer template not found"
-    cmds:
-      - packer validate -var-file=../credentials.pkvars.hcl -var-file=../variables.pkvars.hcl flatcar.pkr.hcl
-      - echo "✓ Packer configuration is valid"
-
-  inspect:flatcar:
-    desc: "Inspect Flatcar Packer template variables and sources"
-    dir: "{{.PACKER_DIR}}/flatcar"
-    preconditions:
-      - sh: test -f flatcar.pkr.hcl
-        msg: "Packer template not found"
-    cmds:
-      - packer inspect flatcar.pkr.hcl

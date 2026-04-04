@@ -1,13 +1,15 @@
 locals {
   node_details = [
     for idx, node in var.nodes : {
-      index       = idx + 1
-      name        = node.name
-      vmid        = node.vmid
-      target_node = node.target_node
-      ip_address  = node.ip_address
-      hostname    = try(node.hostname, node.name)
-      fqdn        = try(node.fqdn, null)
+      index          = idx + 1
+      name           = node.name
+      vmid           = node.vmid
+      target_node    = node.target_node
+      clone_template = try(node.clone_template, null)
+      ip_address     = node.ip_address
+      hostname       = try(node.hostname, node.name)
+      fqdn           = try(node.fqdn, null)
+      storage        = try(node.storage, null)
     }
   ]
 
@@ -65,7 +67,7 @@ EOT
   force_create       = var.force_create
   startup            = "order=${var.startup_order}"
 
-  clone      = var.clone_template
+  clone      = coalesce(local.node_details[count.index].clone_template, var.clone_template)
   full_clone = true
 
   agent   = var.agent_enabled ? 1 : 0
@@ -83,7 +85,7 @@ EOT
   disk {
     slot     = "virtio0"
     type     = "disk"
-    storage  = var.storage
+    storage  = coalesce(local.node_details[count.index].storage, var.storage)
     size     = var.disk_size
     format   = "raw"
     backup   = var.backup_enabled
@@ -94,7 +96,7 @@ EOT
   disk {
     slot    = "ide2"
     type    = "cloudinit"
-    storage = var.storage
+    storage = coalesce(local.node_details[count.index].storage, var.storage)
   }
 
   network {
@@ -119,7 +121,7 @@ EOT
 
   lifecycle {
     precondition {
-      condition     = var.memory_balloon_mb == null || var.memory_balloon_mb <= var.memory_mb
+      condition     = coalesce(var.memory_balloon_mb, var.memory_mb) <= var.memory_mb
       error_message = "memory_balloon_mb must be null or less than or equal to memory_mb"
     }
 

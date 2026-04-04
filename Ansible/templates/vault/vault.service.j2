@@ -1,35 +1,31 @@
 [Unit]
 Description=HashiCorp Vault
-Documentation=https://www.vaultproject.io/docs/
+Documentation=https://developer.hashicorp.com/vault/docs
 Requires=network-online.target
 After=network-online.target
-ConditionFileNotEmpty={{ vault_home_dir }}/vault.hcl
+ConditionFileNotEmpty={{ vault_home }}/vault.hcl
 
 [Service]
-Type=notify
-ExecStart={{ vault_bin_dir }}/vault server -config={{ vault_home_dir }}/vault.hcl
-ExecReload=/bin/kill -HUP $MAINPID
-KillMode=process
-KillSignal=SIGINT
-Restart={{ vault_systemd_restart | default('always') }}
-RestartSec={{ vault_systemd_restart_sec | default(5) }}
-TimeoutStopSec=30
-LimitNOFILE={{ vault_systemd_file_limit | default(65536) }}
-LimitNPROC={{ vault_systemd_file_limit | default(65536) }}
-
-# User and group
 User={{ vault_user }}
 Group={{ vault_group }}
-
-# Environment variables
-Environment="VAULT_ADDR=https://127.0.0.1:8200"
-
-# Security hardening
-PrivateTmp=yes
-ProtectSystem=full
-ProtectHome=yes
+ExecStart={{ vault_bin_path }} server -config={{ vault_home }}/vault.hcl
+ExecReload=/bin/kill --signal HUP $MAINPID
+KillMode=process
+KillSignal=SIGINT
+Restart={{ vault_systemd_restart_policy }}
+RestartSec={{ vault_systemd_restart_sec }}
+LimitNOFILE=65536
+LimitNPROC=65536
+AmbientCapabilities=CAP_IPC_LOCK
+CapabilityBoundingSet=CAP_IPC_LOCK
 NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
 PrivateDevices=yes
+SecureBits=keep-caps
+WorkingDirectory={{ vault_home }}
+Environment=VAULT_ADDR={{ vault_local_api_addr }}
 
 [Install]
 WantedBy=multi-user.target

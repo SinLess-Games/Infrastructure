@@ -13,10 +13,9 @@
   timeout: "{{ dns_query_timeout | int }}"
   loop: "{{ dns_test_domains }}"
   register: dns__verification_tests
-  retries: "{{ dns_verify_attempts | int }}"
-  delay: 2
-  until: dns__verification_tests is succeeded and dns__verification_tests.rc == 0
+  retries: 1
   failed_when: false
+  ignore_errors: true
   changed_when: false
 
 - name: Set DNS verification success count

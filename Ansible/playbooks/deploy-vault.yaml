@@ -2,108 +2,131 @@
 # =============================================================================
 # Vault Deployment Playbook
 # =============================================================================
-# Purpose:
-#   - Deploy Vault VMs using the shared Proxmox VM Terraform module
-#   - Render service-specific Terraform configuration from group_vars/vault
-#   - Execute Terraform via Taskfile
-# =============================================================================
 
-- name: Prepare controller SSH state for Vault access
+- name: Deploy Vault VMs on Proxmox
   hosts: localhost
   gather_facts: false
   connection: local
-  become: true
-
-  vars:
-    vault_controller_user: "{{ lookup('env', 'USER') }}"
-    vault_controller_home: "{{ lookup('env', 'HOME') }}"
-
-  tasks:
-    - name: Ensure controller SSH directory exists
-      ansible.builtin.file:
-        path: "{{ vault_controller_home }}/.ssh"
-        state: directory
-        owner: "{{ vault_controller_user }}"
-        group: "{{ vault_controller_user }}"
-        mode: "0700"
-
-    - name: Ensure controller known_hosts is writable by the current user
-      ansible.builtin.file:
-        path: "{{ vault_controller_home }}/.ssh/known_hosts"
-        state: touch
-        owner: "{{ vault_controller_user }}"
-        group: "{{ vault_controller_user }}"
-        mode: "0600"
-
-- name: Deploy Vault cluster with Terraform
-  hosts: localhost
-  gather_facts: false
-  run_once: true
-  connection: local
+  any_errors_fatal: true
 
   vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/vault/main.yaml
+    - ../group_vars/vault/policies.yaml
+    - ../group_vars/vault/secrets-engines.yaml
+    - ../group_vars/vault/users.yaml
+    - ../group_vars/vault/vault-secrets.yaml
     - ../group_vars/vault/vault-vms.yaml
+
+  vars:
+    ansible_python_interpreter: "{{ playbook_dir | dirname }}/.venv/bin/python"
 
   roles:
     - role: vault
       vars:
         vault_role_phases: ["deploy"]
-      tags: ["deploy"]
+      tags:
+        - vault
+        - deploy
 
-- name: Configure Vault nodes
+- name: Wait for Vault nodes to become reachable
+  hosts: vault
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/vault/main.yaml
+    - ../group_vars/vault/policies.yaml
+    - ../group_vars/vault/secrets-engines.yaml
+    - ../group_vars/vault/users.yaml
+    - ../group_vars/vault/vault-secrets.yaml
+    - ../group_vars/vault/vault-vms.yaml
+
+  tasks:
+    - name: Wait for SSH on Vault nodes
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: "{{ vault_wait_for_ssh_timeout | default(900) }}"
+        connect_timeout: 10
+      tags:
+        - vault
+        - wait
+
+    - name: Gather facts once SSH is available
+      ansible.builtin.setup:
+      tags:
+        - vault
+        - wait
+
+- name: Configure Vault Raft cluster
   hosts: vault
   gather_facts: true
   become: true
+  any_errors_fatal: true
 
   vars_files:
-    - ../group_vars/vault/vault-vms.yaml
-    - ../group_vars/vault/users.yaml
-    - ../group_vars/vault/policies.yaml
+    - ../group_vars/all/ansible.yaml
     - ../group_vars/vault/main.yaml
+    - ../group_vars/vault/policies.yaml
     - ../group_vars/vault/secrets-engines.yaml
+    - ../group_vars/vault/users.yaml
+    - ../group_vars/vault/vault-secrets.yaml
+    - ../group_vars/vault/vault-vms.yaml
     - ../group_vars/all/packages.yaml
     - ../group_vars/all/zsh.yaml
     - ../group_vars/all/users.yaml
-    - ../group_vars/vault/vault-secrets.yaml
+    - ../group_vars/all/ssh.yaml
 
   vars:
-    # Only install essential packages for Vault nodes
     packages_role_groups:
       - production
       - shell
+    dns_servers: "{{ vault_dns_servers }}"
+    dns_search_domains:
+      - "{{ vault_domain }}"
+      - local
+
+  pre_tasks:
+    - name: Validate Vault inventory and cluster definitions align
+      ansible.builtin.assert:
+        that:
+          - groups['vault'] | length == vault_cluster_nodes | length
+        fail_msg: "Inventory group 'vault' must match the number of configured vault_cluster_nodes."
+      run_once: true
+      tags:
+        - vault
+        - validate
 
   roles:
     - role: dns-resolver
-      tags: ["configure", "dns"]
-    
-    - role: users
-      tags: ["configure", "users"]
+      tags:
+        - vault
+        - dns
 
     - role: packages
-      tags: ["configure", "packages"]
-    
+      tags:
+        - vault
+        - packages
+
+    - role: users
+      tags:
+        - vault
+        - users
+
     - role: shell-config
-      tags: ["configure", "shell"]
-    
+      tags:
+        - vault
+        - shell
+
     - role: ssh
-      tags: ["configure", "sshd"]
-  
+      tags:
+        - vault
+        - ssh
+
     - role: vault
       vars:
         vault_role_phases: ["configure"]
-      tags: ["configure"]
-
-    - role: vault
-      vars:
-        vault_role_phases: ["setup"]
-      tags: ["setup"]
-
-    - role: vault
-      vars:
-        vault_role_phases: ["secrets"]
-      tags: ["secrets"]
-
-    - role: vault
-      vars:
-        vault_role_phases: ["users"]
-      tags: ["users"]
+      tags:
+        - vault
+        - configure

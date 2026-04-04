@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# SSH :: Users :: Configure Authorized Principals for SSH certificates
+# =============================================================================
+
+- name: Ensure AuthorizedPrincipalsFile directory exists
+  ansible.builtin.file:
+    path: "{{ ssh_authorized_principals_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Render AuthorizedPrincipalsFile for SSH users
+  ansible.builtin.copy:
+    dest: "{{ ssh_authorized_principals_dir }}/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {% for principal in (item.ssh_principals | default([item.name])) %}
+      {{ principal }}
+      {% endfor %}
+  loop: "{{ ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true

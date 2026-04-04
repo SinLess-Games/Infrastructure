@@ -74,6 +74,7 @@ proxmox_roles:
       - "VM.Config.Memory"
       - "VM.Config.Network"
       - "VM.Config.Options"
+      - "VM.Console"
       - "VM.Migrate"
       - "VM.PowerMgmt"
       - "VM.GuestAgent.Audit"

@@ -1,7 +1,0 @@
----
-# =============================================================================
-# Postgres Deploy Role - Defaults
-# =============================================================================
-
-postgres_repo_root: "{{ playbook_dir | dirname | dirname }}"
-postgres_terraform_dir: "{{ postgres_repo_root }}/Terraform"

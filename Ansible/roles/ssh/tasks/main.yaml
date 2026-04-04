@@ -494,6 +494,10 @@
     - name: Install authorized_keys for users
       ansible.builtin.import_tasks: users/copy-keys.yaml
 
+    - name: Install AuthorizedPrincipals files for users
+      ansible.builtin.import_tasks: users/configure-principals.yaml
+      when: ssh_ca_enabled | default(false) | bool
+
     - name: Install SSH client config for users
       ansible.builtin.import_tasks: users/copy-config.yaml
 

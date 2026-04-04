@@ -2,6 +2,54 @@
 vault_role_phases:
   - deploy
   - configure
-  - setup
-  - secrets
-  - users
+
+vault_repo_root: "{{ playbook_dir | dirname | dirname }}"
+vault_primary_host: "{{ (groups['vault'] | default([])) | first | default('vault-01') }}"
+vault_proxmox_api_user: "root@pam"
+
+vault_service_name: "vault"
+vault_disable_mlock: true
+vault_download_url: "https://releases.hashicorp.com/vault/{{ vault_version }}/vault_{{ vault_version }}_linux_amd64.zip"
+vault_archive_name: "vault_{{ vault_version }}_linux_amd64.zip"
+
+vault_wait_for_ssh_timeout: 900
+vault_proxmox_clone_timeout: 1800
+vault_proxmox_api_retries: 5
+vault_proxmox_api_retry_delay: 3
+
+vault_tls_local_dir: "{{ vault_unseal_keys_output_dir }}/pki"
+vault_tls_ca_common_name: "Sinless Vault Local CA"
+vault_tls_cert_days: 825
+vault_tls_ca_days: 3650
+vault_tls_key_size: 4096
+
+vault_log_file: "{{ vault_log_dir }}/vault.log"
+vault_plugin_directory: "/opt/vault/plugins"
+
+vault_tls_disable: false
+vault_service_api_port: 18200
+vault_service_cluster_port: 18201
+vault_local_api_addr: "{{ vault_api_addr_protocol }}://{{ ansible_host | default(inventory_hostname) }}:{{ vault_service_api_port }}"
+vault_listener_address_effective: "0.0.0.0:{{ vault_service_api_port }}"
+vault_node_api_addr_effective: "{{ vault_api_addr_protocol }}://{{ ansible_host | default(inventory_hostname) }}:{{ vault_service_api_port }}"
+vault_api_addr_effective: "{{ vault_api_addr_protocol }}://{{ vault_keepalived_virtual_ip }}:{{ vault_api_addr_port }}"
+vault_cluster_addr_effective: "{{ vault_api_addr_protocol }}://{{ ansible_host | default(inventory_hostname) }}:{{ vault_service_cluster_port }}"
+vault_bootstrap_addr: "{{ vault_api_addr_protocol }}://{{ hostvars[vault_primary_host].ansible_host | default(vault_primary_host) }}:{{ vault_service_api_port }}"
+vault_leader_api_addr: "{{ vault_api_addr_protocol }}://{{ hostvars[vault_primary_host].ansible_host | default(vault_primary_host) }}:{{ vault_service_api_port }}"
+
+vault_keepalived_vrid: 51
+vault_keepalived_priority_step: 10
+vault_keepalived_password: "vaultha01"
+vault_haproxy_bind_address: "0.0.0.0"
+vault_haproxy_frontend_port: "{{ vault_api_addr_port }}"
+vault_haproxy_stats_port: 8404
+
+vault_user_password_length: 32
+vault_user_password_charset: "ascii_letters,digits"
+vault_user_passwords_dir: "{{ vault_users_output_dir }}/passwords"
+vault_force_rotate_user_tokens: false
+vault_user_token_ttl: "768h"
+vault_user_token_display_name_prefix: "vault-user"
+
+vault_cluster_join_retries: 20
+vault_cluster_join_delay: 5

@@ -1,32 +1,16 @@
 ---
-- name: "Restart vault service"
-  systemd:
-    name: vault
+- name: Restart vault
+  ansible.builtin.systemd:
+    name: "{{ vault_service_name }}"
     state: restarted
     daemon_reload: true
-  listen: "restart vault"
 
-- name: "Reload vault systemd daemon"
-  systemd:
-    daemon_reload: true
-  listen: "reload vault systemd"
-
-- name: "Restart haproxy service"
-  systemd:
+- name: Restart haproxy
+  ansible.builtin.systemd:
     name: haproxy
     state: restarted
-  listen: "restart haproxy"
 
-- name: "Restart keepalived service"
-  systemd:
+- name: Restart keepalived
+  ansible.builtin.systemd:
     name: keepalived
     state: restarted
-  listen: "restart keepalived"
-
-- name: "Enable and start vault service"
-  systemd:
-    name: vault
-    state: started
-    enabled: true
-    daemon_reload: true
-  listen: "start vault"

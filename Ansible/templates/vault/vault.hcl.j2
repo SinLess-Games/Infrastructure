@@ -1,66 +1,43 @@
-# =====================================================================
-# Vault Configuration Template
-# Location: Ansible/templates/vault/vault.hcl.j2
-# =====================================================================
+ui = {{ vault_ui_enabled | bool | lower }}
+disable_mlock = {{ vault_disable_mlock | bool | lower }}
+cluster_name = "{{ vault_cluster_name }}"
 
-ui = true
-disable_mlock = {{ vault_disable_mlock | default(true) | bool | lower }}
-cluster_name = "{{ vault_cluster_name | default('vault-cluster') }}"
-
-# ---------------------------------------------------------------------
-# Storage Backend (Integrated Storage - Raft)
-# ---------------------------------------------------------------------
 storage "raft" {
-  path    = "{{ vault_storage_path | default('/opt/vault/data') }}"
+  path    = "{{ vault_data_dir }}"
   node_id = "{{ inventory_hostname }}"
-
-  {% if vault_raft_retry_join is defined %}
-  {% for join in vault_raft_retry_join %}
+{% if vault_raft_retry_join_enabled | bool and inventory_hostname != vault_primary_host %}
+{% for peer in vault_peer_nodes %}
   retry_join {
-    leader_api_addr = "{{ join.leader_api_addr }}"
-    {% if join.leader_ca_cert_file is defined %}
-    leader_ca_cert_file = "{{ join.leader_ca_cert_file }}"
-    {% endif %}
-    {% if join.auto_join is defined %}
-    auto_join        = "{{ join.auto_join }}"
-    auto_join_scheme = "{{ join.auto_join_scheme | default('https') }}"
-    {% endif %}
+    leader_api_addr = "{{ vault_api_addr_protocol }}://{{ hostvars[peer].ansible_host | default(peer) }}:{{ vault_service_api_port }}"
+    leader_ca_cert_file = "{{ vault_tls_ca_cert_file }}"
   }
-  {% endfor %}
-  {% endif %}
+{% endfor %}
+{% endif %}
 }
 
-# ---------------------------------------------------------------------
-# Listener
-# ---------------------------------------------------------------------
 listener "tcp" {
-  address          = "{{ vault_listener_address | default('0.0.0.0:8200') }}"
-  cluster_address  = "{{ vault_cluster_addr_ip | default(ansible_host | default(inventory_hostname)) }}:{{ vault_cluster_addr_port | default(8201) }}"
-  tls_disable      = {{ vault_tls_disable | default(false) | bool | lower }}
-
-  {% if not vault_tls_disable %}
-  tls_cert_file    = "{{ vault_tls_cert_file }}"
-  tls_key_file     = "{{ vault_tls_key_file }}"
-  {% endif %}
+  address         = "{{ vault_listener_address_effective }}"
+  cluster_address = "{{ ansible_host | default(inventory_hostname) }}:{{ vault_service_cluster_port }}"
+  tls_disable     = {{ vault_tls_disable | bool | lower }}
+{% if not (vault_tls_disable | bool) %}
+  tls_cert_file   = "{{ vault_tls_cert_file }}"
+  tls_key_file    = "{{ vault_tls_key_file }}"
+  tls_client_ca_file = "{{ vault_tls_ca_cert_file }}"
+{% endif %}
 }
 
-# ---------------------------------------------------------------------
-# Telemetry
-# ---------------------------------------------------------------------
+api_addr = "{{ vault_api_addr_effective }}"
+cluster_addr = "{{ vault_cluster_addr_effective }}"
+plugin_directory = "{{ vault_plugin_directory }}"
+log_level = "{{ vault_log_level }}"
+
+default_lease_ttl = "{{ vault_default_lease_duration }}"
+max_lease_ttl = "{{ vault_max_lease_duration }}"
+
 telemetry {
   prometheus_retention_time = "24h"
   disable_hostname = true
 }
-
-# ---------------------------------------------------------------------
-# API & Cluster Addresses
-# ---------------------------------------------------------------------
-api_addr     = "{{ vault_api_addr }}"
-cluster_addr = "{{ vault_cluster_addr }}"
-
-# ---------------------------------------------------------------------
-# Auto-Unseal
-# ---------------------------------------------------------------------
 
 {% if vault_seal_type == 'transit' %}
 seal "transit" {
@@ -71,32 +48,4 @@ seal "transit" {
   mount_path         = "{{ vault_transit_mount_path | default('transit') }}"
   tls_skip_verify    = {{ vault_transit_skip_verify | default(false) | bool | lower }}
 }
-{% elif vault_seal_type == 'awskms' %}
-seal "awskms" {
-  region     = "{{ vault_aws_region }}"
-  kms_key_id = "{{ vault_aws_kms_key_id }}"
-}
-{% elif vault_seal_type == 'azurekeyvault' %}
-seal "azurekeyvault" {
-  tenant_id      = "{{ vault_azure_tenant_id }}"
-  client_id      = "{{ vault_azure_client_id }}"
-  client_secret  = "{{ vault_azure_client_secret }}"
-  vault_name     = "{{ vault_azure_vault_name }}"
-  key_name       = "{{ vault_azure_key_name }}"
-}
 {% endif %}
-
-# ---------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------
-log_level = "{{ vault_log_level | default('info') }}"
-
-# ---------------------------------------------------------------------
-# Plugin Directory
-# ---------------------------------------------------------------------
-plugin_directory = "{{ vault_plugin_directory | default('/opt/vault/plugins') }}"
-
-# ---------------------------------------------------------------------
-# Audit Logging
-# ---------------------------------------------------------------------
-# NOTE: Vault audit devices must be enabled via the API/CLI after startup.

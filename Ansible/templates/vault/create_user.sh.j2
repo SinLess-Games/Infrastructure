@@ -1,39 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-# Variables
-VAULT_ADDR="{{ vault_addr | default('https://10.10.10.180:8200') }}"
-VAULT_SKIP_VERIFY="true"
-VAULT_TOKEN="{{ vault_token }}"
-VAULT_BIN="{{ vault_vault_bin | default('/usr/local/bin/vault') }}"
-USERNAME="{{ user_item.name }}"
-POLICIES="{{ user_item.policies | join(',') }}"
+: "${VAULT_ADDR:?VAULT_ADDR is required}"
+: "${VAULT_TOKEN:?VAULT_TOKEN is required}"
 
-# Export for vault CLI
-export VAULT_ADDR
-export VAULT_SKIP_VERIFY
-export VAULT_TOKEN
+USERNAME="${1:?username required}"
+PASSWORD="${2:?password required}"
+POLICIES="${3:-default}"
 
-# Check if user exists
-user_exists=$( $VAULT_BIN read -format=json auth/userpass/users/$USERNAME 2>/dev/null | jq -r '.data.username // empty' )
+export VAULT_CACERT="${VAULT_CACERT:-{{ vault_tls_ca_cert_file }}}"
 
-# Create user if doesn't exist
-if [ -z "$user_exists" ]; then
-  echo "Creating user: $USERNAME"
-  $VAULT_BIN write auth/userpass/users/$USERNAME \
-    password="temp_pass_${USERNAME}_$(date +%s)" \
-    policies="$POLICIES" 2>&1
-else
-  echo "User $USERNAME already exists, updating policies..."
-  $VAULT_BIN write auth/userpass/users/$USERNAME \
-    policies="$POLICIES" 2>&1
-fi
+vault write "auth/userpass/users/${USERNAME}" \
+  password="${PASSWORD}" \
+  token_policies="${POLICIES}" >/dev/null
 
-# Generate token for the user (this creates an orphan token for automation)
-token_output=$( $VAULT_BIN token create \
-  -format=json \
-  -policies="$POLICIES" \
-  -display-name="token_${USERNAME}" \
-  -ttl=720h 2>&1 )
-
-echo "$token_output"
+printf 'configured user %s\n' "${USERNAME}"

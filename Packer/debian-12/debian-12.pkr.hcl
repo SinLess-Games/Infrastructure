@@ -10,7 +10,7 @@ packer {
 
 # Packer variables
 variable "proxmox_endpoint" {
-  description = "Proxmox API endpoint URL"
+  description = "Proxmox API endpoint URL (for example: https://pve-01:8006/api2/json)"
   type        = string
 }
 
@@ -27,8 +27,19 @@ variable "proxmox_api_token_secret" {
 }
 
 variable "proxmox_node" {
-  description = "Proxmox node for building VMs"
+  description = "Proxmox cluster node name for VM build placement (for example: pve-01, not an IP address)"
   type        = string
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9._-]*$", var.proxmox_node)) && !can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", var.proxmox_node))
+    error_message = "Proxmox node must be a Proxmox node name (for example pve-01), not an IP address."
+  }
+}
+
+variable "proxmox_insecure_skip_tls_verify" {
+  description = "Skip TLS verification when connecting to Proxmox API"
+  type        = bool
+  default     = true
 }
 
 variable "proxmox_iso_storage" {
@@ -40,7 +51,7 @@ variable "proxmox_iso_storage" {
 variable "proxmox_vm_storage" {
   description = "Proxmox VM disk storage pool"
   type        = string
-  default     = "vmdisks"
+  default     = "vm_disks_01"
 }
 
 variable "vm_name" {
@@ -89,10 +100,10 @@ variable "debian_iso_checksum" {
 source "proxmox-iso" "debian12" {
   # Proxmox connection
   proxmox_url              = var.proxmox_endpoint
-  insecure_skip_tls_verify = true
   username                 = var.proxmox_api_token_id
   token                    = var.proxmox_api_token_secret
   node                     = var.proxmox_node
+  insecure_skip_tls_verify = var.proxmox_insecure_skip_tls_verify
 
   # VM Configuration
   vm_id   = 9001
@@ -126,8 +137,12 @@ source "proxmox-iso" "debian12" {
     memory = 16
   }
 
-  # ISO configuration  
-  iso_file = "${var.proxmox_iso_storage}:iso/debian-12.13.0-amd64-netinst.iso"
+  # ISO configuration
+  boot_iso {
+    type     = "scsi"
+    iso_file = "${var.proxmox_iso_storage}:iso/debian-12.13.0-amd64-netinst.iso"
+    unmount  = true
+  }
 
   # Boot and firmware
   bios = "seabios"
@@ -168,8 +183,6 @@ source "proxmox-iso" "debian12" {
   template_name        = var.vm_name
   template_description = "Debian ${var.debian_version} template built by Packer"
 
-  # Enable template mode
-  unmount_iso = true
 }
 
 # Build configuration
