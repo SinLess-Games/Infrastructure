@@ -21,6 +21,7 @@
 
   vars:
     proxmox_node_playbook: true
+    proxmox_join_only: false
     ssh_role_manage_user_materials: false
     # Permissions role defaults (normally from role defaults/main.yaml)
     proxmox_permissions_enabled: true
@@ -62,9 +63,12 @@
     # Phase 0: Gather facts early with timeout
     # -------------------------------------------------------------------------
     - role: ssh
+      when: not (proxmox_join_only | bool)
       tags: [ssh, common]
 
     - role: proxmox
+      vars:
+        proxmox_role_phases: "{{ ['cluster'] if (proxmox_join_only | bool) else ['node', 'cluster', 'hardware', 'certs', 'networking', 'storage', 'permissions'] }}"
       tags: [proxmox]
 
   tasks:

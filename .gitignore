@@ -29,3 +29,4 @@ terraform.tfstate
 Ansible/roles/lablabs.rke2
 .secrets/
 .codex
+notes.md

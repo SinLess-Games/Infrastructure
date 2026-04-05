@@ -14,11 +14,11 @@ proxmox_node_interfaces:
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
 
-  # pve-02:
-  #   enp0s25:
-  #     inet: "10.10.10.15"
-  #     netmask: "255.255.255.0"
-  #     gateway: "10.10.10.1"
+  pve-02:
+    enp0s25:
+      inet: "10.10.10.15"
+      netmask: "255.255.255.0"
+      gateway: "10.10.10.1"
 
   pve-03:
     eno1:
@@ -126,8 +126,17 @@ proxmox_node_bridges:
       stp: true
       stp_forward_delay: 0
 
-
-  pve-02: null
+  pve-02:
+    vmbr0:
+      description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
+      vlan_id: 1
+      ports:
+        - enp0s25
+      address: "10.10.10.15/24"
+      vlan_aware: true
+      auto: true
+      stp: true
+      stp_forward_delay: 0
 
 
   pve-03:

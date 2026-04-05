@@ -21,7 +21,7 @@
 
 - name: Deploy sshd configuration drop-in
   ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/ssh/sshd_config.j2"
+    src: "{{ role_path }}/templates/ssh/sshd_config.j2"
     dest: /etc/ssh/sshd_config.d/50-ansible-ssh.conf
     owner: root
     group: root

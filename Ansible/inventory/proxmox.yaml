@@ -11,6 +11,7 @@ proxmox:
       -o PubkeyAcceptedAlgorithms=+ssh-rsa
       -o CertificateFile=/home/sinless777/Projects/Infrastructure/.outputs/ssh/root/id_ed25519-cert.pub
       -o IdentitiesOnly=yes
+      -o IdentityAgent=none
     proxmox_cluster_name: Sinless-Games
     proxmox_cluster_network: 10.10.10.0/24
   children:
@@ -18,8 +19,8 @@ proxmox:
       hosts:
         pve-01:
           ansible_host: 10.10.10.14
-        # pve-02:
-        #   ansible_host: 10.10.10.15
+        pve-02:
+          ansible_host: 10.10.10.15
         pve-03:
           ansible_host: 10.10.10.16
         pve-04:
@@ -33,6 +34,7 @@ proxmox:
 
     pve_cluster_members:
       hosts:
+        pve-02:
         pve-03:
         pve-04:
         pve-05:

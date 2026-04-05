@@ -54,7 +54,7 @@
 
 - name: Deploy authorized_keys from template
   ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/ssh/authorized_keys.j2"
+    src: "{{ role_path }}/templates/ssh/authorized_keys.j2"
     dest: "{{ ssh__authorized_keys_path }}"
     owner: "{{ ssh.authorized_keys.owner | default('root') }}"
     group: "{{ ssh.authorized_keys.group | default('root') }}"
