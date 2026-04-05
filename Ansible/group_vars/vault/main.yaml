@@ -128,3 +128,7 @@ vault_log_level: "info"
 
 # UI Configuration
 vault_ui_enabled: true
+
+# Client monitoring / activity counters
+vault_client_monitoring_enabled: true
+vault_client_monitoring_retention_months: 60

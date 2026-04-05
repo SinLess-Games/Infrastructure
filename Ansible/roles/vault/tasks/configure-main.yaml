@@ -574,6 +574,41 @@
   become: false
   run_once: true
 
+- name: Query Vault client monitoring configuration
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/internal/counters/config"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code: 200
+    return_content: true
+  register: vault_client_monitoring_config
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Enable Vault client monitoring with requested retention
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/internal/counters/config"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      enabled: "{{ vault_client_monitoring_enabled | bool | ternary('enable', 'disable') }}"
+      retention_months: "{{ vault_client_monitoring_retention_months | int }}"
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - (vault_client_monitoring_config.json.data.enabled | default('default-disabled')) != (vault_client_monitoring_enabled | bool | ternary('enable', 'disable'))
+      or (vault_client_monitoring_config.json.data.retention_months | default(48) | int) != (vault_client_monitoring_retention_months | int)
+  no_log: true
+
 - name: Query enabled audit devices
   ansible.builtin.uri:
     url: "{{ vault_bootstrap_addr }}/v1/sys/audit"

@@ -1,0 +1,26 @@
+[Unit]
+Description=pgAdmin 4 container
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+ExecStartPre=-/usr/bin/docker rm -f {{ postgres_pgadmin_container_name }}
+ExecStart=/usr/bin/docker run --rm \
+  --name {{ postgres_pgadmin_container_name }} \
+  --network host \
+  -e PGADMIN_DEFAULT_EMAIL={{ postgres_pgadmin_default_email }} \
+  -e PGADMIN_DEFAULT_PASSWORD={{ postgres_pgadmin_password }} \
+  -e PGADMIN_LISTEN_PORT={{ postgres_pgadmin_backend_port }} \
+  -e PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION=True \
+  -e PGADMIN_CONFIG_LOGIN_BANNER='"Managed by Ansible"' \
+  -e PGADMIN_SERVER_JSON_FILE=/pgadmin4/servers.json \
+  -v {{ postgres_pgadmin_data_dir }}:/var/lib/pgadmin \
+  -v {{ postgres_pgadmin_config_dir }}/servers.json:/pgadmin4/servers.json:ro \
+  {{ postgres_pgadmin_container_image }}
+ExecStop=/usr/bin/docker stop {{ postgres_pgadmin_container_name }}
+
+[Install]
+WantedBy=multi-user.target

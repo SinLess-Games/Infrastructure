@@ -13,9 +13,9 @@ postgres_proxmox_api_token_file: "{{ infra_proxmox_api_token_file }}"
 
 # Vault secrets (KV v2)
 postgres_vault_kv_path: "ansible/postgres"
-postgres_vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('https://vault.local.sinlessgames.com', true) }}"
+postgres_vault_addr: "https://10.10.10.180:8200"
 postgres_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
-postgres_vault_skip_verify: "{{ lookup('env', 'VAULT_SKIP_VERIFY') | default('true', true) }}"
+postgres_vault_skip_verify: true
 postgres_vault_token_file: "{{ playbook_dir }}/../../.outputs/vault/unseal-keys.json"
 postgres_vault_required_keys:
   - "superuser_password"
@@ -25,12 +25,15 @@ postgres_vault_required_keys:
   - "pganalyze_api_key"
   - "pgadmin_password"
   - "keepalived_password"
+  - "users"
+  - "databases"
 
 # Cluster metadata
 postgres_cluster_name: "postgres-ha"
 postgres_node_name_prefix: "postgres"
 postgres_node_count: "{{ postgres_nodes | length }}"
-postgres_vm_id_start: 206
+postgres_vm_id_start: 103
+postgres_major_version: 17
 
 # Proxmox placement
 postgres_target_nodes:
@@ -38,6 +41,10 @@ postgres_target_nodes:
   - "pve-04"
   - "pve-05"
 postgres_clone_template: "debian-13-template"
+postgres_clone_template_by_node:
+  pve-01: "debian-13-template-pve-01"
+  pve-04: "debian-13-template-pve-04"
+  pve-05: "debian-13-template-pve-05"
 
 # VM sizing
 postgres_cpu_cores: 4
@@ -45,6 +52,10 @@ postgres_cpu_sockets: 1
 postgres_memory_mb: 8192
 postgres_disk_size: "80G"
 postgres_storage: "VM_Disks"
+postgres_storage_by_node:
+  pve-01: "vm_disks_01"
+  pve-04: "vm_disks_04"
+  pve-05: "vm_disks_05"
 
 # Networking
 postgres_network_bridge: "vmbr40"
@@ -52,7 +63,7 @@ postgres_vlan_id: 40
 postgres_cidr_subnet: "/24"
 postgres_network_subnet: "10.10.40.0/24"
 postgres_gateway: "10.10.40.1"
-postgres_nameservers: "10.10.40.1 1.1.1.1"
+postgres_nameservers: "10.10.10.1 10.10.10.12 1.1.1.1"
 postgres_vip_ip: "10.10.40.50"
 postgres_vip_cidr: 24
 postgres_vip_iface: "{{ ansible_default_ipv4.interface | default('eth0') }}"
@@ -62,18 +73,24 @@ postgres_vip_dns_name_suggestion: "postgres-vip.infra.local"
 postgres_nodes:
   - name: "postgres-01"
     ip: "10.10.40.2"
-    vmid: 206
+    vmid: 103
     target_node: "pve-01"
+    vlan_id: 40
+    proxmox_vlan_tagged: false
     keepalived_priority: 140
   - name: "postgres-02"
     ip: "10.10.40.3"
-    vmid: 207
+    vmid: 104
     target_node: "pve-04"
+    vlan_id: 40
+    proxmox_vlan_tagged: false
     keepalived_priority: 130
   - name: "postgres-03"
     ip: "10.10.40.4"
-    vmid: 208
+    vmid: 105
     target_node: "pve-05"
+    vlan_id: 40
+    proxmox_vlan_tagged: false
     keepalived_priority: 120
 
 # Access/bootstrap
@@ -90,7 +107,7 @@ postgres_etcd_peer_port: 2380
 
 # Patroni configuration
 postgres_data_dir: "/var/lib/postgresql/patroni"
-postgres_bin_dir: "/usr/lib/postgresql/17/bin"
+postgres_bin_dir: "/usr/lib/postgresql/{{ postgres_major_version }}/bin"
 postgres_config_dir: "/etc/patroni"
 patroni:
   scope: "postgres-ha"
@@ -152,10 +169,11 @@ postgres_database_names:
   - boundary
   - defectdojo
 
+postgres_users: []
+postgres_databases: []
+
 # Package installation
 postgres_packages_required:
-  - "postgresql"
-  - "postgresql-contrib"
   - "python3-psycopg2"
   - "python3-etcd"
   - "python3-etcd3"
@@ -172,7 +190,6 @@ postgres_packages_optional:
   - "prometheus-postgres-exporter"
   - "prometheus-pgbouncer-exporter"
   - "prometheus-patroni-exporter"
-  - "pgadmin4"
 
 postgres_pganalyze_enabled: true
 postgres_pganalyze_install_method: "container"
@@ -186,6 +203,21 @@ postgres_patroni_exporter_enabled: true
 # pganalyze configuration
 postgres_pganalyze_config_path: "/etc/pganalyze-collector.conf"
 postgres_pganalyze_service_name: "pganalyze-collector"
+
+# Extension and admin UI
+postgres_pgvector_enabled: true
+postgres_pgvector_extension_name: "vector"
+postgres_pgadmin_enabled: true
+postgres_pgadmin_default_email: "postgres-admin@local.sinlessgames.com"
+postgres_pgadmin_port: 8080
+postgres_pgadmin_backend_port: 5050
+postgres_pgadmin_container_image: "docker.io/dpage/pgadmin4:latest"
+postgres_pgadmin_container_name: "pgadmin4"
+postgres_pgadmin_service_name: "pgadmin4"
+postgres_pgadmin_config_dir: "/etc/pgadmin4"
+postgres_pgadmin_data_dir: "/var/lib/pgadmin4"
+postgres_pgadmin_server_group_name: "PostgreSQL HA"
+postgres_pgadmin_vip_dns_name_suggestion: "pgadmin-postgres.infra.local"
 
 # Database provisioning
 postgres_db_provisioning_enabled: true

@@ -66,3 +66,7 @@ dns_configure_systemd_resolved: true
 # NetworkManager DNS mode (if applicable)
 # Options: default, dnsmasq, unbound, systemd-resolved, none
 dns_networkmanager_mode: systemd-resolved
+
+# Force libc resolver queries over TCP instead of UDP.
+# Useful in networks where UDP/53 is filtered but TCP/53 is permitted.
+dns_force_tcp: false

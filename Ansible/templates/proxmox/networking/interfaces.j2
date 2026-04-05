@@ -43,7 +43,7 @@ iface lo inet loopback
 {% if _port not in ns.declared_ifaces %}
 {% set _ = ns.declared_ifaces.append(_port) %}
 {% endif %}
-{% if (_bridge_cfg.get('vlan_id', 1) | int) > 1 %}
+{% if (_bridge_cfg.get('vlan_id', 1) | int) > 1 and (_bridge_cfg.get('vlan_tagged', true) | bool) %}
 {% set _vlan_port = _port ~ '.' ~ (_bridge_cfg.get('vlan_id') | string) %}
 {% if _vlan_port not in ns.vlan_ifaces %}
 {% set _ = ns.vlan_ifaces.append(_vlan_port) %}
@@ -123,7 +123,7 @@ iface {{ bond_name }} inet manual
 # ==============================================================================
 # Access VLAN bridges use per-VLAN subinterfaces instead of bridge VLAN filtering.
 {% for bridge_name, bridge_config in merged_bridges.items() | sort %}
-{% if (bridge_config.get('vlan_id', 1) | int) > 1 %}
+{% if (bridge_config.get('vlan_id', 1) | int) > 1 and (bridge_config.get('vlan_tagged', true) | bool) %}
 {% for bridge_port in bridge_config.get('ports', []) %}
 
 auto {{ bridge_port }}.{{ bridge_config.vlan_id }}
@@ -185,7 +185,7 @@ iface {{ bridge_name }} inet manual
 {% endif %}
 {% set bridge_ports = [] %}
 {% for bridge_port in bridge_config.get('ports', []) %}
-{% if (bridge_config.get('vlan_id', 1) | int) > 1 %}
+{% if (bridge_config.get('vlan_id', 1) | int) > 1 and (bridge_config.get('vlan_tagged', true) | bool) %}
 {% set _ = bridge_ports.append(bridge_port ~ '.' ~ (bridge_config.vlan_id | string)) %}
 {% else %}
 {% set _ = bridge_ports.append(bridge_port) %}

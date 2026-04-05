@@ -1,0 +1,66 @@
+- name: Resolve PostgreSQL clone template metadata
+  ansible.builtin.set_fact:
+    postgres_clone_template_name: "{{ postgres_clone_template_by_node[item.target_node] | default(postgres_clone_template) }}"
+    postgres_clone_template_info: >-
+      {{
+        postgres_existing_vm_info.proxmox_vms
+        | default([])
+        | selectattr('node', 'equalto', item.target_node)
+        | selectattr('name', 'equalto', postgres_clone_template_by_node[item.target_node] | default(postgres_clone_template))
+        | list
+        | first
+        | default({})
+      }}
+
+- name: Assert PostgreSQL clone template exists on target node
+  ansible.builtin.assert:
+    that:
+      - postgres_clone_template_info != {}
+      - postgres_clone_template_info.vmid is defined
+    fail_msg: >-
+      Unable to find clone template '{{ postgres_clone_template_name }}'
+      on node '{{ item.target_node }}'.
+
+- name: Request PostgreSQL VM clone from Proxmox API
+  ansible.builtin.uri:
+    url: "{{ postgres_proxmox_api_url }}/nodes/{{ item.target_node }}/qemu/{{ postgres_clone_template_info.vmid }}/clone"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ postgres_proxmox_full_token_id }}={{ postgres_proxmox_token_secret }}"
+    validate_certs: "{{ not (postgres_proxmox_tls_insecure | bool) }}"
+    body_format: form-urlencoded
+    body:
+      newid: "{{ item.vmid }}"
+      name: "{{ item.name }}"
+      full: "1"
+      storage: "{{ postgres_storage_by_node[item.target_node] | default(postgres_storage) }}"
+      target: "{{ item.target_node }}"
+    status_code: 200
+    return_content: true
+  register: postgres_clone_request
+  no_log: true
+
+- name: Wait for PostgreSQL VM clone task to finish
+  ansible.builtin.uri:
+    url: "{{ postgres_proxmox_api_url }}/nodes/{{ item.target_node }}/tasks/{{ postgres_clone_request.json.data | urlencode }}/status"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ postgres_proxmox_full_token_id }}={{ postgres_proxmox_token_secret }}"
+    validate_certs: "{{ not (postgres_proxmox_tls_insecure | bool) }}"
+    status_code: 200
+    return_content: true
+  register: postgres_clone_status
+  until:
+    - postgres_clone_status.json.data is defined
+    - postgres_clone_status.json.data.status == 'stopped'
+  retries: 180
+  delay: 5
+  no_log: true
+
+- name: Assert PostgreSQL VM clone task succeeded
+  ansible.builtin.assert:
+    that:
+      - postgres_clone_status.json.data.exitstatus | default('') == 'OK'
+    fail_msg: >-
+      PostgreSQL VM clone failed for {{ item.name }} on {{ item.target_node }}:
+      {{ postgres_clone_status.json.data | default({}) }}

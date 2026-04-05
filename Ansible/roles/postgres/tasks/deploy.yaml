@@ -1,0 +1,200 @@
+---
+- name: Assert PostgreSQL deployment variables are defined
+  ansible.builtin.assert:
+    that:
+      - postgres_nodes | length > 0
+      - postgres_clone_template | length > 0
+      - postgres_proxmox_api_url | length > 0
+      - postgres_proxmox_api_token_file | length > 0
+    fail_msg: "Missing one or more required PostgreSQL deployment variables."
+
+- name: Read Proxmox API token file for PostgreSQL deployment
+  ansible.builtin.slurp:
+    src: "{{ postgres_repo_root }}/{{ postgres_proxmox_api_token_file }}"
+  register: postgres_proxmox_token_file
+  no_log: true
+
+- name: Decode Proxmox API token file contents
+  ansible.builtin.set_fact:
+    postgres_proxmox_token_file_text: "{{ postgres_proxmox_token_file.content | b64decode }}"
+  no_log: true
+
+- name: Parse Proxmox API token data
+  ansible.builtin.set_fact:
+    postgres_proxmox_full_token_id: >-
+      {{
+        (
+          postgres_proxmox_token_file_text.split('FULL_TOKENID=')[1].splitlines()[0].strip()
+          if 'FULL_TOKENID=' in postgres_proxmox_token_file_text
+          else ''
+        )
+      }}
+    postgres_proxmox_token_secret: >-
+      {{
+        (
+          postgres_proxmox_token_file_text.split('TOKEN_SECRET=')[1].splitlines()[0].strip()
+          if 'TOKEN_SECRET=' in postgres_proxmox_token_file_text
+          else ''
+        )
+      }}
+  no_log: true
+
+- name: Derive PostgreSQL Proxmox token user and token name
+  ansible.builtin.set_fact:
+    postgres_proxmox_api_user: >-
+      {{
+        postgres_proxmox_full_token_id.split('!')[0]
+        if ('!' in postgres_proxmox_full_token_id)
+        else (postgres_proxmox_api_user | default(''))
+      }}
+    postgres_proxmox_api_token_id: >-
+      {{
+        postgres_proxmox_full_token_id.split('!')[1]
+        if ('!' in postgres_proxmox_full_token_id)
+        else ''
+      }}
+  no_log: true
+
+- name: Assert Proxmox token parsing succeeded
+  ansible.builtin.assert:
+    that:
+      - postgres_proxmox_api_user | length > 0
+      - postgres_proxmox_full_token_id | length > 0
+      - postgres_proxmox_api_token_id | length > 0
+      - postgres_proxmox_token_secret | length > 0
+    fail_msg: "Unable to parse the PostgreSQL Proxmox API token file."
+
+- name: Query current PostgreSQL VMs from Proxmox
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ postgres_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (postgres_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ postgres_proxmox_api_user }}"
+    api_token_id: "{{ postgres_proxmox_api_token_id }}"
+    api_token_secret: "{{ postgres_proxmox_token_secret }}"
+    validate_certs: "{{ not (postgres_proxmox_tls_insecure | bool) }}"
+    type: qemu
+    config: current
+  register: postgres_existing_vm_info
+  retries: "{{ postgres_proxmox_api_retries }}"
+  delay: "{{ postgres_proxmox_api_retry_delay }}"
+  until: postgres_existing_vm_info is succeeded
+
+- name: Build existing PostgreSQL VM ID list
+  ansible.builtin.set_fact:
+    postgres_existing_vmids: "{{ postgres_existing_vm_info.proxmox_vms | default([]) | map(attribute='vmid') | map('int') | list }}"
+
+- name: Clone missing PostgreSQL VMs on Proxmox
+  ansible.builtin.include_tasks: clone-missing-vm.yaml
+  loop: "{{ postgres_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: (item.vmid | int) not in postgres_existing_vmids
+
+- name: Update PostgreSQL VM cloud-init and hardware settings
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ postgres_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (postgres_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ postgres_proxmox_api_user }}"
+    api_token_id: "{{ postgres_proxmox_api_token_id }}"
+    api_token_secret: "{{ postgres_proxmox_token_secret }}"
+    validate_certs: "{{ not (postgres_proxmox_tls_insecure | bool) }}"
+    vmid: "{{ item.vmid }}"
+    node: "{{ item.target_node }}"
+    name: "{{ item.name }}"
+    cores: "{{ postgres_cpu_cores }}"
+    sockets: "{{ postgres_cpu_sockets }}"
+    memory: "{{ postgres_memory_mb }}"
+    onboot: "{{ postgres_start_at_node_boot | bool }}"
+    protection: "{{ postgres_protection | bool }}"
+    agent: "{{ postgres_agent_enabled | ternary('enabled=1', '0') }}"
+    ciuser: "{{ postgres_default_user }}"
+    sshkeys: "{{ postgres_ssh_keys | join('\n') }}"
+    nameservers: "{{ postgres_nameservers }}"
+    tags: "{{ postgres_tags | join(',') }}"
+    net:
+      net0: >-
+        virtio,bridge={{ postgres_network_bridge }}{% if (item.proxmox_vlan_tagged | default(true) | bool) and ((item.vlan_id | default(postgres_vlan_id) | int) > 0) %},tag={{ item.vlan_id | default(postgres_vlan_id) }}{% endif %}
+    ipconfig:
+      ipconfig0: "ip={{ item.ip }}{{ postgres_cidr_subnet }},gw={{ postgres_gateway }}"
+    startup: "order={{ postgres_startup_order }}"
+    update_unsafe: true
+    update: true
+    state: present
+  loop: "{{ postgres_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Refresh PostgreSQL VM information after provisioning
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ postgres_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (postgres_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ postgres_proxmox_api_user }}"
+    api_token_id: "{{ postgres_proxmox_api_token_id }}"
+    api_token_secret: "{{ postgres_proxmox_token_secret }}"
+    validate_certs: "{{ not (postgres_proxmox_tls_insecure | bool) }}"
+    type: qemu
+    config: current
+  register: postgres_proxmox_vms_after
+  retries: "{{ postgres_proxmox_api_retries }}"
+  delay: "{{ postgres_proxmox_api_retry_delay }}"
+  until: postgres_proxmox_vms_after is succeeded
+
+- name: Resize PostgreSQL root disks when needed
+  community.proxmox.proxmox_disk:
+    api_host: "{{ postgres_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (postgres_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ postgres_proxmox_api_user }}"
+    api_token_id: "{{ postgres_proxmox_api_token_id }}"
+    api_token_secret: "{{ postgres_proxmox_token_secret }}"
+    validate_certs: "{{ not (postgres_proxmox_tls_insecure | bool) }}"
+    vmid: "{{ item.vmid }}"
+    disk: "{{ postgres_disk_name }}"
+    state: resized
+    size: "+{{ postgres_resize_amount_gb }}G"
+  vars:
+    postgres_vm_config: >-
+      {{
+        (postgres_proxmox_vms_after.proxmox_vms | default([])
+        | selectattr('vmid', 'equalto', item.vmid)
+        | first)
+      }}
+    postgres_disk_name: "{{ 'scsi0' if (postgres_vm_config.config.scsi0 is defined) else 'virtio0' }}"
+    postgres_current_disk_config: "{{ postgres_vm_config.config[postgres_disk_name] | default('') }}"
+    postgres_current_disk_size_gb: "{{ ((postgres_current_disk_config | regex_search('size=(\\d+)', '\\1') | first | default('0')) | int) }}"
+    postgres_target_disk_size_gb: "{{ postgres_disk_size | regex_replace('[^0-9]', '') | int }}"
+    postgres_resize_amount_gb: "{{ (postgres_target_disk_size_gb | int) - (postgres_current_disk_size_gb | int) }}"
+  when: (postgres_resize_amount_gb | int) > 0
+  loop: "{{ postgres_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Start PostgreSQL VMs
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ postgres_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (postgres_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ postgres_proxmox_api_user }}"
+    api_token_id: "{{ postgres_proxmox_api_token_id }}"
+    api_token_secret: "{{ postgres_proxmox_token_secret }}"
+    validate_certs: "{{ not (postgres_proxmox_tls_insecure | bool) }}"
+    vmid: "{{ item.vmid }}"
+    node: "{{ item.target_node }}"
+    state: started
+  loop: "{{ postgres_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Repair PostgreSQL guest networking after first boot
+  ansible.builtin.shell: >-
+    export ANSIBLE_CONFIG={{ postgres_repo_root }}/Ansible/ansible.cfg;
+    {{ postgres_repo_root }}/Ansible/.venv/bin/ansible
+    -i {{ postgres_repo_root }}/Ansible/inventory/proxmox.yaml
+    {{ item.target_node }}
+    -b
+    -m script
+    -a "{{ role_path }}/files/repair_guest_network.sh {{ item.vmid | string }} {{ item.ip }} {{ postgres_cidr_subnet }} {{ postgres_gateway }} '{{ postgres_nameservers }}'"
+    -o
+  args:
+    executable: /bin/bash
+  loop: "{{ postgres_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"

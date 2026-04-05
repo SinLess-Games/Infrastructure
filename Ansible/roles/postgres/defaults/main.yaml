@@ -1,0 +1,65 @@
+---
+postgres_role_phases:
+  - secrets
+  - deploy
+  - configure
+
+postgres_repo_root: "{{ playbook_dir | dirname | dirname }}"
+postgres_primary_inventory_host: "{{ postgres_primary_host | default((groups['postgres'] | default([])) | first | default(postgres_nodes[0].name)) }}"
+postgres_proxmox_api_user: "root@pam"
+postgres_proxmox_api_retries: 5
+postgres_proxmox_api_retry_delay: 3
+
+postgres_vault_secret_field_map:
+  superuser_password: postgres_superuser_password
+  replication_password: postgres_replication_password
+  pgbouncer_password: postgres_pgbouncer_password
+  pgbackrest_repo_password: postgres_pgbackrest_repo_password
+  pganalyze_api_key: postgres_pganalyze_api_key
+  pgadmin_password: postgres_pgadmin_password
+  keepalived_password: postgres_keepalived_password
+
+postgres_pgdg_keyring_dir: "/usr/share/postgresql-common/pgdg"
+postgres_pgdg_keyring_file: "{{ postgres_pgdg_keyring_dir }}/apt.postgresql.org.asc"
+postgres_pgdg_repo_file: "/etc/apt/sources.list.d/pgdg.list"
+postgres_pgdg_repo: "deb [signed-by={{ postgres_pgdg_keyring_file }}] https://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+
+postgres_versioned_packages:
+  - "postgresql-{{ postgres_major_version }}"
+  - "postgresql-client-{{ postgres_major_version }}"
+  - "postgresql-contrib-{{ postgres_major_version }}"
+
+postgres_pgvector_packages: >-
+  {{
+    postgres_pgvector_enabled | bool
+    | ternary(['postgresql-' ~ (postgres_major_version | string) ~ '-pgvector'], [])
+  }}
+
+postgres_pgadmin_container_packages:
+  - "docker.io"
+  - "python3-docker"
+
+postgres_runtime_packages: >-
+  {{
+    postgres_packages_required
+    + postgres_versioned_packages
+    + postgres_pgvector_packages
+    + (
+      postgres_pgadmin_enabled | bool
+      and postgres_pgadmin_container_image | length > 0
+    ) | ternary(postgres_pgadmin_container_packages, [])
+    + (
+      postgres_pganalyze_enabled | bool
+      and postgres_pganalyze_install_method == 'container'
+    ) | ternary(postgres_pganalyze_container_packages, [])
+  }}
+
+postgres_pgbouncer_userlist:
+  - name: "{{ patroni.superuser.username }}"
+    password: "{{ postgres_superuser_password | default('') }}"
+  - name: "pgbouncer"
+    password: "{{ postgres_pgbouncer_password | default('') }}"
+
+postgres_patroni_bootstrap_wait_retries: 30
+postgres_patroni_bootstrap_wait_delay: 5
+postgres_patroni_health_scheme: "http"

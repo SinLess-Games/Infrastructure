@@ -98,9 +98,24 @@ listen stats
     stats realm Haproxy\ Statistics
     stats refresh 30s
 
+frontend pgadmin
+    mode http
+    bind {{ postgres_vip_ip }}:{{ postgres_pgadmin_port }}
+    option httplog
+    default_backend pgadmin
+
+backend pgadmin
+    mode http
+    balance source
+    option httpchk GET /misc/ping
+    http-check expect status 200
+{% for node in postgres_nodes %}
+    server {{ node.name }} {{ node.ip }}:{{ postgres_pgadmin_backend_port }} check inter 2000 rise 2 fall 3
+{% endfor %}
+
 listen postgres-primary
-    bind *:{{ postgres_listen_port }}
-    option httpchk
+    bind {{ postgres_vip_ip }}:{{ postgres_listen_port }}
+    option httpchk GET /primary
     http-check expect status 200
     default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
 {% for node in postgres_nodes %}
@@ -108,8 +123,8 @@ listen postgres-primary
 {% endfor %}
 
 listen postgres-standby
-    bind *:{{ postgres_readonly_port }}
-    option httpchk /replica
+    bind {{ postgres_vip_ip }}:{{ postgres_readonly_port }}
+    option httpchk GET /replica
     http-check expect status 200
     default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
 {% for node in postgres_nodes %}

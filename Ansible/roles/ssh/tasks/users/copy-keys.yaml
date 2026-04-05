@@ -110,17 +110,26 @@
 # Collect authorized key material (controller-side) as delegated facts
 # -----------------------------------------------------------------------------
 
+- name: Initialize authorized_keys material map (controller, delegated facts)
+  ansible.builtin.set_fact:
+    ssh__authorized_keys_map: {}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  changed_when: false
+
 - name: Build authorized_keys material map (controller, delegated facts)
   ansible.builtin.set_fact:
-    ssh__authorized_keys_map: |-
-      {%- set out = {} -%}
-      {%- for u in ssh_role_users -%}
-      {%-   set out = out | combine({
-              u.name: {
+    ssh__authorized_keys_map: >-
+      {{
+        hostvars['localhost'].ssh__authorized_keys_map
+        | combine(
+            {
+              item.name: {
                 'public_keys': (
                   lookup(
                     'ansible.builtin.fileglob',
-                    _ssh_output_base ~ '/' ~ u.name ~ '/id_' ~ _ssh_key_type ~ '.pub',
+                    _ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ _ssh_key_type ~ '.pub',
                     wantlist=True
                   ) | sort
                 ),
@@ -128,17 +137,21 @@
                   (
                     lookup(
                       'ansible.builtin.fileglob',
-                      _ssh_output_base ~ '/' ~ u.name ~ '/id_' ~ _ssh_key_type ~ '-cert.pub',
+                      _ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ _ssh_key_type ~ '-cert.pub',
                       wantlist=True
                     ) | sort
                   ) if (_ssh_ca_enabled | bool) else []
                 ),
                 'shared_keys': [],
-                'shared_users': (u['shared-certs'] | default([]))
+                'shared_users': (item['shared-certs'] | default([]))
               }
-            }, recursive=True) -%}
-      {%- endfor -%}
-      {{ out }}
+            },
+            recursive=True
+          )
+      }}
+  loop: "{{ ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
   delegate_to: localhost
   delegate_facts: true
   run_once: true
@@ -146,26 +159,36 @@
 
 - name: Expand shared_keys from shared_users (controller, delegated facts)
   ansible.builtin.set_fact:
-    ssh__authorized_keys_map: |-
-      {%- set base = hostvars['localhost'].ssh__authorized_keys_map | default({}) -%}
-      {%- set out = {} -%}
-      {%- for uname, udata in base.items() -%}
-      {%-   set ns = namespace(shared=[]) -%}
-      {%-   for suser in (udata.shared_users | default([])) -%}
-      {%-     if suser in base -%}
-      {%-       set ns.shared = ns.shared + (base[suser].public_keys | default([])) -%}
-      {%-     endif -%}
-      {%-   endfor -%}
-      {%-   set out = out | combine({
-              uname: (
-                udata | combine(
-                  { 'shared_keys': (ns.shared | flatten | unique | sort) },
+    ssh__authorized_keys_map: >-
+      {{
+        hostvars['localhost'].ssh__authorized_keys_map
+        | combine(
+            {
+              item.key: (
+                item.value | combine(
+                  {
+                    'shared_keys': (
+                      (
+                        item.value.shared_users | default([])
+                      )
+                      | map('extract', hostvars['localhost'].ssh__authorized_keys_map)
+                      | map(attribute='public_keys')
+                      | list
+                      | flatten
+                      | unique
+                      | sort
+                    )
+                  },
                   recursive=True
                 )
               )
-            }, recursive=True) -%}
-      {%- endfor -%}
-      {{ out }}
+            },
+            recursive=True
+          )
+      }}
+  loop: "{{ (hostvars['localhost'].ssh__authorized_keys_map | default({})) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
   delegate_to: localhost
   delegate_facts: true
   run_once: true

@@ -1,0 +1,22 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "{{ postgres_cluster_name }} VIP",
+      "Group": "{{ postgres_pgadmin_server_group_name }}",
+      "Host": "{{ postgres_vip_ip }}",
+      "Port": {{ postgres_listen_port }},
+      "MaintenanceDB": "postgres",
+      "Username": "{{ patroni.superuser.username }}",
+      "SSLMode": "prefer"
+    }{% for node in postgres_nodes %},
+    "{{ loop.index + 1 }}": {
+      "Name": "{{ node.name }}",
+      "Group": "{{ postgres_pgadmin_server_group_name }}",
+      "Host": "{{ node.ip }}",
+      "Port": {{ postgres_listen_port }},
+      "MaintenanceDB": "postgres",
+      "Username": "{{ patroni.superuser.username }}",
+      "SSLMode": "prefer"
+    }{% endfor %}
+  }
+}

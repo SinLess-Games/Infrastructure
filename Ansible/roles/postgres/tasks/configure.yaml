@@ -1,0 +1,456 @@
+---
+- name: Set PostgreSQL runtime secrets from localhost cache
+  ansible.builtin.set_fact:
+    postgres_superuser_password: "{{ hostvars['localhost'].postgres_superuser_password }}"
+    postgres_replication_password: "{{ hostvars['localhost'].postgres_replication_password }}"
+    postgres_pgbouncer_password: "{{ hostvars['localhost'].postgres_pgbouncer_password }}"
+    postgres_pgbackrest_repo_password: "{{ hostvars['localhost'].postgres_pgbackrest_repo_password }}"
+    postgres_pganalyze_api_key: "{{ hostvars['localhost'].postgres_pganalyze_api_key }}"
+    postgres_pgadmin_password: "{{ hostvars['localhost'].postgres_pgadmin_password }}"
+    postgres_keepalived_password: "{{ hostvars['localhost'].postgres_keepalived_password }}"
+  no_log: true
+
+- name: Build PostgreSQL provisioning facts from Vault secrets
+  ansible.builtin.set_fact:
+    postgres_provision_users_effective: >-
+      {{
+        hostvars['localhost'].postgres_runtime_secrets.users
+        | default(postgres_users | default([]), true)
+      }}
+    postgres_provision_databases_effective: >-
+      {{
+        hostvars['localhost'].postgres_runtime_secrets.databases
+        | default(postgres_databases | default([]), true)
+      }}
+  no_log: true
+
+- name: Build PostgreSQL derived runtime facts
+  ansible.builtin.set_fact:
+    postgres_database_names_effective: >-
+      {{
+        (
+          postgres_provision_databases_effective
+          | map(attribute='name')
+          | list
+        )
+        if (postgres_provision_databases_effective | length > 0)
+        else postgres_database_names
+      }}
+    postgres_pgbouncer_userlist_effective: >-
+      {{
+        postgres_pgbouncer_userlist
+        + (
+          postgres_provision_users_effective
+          | rejectattr('name', 'equalto', patroni.superuser.username)
+          | rejectattr('name', 'equalto', 'pgbouncer')
+          | list
+        )
+      }}
+  no_log: true
+
+- name: Assert PostgreSQL runtime secrets are available
+  ansible.builtin.assert:
+    that:
+      - postgres_superuser_password | length > 0
+      - postgres_replication_password | length > 0
+      - postgres_keepalived_password | length > 0
+    fail_msg: "Required PostgreSQL runtime secrets are missing from localhost cache."
+
+- name: Assert PostgreSQL provisioning data is valid
+  ansible.builtin.assert:
+    that:
+      - not postgres_db_provisioning_enabled | bool or postgres_provision_users_effective | length > 0
+      - not postgres_db_provisioning_enabled | bool or postgres_provision_databases_effective | length > 0
+      - >-
+        not postgres_db_provisioning_enabled | bool
+        or (
+          postgres_provision_databases_effective
+          | map(attribute='owner')
+          | difference(postgres_provision_users_effective | map(attribute='name') | list)
+          | length == 0
+        )
+    fail_msg: "PostgreSQL database provisioning requires user records and each database owner must exist."
+
+- name: Assert PostgreSQL provisioning identifiers are safe SQL identifiers
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          postgres_provision_users_effective
+          | map(attribute='name')
+          | reject('match', '^[A-Za-z_][A-Za-z0-9_]*$')
+          | list
+          | length
+        ) == 0
+      - >-
+        (
+          postgres_provision_databases_effective
+          | map(attribute='name')
+          | reject('match', '^[A-Za-z_][A-Za-z0-9_]*$')
+          | list
+          | length
+        ) == 0
+      - >-
+        (
+          postgres_provision_databases_effective
+          | map(attribute='owner')
+          | reject('match', '^[A-Za-z_][A-Za-z0-9_]*$')
+          | list
+          | length
+        ) == 0
+    fail_msg: "PostgreSQL provisioning names must be simple SQL identifiers."
+
+- name: Build PostgreSQL node runtime fact
+  ansible.builtin.set_fact:
+    postgres_node: "{{ postgres_nodes | selectattr('name', 'equalto', inventory_hostname) | first }}"
+
+- name: Install PostgreSQL repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - postgresql-common
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure PostgreSQL PGDG keyring directory exists
+  ansible.builtin.file:
+    path: "{{ postgres_pgdg_keyring_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install PostgreSQL PGDG repository key
+  ansible.builtin.get_url:
+    url: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+    dest: "{{ postgres_pgdg_keyring_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure PostgreSQL PGDG apt repository
+  ansible.builtin.copy:
+    content: "{{ postgres_pgdg_repo }}\n"
+    dest: "{{ postgres_pgdg_repo_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install PostgreSQL packages
+  ansible.builtin.apt:
+    name: "{{ postgres_runtime_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Allow HAProxy to bind PostgreSQL VIP sockets before failover
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: "1"
+    state: present
+    sysctl_set: true
+    reload: true
+
+- name: Ensure PostgreSQL directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('postgres') }}"
+    group: "{{ item.group | default('postgres') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ postgres_config_dir }}", owner: "postgres", group: "postgres", mode: "0750" }
+    - { path: "/etc/pgbouncer", owner: "postgres", group: "postgres", mode: "0750" }
+    - { path: "{{ postgres_data_dir }}", owner: "postgres", group: "postgres", mode: "0700" }
+    - { path: "/var/lib/etcd/{{ postgres_cluster_name }}", owner: "etcd", group: "etcd", mode: "0750" }
+    - { path: "/var/log/postgresql", owner: "postgres", group: "postgres", mode: "0755" }
+    - { path: "/var/log/pgbackrest", owner: "postgres", group: "postgres", mode: "0755" }
+    - { path: "/var/lib/pgbackrest", owner: "postgres", group: "postgres", mode: "0750" }
+    - { path: "{{ postgres_pgadmin_config_dir }}", owner: "root", group: "root", mode: "0755" }
+    - { path: "{{ postgres_pgadmin_data_dir }}", owner: "5050", group: "5050", mode: "0750" }
+
+- name: Stop and disable default PostgreSQL service
+  ansible.builtin.systemd:
+    name: postgresql
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Remove default PostgreSQL cluster when Patroni data directory is empty
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [ ! -d "{{ postgres_data_dir }}/base" ] && pg_lsclusters --no-header | awk '{print $1" "$2}' | grep -q '^{{ postgres_major_version }} main$'; then
+      pg_dropcluster --stop {{ postgres_major_version }} main
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false
+
+- name: Render etcd environment file
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/etcd.conf.j2"
+    dest: /etc/default/etcd
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart etcd
+
+- name: Render etcd systemd unit
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/etcd.service.j2"
+    dest: /etc/systemd/system/etcd.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart etcd
+
+- name: Render Patroni configuration
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/patroni.yml.j2"
+    dest: "{{ postgres_config_dir }}/patroni.yml"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  notify: Restart patroni
+
+- name: Render Patroni systemd unit
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/patroni.service.j2"
+    dest: /etc/systemd/system/patroni.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart patroni
+
+- name: Render PgBouncer configuration
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/pgbouncer.ini.j2"
+    dest: /etc/pgbouncer/pgbouncer.ini
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  notify: Restart pgbouncer
+
+- name: Render PgBouncer userlist
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/pgbouncer-userlist.txt.j2"
+    dest: /etc/pgbouncer/userlist.txt
+    owner: postgres
+    group: postgres
+    mode: "0600"
+  notify: Restart pgbouncer
+
+- name: Render pgBackRest configuration
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/pgbackrest.conf.j2"
+    dest: /etc/pgbackrest.conf
+    owner: postgres
+    group: postgres
+    mode: "0640"
+
+- name: Render pganalyze collector configuration
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/pganalyze-collector.conf.j2"
+    dest: "{{ postgres_pganalyze_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: postgres_pganalyze_enabled | bool
+
+- name: Render pganalyze collector service
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/pganalyze-collector.service.j2"
+    dest: "/etc/systemd/system/{{ postgres_pganalyze_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  when: postgres_pganalyze_enabled | bool and postgres_pganalyze_install_method == 'container'
+  notify:
+    - Reload systemd
+    - Restart pganalyze collector
+
+- name: Render pgAdmin server definitions
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/pgadmin-servers.json.j2"
+    dest: "{{ postgres_pgadmin_config_dir }}/servers.json"
+    owner: root
+    group: root
+    mode: "0644"
+  when: postgres_pgadmin_enabled | bool
+  notify: Restart pgadmin
+
+- name: Render pgAdmin container service
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/pgadmin.service.j2"
+    dest: "/etc/systemd/system/{{ postgres_pgadmin_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  when: postgres_pgadmin_enabled | bool
+  notify:
+    - Reload systemd
+    - Restart pgadmin
+
+- name: Render PostgreSQL HAProxy configuration
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/haproxy/haproxy.cfg.j2"
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    routing_profile: postgres
+  notify: Restart haproxy
+
+- name: Render PostgreSQL HAProxy health check script
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/haproxy/health-check.sh.j2"
+    dest: /usr/local/bin/check-haproxy.sh
+    owner: root
+    group: root
+    mode: "0755"
+  vars:
+    routing_profile: postgres
+
+- name: Render PostgreSQL Keepalived configuration
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/haproxy/keepalived.conf.j2"
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    routing_profile: postgres
+  notify: Restart keepalived
+
+- name: Flush PostgreSQL handlers before bootstrap checks
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure PostgreSQL HA services are enabled and started
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - etcd
+    - patroni
+    - pgbouncer
+    - haproxy
+    - keepalived
+
+- name: Ensure pganalyze collector service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ postgres_pganalyze_service_name }}"
+    enabled: true
+    state: started
+  when: postgres_pganalyze_enabled | bool and postgres_pganalyze_install_method == 'container'
+
+- name: Ensure pgAdmin service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ postgres_pgadmin_service_name }}"
+    enabled: true
+    state: started
+  when: postgres_pgadmin_enabled | bool
+
+- name: Wait for Patroni API to respond
+  ansible.builtin.uri:
+    url: "{{ postgres_patroni_health_scheme }}://{{ postgres_node.ip }}:{{ patroni.restapi_port }}/health"
+    method: GET
+    status_code:
+      - 200
+      - 503
+  register: postgres_patroni_health
+  until: postgres_patroni_health.status in [200, 503]
+  retries: "{{ postgres_patroni_bootstrap_wait_retries }}"
+  delay: "{{ postgres_patroni_bootstrap_wait_delay }}"
+
+- name: Wait for PostgreSQL VIP health endpoint
+  ansible.builtin.uri:
+    url: "{{ postgres_patroni_health_scheme }}://{{ postgres_vip_ip }}:{{ patroni.restapi_port }}/health"
+    method: GET
+    status_code:
+      - 200
+      - 503
+  delegate_to: localhost
+  become: false
+  failed_when: false
+  run_once: true
+
+- name: Ensure PostgreSQL application roles exist on primary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if ! runuser -u postgres -- psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = \$\${{ item.name }}\$\$;" | grep -q 1; then
+      runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE {{ item.name }} LOGIN PASSWORD \$pwd\${{ item.password }}\$pwd\$;"
+    else
+      runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE {{ item.name }} WITH LOGIN PASSWORD \$pwd\${{ item.password }}\$pwd\$;"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  delegate_to: "{{ postgres_primary_inventory_host }}"
+  run_once: true
+  loop: "{{ postgres_provision_users_effective }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: postgres_db_provisioning_enabled | bool
+
+- name: Ensure PostgreSQL application databases exist on primary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if ! runuser -u postgres -- psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = \$\${{ item.name }}\$\$;" | grep -q 1; then
+      runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE {{ item.name }} OWNER {{ item.owner }};"
+    else
+      runuser -u postgres -- psql -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE {{ item.name }} OWNER TO {{ item.owner }};"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  delegate_to: "{{ postgres_primary_inventory_host }}"
+  run_once: true
+  loop: "{{ postgres_provision_databases_effective }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: postgres_db_provisioning_enabled | bool
+
+- name: Ensure PostgreSQL application privileges exist on primary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    runuser -u postgres -- psql -d {{ item.name | quote }} -v ON_ERROR_STOP=1 -c "ALTER SCHEMA public OWNER TO {{ item.owner }};"
+    runuser -u postgres -- psql -d {{ item.name | quote }} -v ON_ERROR_STOP=1 -c "GRANT ALL ON DATABASE {{ item.name }} TO {{ item.owner }};"
+    runuser -u postgres -- psql -d {{ item.name | quote }} -v ON_ERROR_STOP=1 -c "GRANT ALL ON SCHEMA public TO {{ item.owner }};"
+    runuser -u postgres -- psql -d {{ item.name | quote }} -v ON_ERROR_STOP=1 -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {{ item.owner }};"
+    runuser -u postgres -- psql -d {{ item.name | quote }} -v ON_ERROR_STOP=1 -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {{ item.owner }};"
+    runuser -u postgres -- psql -d {{ item.name | quote }} -v ON_ERROR_STOP=1 -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO {{ item.owner }};"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  delegate_to: "{{ postgres_primary_inventory_host }}"
+  run_once: true
+  loop: "{{ postgres_provision_databases_effective }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: postgres_db_provisioning_enabled | bool
+
+- name: Enable pgvector extension in provisioned databases
+  ansible.builtin.shell: |
+    set -euo pipefail
+    runuser -u postgres -- psql -d {{ item | quote }} -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS {{ postgres_pgvector_extension_name }};"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  delegate_to: "{{ postgres_primary_inventory_host }}"
+  run_once: true
+  loop: "{{ postgres_database_names_effective }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - postgres_db_provisioning_enabled | bool
+    - postgres_pgvector_enabled | bool

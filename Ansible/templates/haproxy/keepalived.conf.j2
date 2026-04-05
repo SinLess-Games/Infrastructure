@@ -42,6 +42,7 @@ vrrp_instance MINIO_VIP {
 
 {% set keepalived_router_id_value = inventory_hostname %}
 {% set keepalived_script_user = 'root' %}
+{% set postgres_keepalived_state = 'MASTER' if inventory_hostname == postgres_nodes[0].name else 'BACKUP' %}
 {% include 'keepalived-global-defs.j2' %}
 
 vrrp_script check_haproxy {
@@ -53,14 +54,14 @@ vrrp_script check_haproxy {
 }
 
 vrrp_instance VI_{{ postgres_keepalived_vrid }} {
-    state {% if inventory_hostname == postgres_nodes[0].name %}MASTER{% else %}BACKUP{% endif %}
+    state {{ postgres_keepalived_state }}
     interface {{ postgres_vip_iface }}
     virtual_router_id {{ postgres_keepalived_vrid }}
     priority {{ postgres_nodes | selectattr('name', 'equalto', inventory_hostname) | map(attribute='keepalived_priority') | first }}
     advert_int 1
     authentication {
         auth_type PASS
-        auth_pass {{ postgres_keepalived_auth_pass }}
+        auth_pass {{ (postgres_keepalived_auth_pass | string)[:8] }}
     }
     virtual_ipaddress {
         {{ postgres_vip_ip }}/{{ postgres_vip_cidr }} dev {{ postgres_vip_iface }}

@@ -1,106 +1,146 @@
 ---
-# =============================================================================
-# PostgreSQL Deployment and Configuration Playbook
-# =============================================================================
-# Purpose:
-#   - Deploy PostgreSQL VMs using the shared Proxmox VM Terraform module
-#   - Configure the PostgreSQL HA stack on the provisioned nodes
-# =============================================================================
-
-- name: Deploy PostgreSQL VMs via Terraform
+- name: Load PostgreSQL runtime secrets and deploy VMs
   hosts: localhost
   gather_facts: false
   connection: local
+  any_errors_fatal: true
 
-  pre_tasks:
-    - name: Load PostgreSQL shared variables
-      ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../group_vars/postgres/main.yaml"
-      tags: ["always"]
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/postgres/main.yaml
 
-    - name: Check if PostgreSQL environment override exists
-      ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
-      register: postgres_env_vars_file
-      tags: ["always"]
-
-    - name: Load PostgreSQL environment override variables
-      ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
-      when: postgres_env_vars_file.stat.exists
-      tags: ["always"]
-
-    - name: Build runtime postgres inventory group
-      ansible.builtin.add_host:
-        name: "{{ item.name }}"
-        groups: postgres
-        ansible_host: "{{ item.ip }}"
-        ansible_user: "{{ postgres_ansible_user }}"
-      loop: "{{ postgres_nodes }}"
-      tags: ["always"]
+  vars:
+    ansible_python_interpreter: "{{ playbook_dir | dirname }}/.venv/bin/python"
 
   roles:
     - role: postgres
       vars:
-        postgres_role_phases: ["deploy"]
-      tags: ["deploy", "terraform"]
+        postgres_role_phases:
+          - secrets
+          - deploy
+      tags:
+        - postgres
+        - secrets
+        - deploy
 
-- name: Configure PostgreSQL HA stack on postgres nodes
+- name: Wait for PostgreSQL nodes
+  hosts: postgres
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/postgres/main.yaml
+
+  vars:
+    ansible_user: "{{ postgres_ansible_user }}"
+
+  tasks:
+    - name: Wait for SSH on PostgreSQL nodes
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 900
+        connect_timeout: 10
+      tags:
+        - postgres
+        - wait
+
+    - name: Gather facts after SSH is available
+      ansible.builtin.setup:
+      tags:
+        - postgres
+        - wait
+
+- name: Configure PostgreSQL HA cluster
   hosts: postgres
   gather_facts: true
   become: true
+  any_errors_fatal: true
+
   vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/postgres/main.yaml
     - ../group_vars/all/packages.yaml
     - ../group_vars/all/zsh.yaml
     - ../group_vars/all/users.yaml
     - ../group_vars/all/ssh.yaml
 
   vars:
+    ansible_user: "{{ postgres_ansible_user }}"
     packages_role_groups:
       - production
       - shell
+    dns_servers: "{{ postgres_nameservers.split() }}"
+    dns_search_domains:
+      - local.sinlessgames.com
+    dns_force_tcp: true
 
   pre_tasks:
-    - name: Load PostgreSQL shared variables
-      ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../group_vars/postgres/main.yaml"
-      tags: ["always"]
+    - name: Validate localhost PostgreSQL runtime cache exists
+      ansible.builtin.assert:
+        that:
+          - "'localhost' in hostvars"
+          - hostvars['localhost'].postgres_runtime_secrets is defined
+          - hostvars['localhost'].postgres_runtime_secrets | length > 0
+        fail_msg: "PostgreSQL runtime secrets were not loaded on localhost."
+      tags:
+        - postgres
+        - validate
 
-    - name: Check if PostgreSQL environment override exists
-      ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
-      register: postgres_env_vars_file
-      tags: ["always"]
+    - name: Wait for cloud-init to finish on PostgreSQL nodes
+      ansible.builtin.command: cloud-init status --wait
+      register: postgres_cloud_init_wait
+      changed_when: false
+      failed_when: false
+      tags:
+        - postgres
+        - validate
 
-    - name: Load PostgreSQL environment override variables
-      ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../group_vars/postgres/{{ postgres_environment | default('dev') }}.yaml"
-      when: postgres_env_vars_file.stat.exists
-      tags: ["always"]
-
-    - name: Wait for SSH on postgres nodes
-      ansible.builtin.wait_for_connection:
-        timeout: 300
-        delay: 5
-      tags: ["always"]
+    - name: Wait for dpkg and apt locks to clear on PostgreSQL nodes
+      ansible.builtin.shell: |
+        set -eu
+        while fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+          || fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+          || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+          sleep 5
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      tags:
+        - postgres
+        - validate
 
   roles:
     - role: dns-resolver
-      tags: ["configure", "dns"]
-    
-    - role: users
-      tags: ["configure", "users"]
+      tags:
+        - postgres
+        - dns
 
     - role: packages
-      tags: ["configure", "packages"]
-    
+      tags:
+        - postgres
+        - packages
+
+    - role: users
+      tags:
+        - postgres
+        - users
+
     - role: shell-config
-      tags: ["configure", "shell"]
-    
+      tags:
+        - postgres
+        - shell
+
     - role: ssh
-      tags: ["configure", "sshd"]
+      tags:
+        - postgres
+        - ssh
 
     - role: postgres
       vars:
-        postgres_role_phases: ["configure"]
-      tags: ["configure", "ha"]
+        postgres_role_phases:
+          - configure
+      tags:
+        - postgres
+        - configure

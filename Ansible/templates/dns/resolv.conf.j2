@@ -19,3 +19,6 @@ nameserver {{ server }}
 options timeout:{{ dns_test_timeout }}
 options attempts:{{ dns_test_retries }}
 options rotate
+{% if dns_force_tcp | bool %}
+options use-vc
+{% endif %}

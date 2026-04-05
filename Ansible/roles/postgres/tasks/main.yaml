@@ -1,0 +1,12 @@
+---
+- name: Include PostgreSQL runtime secret loading tasks
+  ansible.builtin.include_tasks: load-secrets.yaml
+  when: "'secrets' in postgres_role_phases"
+
+- name: Include PostgreSQL VM deployment tasks
+  ansible.builtin.include_tasks: deploy.yaml
+  when: "'deploy' in postgres_role_phases"
+
+- name: Include PostgreSQL cluster configuration tasks
+  ansible.builtin.include_tasks: configure.yaml
+  when: "'configure' in postgres_role_phases"
