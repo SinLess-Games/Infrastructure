@@ -147,7 +147,7 @@
   loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
   loop_control:
     label: "{{ item.name }}@{{ item.target_node }}"
-    parallelism: 2
+  throttle: 2
   delegate_to: localhost
   run_once: true
   changed_when: false
