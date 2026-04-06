@@ -127,7 +127,13 @@
     argv:
       - ssh
       - -o
+      - ConnectTimeout=5
+      - -o
+      - BatchMode=yes
+      - -o
       - StrictHostKeyChecking=no
+      - -o
+      - UserKnownHostsFile=/dev/null
       - root@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] }}
       - /bin/bash
       - -lc
@@ -135,15 +141,18 @@
         set -euo pipefail;
         vmid="{{ item.vmid }}";
         if [ -f "/etc/pve/qemu-server/${vmid}.conf" ]; then
-          timeout 10 /usr/sbin/qm unlock "${vmid}" || true;
+          timeout 5 /usr/sbin/qm unlock "${vmid}" || true;
         fi
         rm -f "/var/lock/qemu-server/lock-${vmid}.conf";
   loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
   loop_control:
     label: "{{ item.name }}@{{ item.target_node }}"
+    parallelism: 2
   delegate_to: localhost
   run_once: true
   changed_when: false
+  failed_when: false
+  register: stale_lock_cleanup_result
   when: not kubernetes_operation.plan_only | bool
 
 - name: Initialize Terraform working directory

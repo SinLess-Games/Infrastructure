@@ -5,3 +5,4 @@ play order
 - vault
 - postgres
 - wazuh
+- kubernetes Production
