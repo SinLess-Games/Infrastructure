@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: wazuh-agent
+  namespace: security
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wazuh-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wazuh-agent
+    spec:
+      hostPID: true
+      containers:
+        - name: wazuh-agent
+          image: wazuh/wazuh-agent:4.9.0
+          env:
+            - name: WAZUH_MANAGER
+              value: "wazuh.local.sinlessgames.com"
+            - name: WAZUH_AGENT_GROUP
+              value: "kubernetes-prod"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+            - name: etcosrelease
+              mountPath: /etc/os-release
+              readOnly: true
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: etcosrelease
+          hostPath:
+            path: /etc/os-release

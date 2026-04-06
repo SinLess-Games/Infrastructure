@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: helix-ai-mesh
+  namespace: gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "17"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/Sinless777/Infrastructure.git
+    targetRevision: main
+    path: Kubernetes/apps/prod/helix-ai/mesh
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: helix-ai
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

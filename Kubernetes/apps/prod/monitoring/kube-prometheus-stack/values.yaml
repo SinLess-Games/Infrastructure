@@ -1,0 +1,35 @@
+grafana:
+  enabled: false
+alertmanager:
+  alertmanagerSpec:
+    replicas: 3
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+prometheus:
+  prometheusSpec:
+    replicas: 2
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 100Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    externalLabels:
+      cluster: rke2-prod
+defaultRules:
+  create: true
+prometheus-node-exporter:
+  enabled: true
+kube-state-metrics:
+  enabled: true

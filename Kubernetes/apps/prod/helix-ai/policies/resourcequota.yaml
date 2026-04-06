@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: helix-ai-quota
+  namespace: helix-ai
+spec:
+  hard:
+    requests.cpu: "24"
+    requests.memory: 64Gi
+    limits.cpu: "48"
+    limits.memory: 128Gi
+    persistentvolumeclaims: "20"

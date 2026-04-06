@@ -1,0 +1,17 @@
+statefulset:
+  replicas: 3
+storage:
+  persistentVolume:
+    enabled: true
+    storageClassName: longhorn
+    size: 100Gi
+conf:
+  cache: 4Gi
+  max-sql-memory: 4Gi
+tls:
+  enabled: true
+podDisruptionBudget:
+  enabled: true
+topologySpreadConstraints:
+  default:
+    whenUnsatisfiable: DoNotSchedule

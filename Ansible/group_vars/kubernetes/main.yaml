@@ -9,6 +9,7 @@ kubernetes_templates_dir: "{{ kubernetes_repo_root }}/Ansible/templates/kubernet
 kubernetes_generated_dir: "{{ kubernetes_repo_root }}/.outputs/kubernetes"
 kubernetes_generated_env_dir: "{{ kubernetes_generated_dir }}/{{ kubernetes_environment }}"
 kubernetes_kubeconfig_local_path: "{{ kubernetes_generated_env_dir }}/kubeconfig"
+kubernetes_kubeconfig_archive_path: "{{ kubernetes_generated_env_dir }}/kubeconfig-{{ kubernetes_environment }}"
 
 kubernetes_paths:
   repo_root: "{{ kubernetes_repo_root }}"
@@ -80,6 +81,7 @@ kubernetes_vault:
   addr: "https://10.10.10.180:443"
   skip_verify: true
   token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
+  token_file: "{{ playbook_dir }}/../../.outputs/vault/unseal-keys.json"
   kv_mount: "secret"
   kv_path: "kubernetes/{{ kubernetes_environment }}"
   eso_mount: "kv"
@@ -127,9 +129,10 @@ kubernetes_deploy_wait_for_api_timeout: "{{ kubernetes_wait_for_api_timeout }}"
 kubernetes_deploy_proxmox_api_token_file: "{{ kubernetes_proxmox.api_token_file }}"
 kubernetes_deploy_proxmox_api_url: "{{ kubernetes_proxmox.deploy_api_url }}"
 kubernetes_deploy_proxmox_tls_insecure: "{{ kubernetes_proxmox.tls_insecure }}"
-kubernetes_deploy_vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default(kubernetes_vault.addr, true) }}"
-kubernetes_deploy_vault_skip_verify: "{{ lookup('env', 'VAULT_SKIP_VERIFY') | default(kubernetes_vault.skip_verify | ternary('true', 'false'), true) | bool }}"
+kubernetes_deploy_vault_addr: "{{ kubernetes_vault.addr }}"
+kubernetes_deploy_vault_skip_verify: "{{ kubernetes_vault.skip_verify }}"
 kubernetes_deploy_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default(kubernetes_vault.token, true) }}"
+kubernetes_deploy_vault_token_file: "{{ kubernetes_vault.token_file }}"
 
 kubernetes_deploy_master_count: "{{ kubernetes_master.count }}"
 kubernetes_deploy_master_vmid_start: "{{ kubernetes_master.vmid_start }}"
@@ -182,7 +185,7 @@ kubernetes_configure_cluster_cidr: "{{ kubernetes_cluster_cidr }}"
 kubernetes_configure_service_cidr: "{{ kubernetes_service_cidr }}"
 kubernetes_configure_cluster_dns: "{{ kubernetes_cluster_dns }}"
 
-kubernetes_rke2_api_ip: "{{ kubernetes_control_plane_first_ip }}"
+kubernetes_rke2_api_ip: "{{ kubernetes_api_vip | default(kubernetes_control_plane_first_ip) }}"
 kubernetes_rke2_api_private_port: 9345
 kubernetes_server_url: "https://{{ kubernetes_rke2_api_ip }}:{{ kubernetes_rke2_api_private_port }}"
 kubernetes_rke2_cni:
@@ -190,11 +193,36 @@ kubernetes_rke2_cni:
 kubernetes_rke2_ingress_controller: "none"
 kubernetes_rke2_disable:
   - rke2-ingress-nginx
+kubernetes_rke2_disable_kube_proxy: false
 kubernetes_rke2_write_kubeconfig_mode: "0644"
 kubernetes_rke2_additional_sans:
   - "{{ kubernetes_rke2_api_ip }}"
   - "{{ kubernetes_control_plane_first_host }}"
   - "{{ kubernetes_domain_suffix }}"
+kubernetes_rke2_pause_image: "docker.io/rancher/pause:3.6"
+kubernetes_rke2_node_ip_autodetect_interface: "eth0"
+kubernetes_rke2_selinux: false
+kubernetes_rke2_snapshot_schedule_cron: "0 */6 * * *"
+kubernetes_rke2_snapshot_retention: 14
+kubernetes_rke2_etcd_expose_metrics: true
+kubernetes_kube_vip:
+  enabled: true
+  interface: "eth0"
+  image: "ghcr.io/kube-vip/kube-vip:v0.8.9"
+  vip: "{{ kubernetes_api_vip | default('') }}"
+  controlplane: true
+  services: false
+  arp: true
+  leader_election: true
+kubernetes_proxmox_gpu:
+  enabled: true
+  host: "pve-01"
+  vm_name: "{{ kubernetes_rke2_gpu_worker_name | default('rke2-prod-wk-01') }}"
+  vmid: 410
+  devices:
+    - "NVidia-1060"
+    - "Nvidia-3060"
+kubernetes_validation_scripts_dir: "{{ kubernetes_repo_root }}/Kubernetes/validation/{{ kubernetes_environment }}/scripts"
 kubernetes_rke2_kubelet_arg: []
 kubernetes_rke2_kube_proxy_arg: []
 kubernetes_rke2_server_node_taints: []

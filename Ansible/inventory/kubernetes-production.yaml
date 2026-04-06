@@ -9,29 +9,36 @@ kubernetes_prod:
   children:
     kubernetes_prod_control_plane:
       hosts:
-        k8s-prod-master-01:
+        rke2-prod-cp-01:
           ansible_host: "10.10.40.11"
           node_role: control-plane
-          node_fqdn: "k8s-prod-master-01.prod.k8s.sinlessgames.com"
-        k8s-prod-master-02:
+          node_fqdn: "rke2-prod-cp-01.prod.k8s.sinlessgames.com"
+          proxmox_host: "pve-01"
+        rke2-prod-cp-02:
           ansible_host: "10.10.40.12"
           node_role: control-plane
-          node_fqdn: "k8s-prod-master-02.prod.k8s.sinlessgames.com"
-        k8s-prod-master-03:
+          node_fqdn: "rke2-prod-cp-02.prod.k8s.sinlessgames.com"
+          proxmox_host: "pve-04"
+        rke2-prod-cp-03:
           ansible_host: "10.10.40.13"
           node_role: control-plane
-          node_fqdn: "k8s-prod-master-03.prod.k8s.sinlessgames.com"
+          node_fqdn: "rke2-prod-cp-03.prod.k8s.sinlessgames.com"
+          proxmox_host: "pve-05"
     kubernetes_prod_workers:
       hosts:
-        k8s-prod-worker-01:
+        rke2-prod-wk-01:
           ansible_host: "10.10.40.20"
           node_role: worker
-          node_fqdn: "k8s-prod-worker-01.prod.k8s.sinlessgames.com"
-        k8s-prod-worker-02:
+          node_fqdn: "rke2-prod-wk-01.prod.k8s.sinlessgames.com"
+          proxmox_host: "pve-01"
+          kubernetes_gpu_node: true
+        rke2-prod-wk-02:
           ansible_host: "10.10.40.21"
           node_role: worker
-          node_fqdn: "k8s-prod-worker-02.prod.k8s.sinlessgames.com"
-        k8s-prod-worker-03:
+          node_fqdn: "rke2-prod-wk-02.prod.k8s.sinlessgames.com"
+          proxmox_host: "pve-04"
+        rke2-prod-wk-03:
           ansible_host: "10.10.40.22"
           node_role: worker
-          node_fqdn: "k8s-prod-worker-03.prod.k8s.sinlessgames.com"
+          node_fqdn: "rke2-prod-wk-03.prod.k8s.sinlessgames.com"
+          proxmox_host: "pve-05"

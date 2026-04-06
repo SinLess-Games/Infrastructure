@@ -7,6 +7,7 @@
   gather_facts: false
   any_errors_fatal: true
   vars_files:
+    - ../group_vars/all/ansible.yaml
     - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/production/main.yaml
     - ../group_vars/kubernetes/production/master.yaml
@@ -29,6 +30,7 @@
         vault_kv_paths: "{{ kubernetes_vault_kv_paths }}"
         vault_skip_verify: "{{ kubernetes_deploy_vault_skip_verify }}"
         vault_token: "{{ kubernetes_deploy_vault_token }}"
+        vault_token_file: "{{ kubernetes_deploy_vault_token_file }}"
       tags:
         - preflight
         - vault
@@ -123,6 +125,7 @@
   gather_facts: false
   any_errors_fatal: true
   vars_files:
+    - ../group_vars/all/ansible.yaml
     - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/production/main.yaml
     - ../group_vars/kubernetes/production/master.yaml
@@ -151,7 +154,9 @@
   hosts: kubernetes_prod
   gather_facts: true
   any_errors_fatal: true
+  serial: 1
   vars_files:
+    - ../group_vars/all/ansible.yaml
     - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/production/main.yaml
     - ../group_vars/kubernetes/production/master.yaml
@@ -238,6 +243,38 @@
         - dns
         - kubernetes
 
+    - name: Apply packages role
+      become: true
+      ansible.builtin.import_role:
+        name: packages
+      tags:
+        - packages
+        - kubernetes
+
+    - name: Apply shell configuration role
+      become: true
+      ansible.builtin.import_role:
+        name: shell-config
+      tags:
+        - shell
+        - kubernetes
+
+    - name: Apply SSH role
+      become: true
+      ansible.builtin.import_role:
+        name: ssh
+      tags:
+        - ssh
+        - kubernetes
+
+    - name: Apply users role
+      become: true
+      ansible.builtin.import_role:
+        name: users
+      tags:
+        - users
+        - kubernetes
+
     - name: Configure Kubernetes node
       become: true
       ansible.builtin.import_role:
@@ -249,4 +286,57 @@
         kubernetes_rke2_agents_group_name: "kubernetes_prod_workers"
       tags:
         - configure
+        - kubernetes
+
+# =============================================================================
+# Save Local kubeconfig Copy
+# =============================================================================
+- name: Save production kubeconfig copy locally
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/production/main.yaml
+    - ../group_vars/kubernetes/production/master.yaml
+    - ../group_vars/kubernetes/production/worker.yaml
+
+  tasks:
+    - name: Ensure local kubeconfig output directory exists
+      ansible.builtin.file:
+        path: "{{ kubernetes_generated_env_dir }}"
+        state: directory
+        mode: "0755"
+      tags:
+        - kubeconfig
+        - kubernetes
+
+    - name: Verify fetched kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ kubernetes_kubeconfig_local_path }}"
+      register: kubernetes_prod_kubeconfig_stat
+      tags:
+        - kubeconfig
+        - kubernetes
+
+    - name: Fail when kubeconfig was not fetched from bootstrap node
+      ansible.builtin.assert:
+        that:
+          - kubernetes_prod_kubeconfig_stat.stat.exists
+        fail_msg: >-
+          Expected kubeconfig at {{ kubernetes_kubeconfig_local_path }} was not found.
+          The bootstrap control plane may not have completed successfully.
+      tags:
+        - kubeconfig
+        - kubernetes
+
+    - name: Save environment-named kubeconfig copy
+      ansible.builtin.copy:
+        src: "{{ kubernetes_kubeconfig_local_path }}"
+        dest: "{{ kubernetes_kubeconfig_archive_path }}"
+        mode: "0600"
+        remote_src: true
+      tags:
+        - kubeconfig
         - kubernetes

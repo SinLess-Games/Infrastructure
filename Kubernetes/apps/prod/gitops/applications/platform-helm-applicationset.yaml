@@ -1,0 +1,239 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: prod-platform-helm
+  namespace: gitops
+spec:
+  generators:
+    - list:
+        elements:
+          - name: cilium
+            namespace: kube-system
+            chartRepo: https://helm.cilium.io
+            chart: cilium
+            targetRevision: 1.16.5
+            valuesPath: Kubernetes/apps/prod/kube-system/cilium/values.yaml
+            syncWave: "-10"
+          - name: longhorn
+            namespace: kube-system
+            chartRepo: https://charts.longhorn.io
+            chart: longhorn
+            targetRevision: 1.7.2
+            valuesPath: Kubernetes/apps/prod/kube-system/longhorn/values.yaml
+            syncWave: "-8"
+          - name: nvidia-gpu-operator
+            namespace: kube-system
+            chartRepo: https://helm.ngc.nvidia.com/nvidia
+            chart: gpu-operator
+            targetRevision: 24.9.2
+            valuesPath: Kubernetes/apps/prod/kube-system/nvidia-gpu/values.yaml
+            syncWave: "-6"
+          - name: istio-base
+            namespace: istio-system
+            chartRepo: https://istio-release.storage.googleapis.com/charts
+            chart: base
+            targetRevision: 1.24.2
+            valuesPath: Kubernetes/apps/prod/istio-system/istio-base/values.yaml
+            syncWave: "0"
+          - name: istiod
+            namespace: istio-system
+            chartRepo: https://istio-release.storage.googleapis.com/charts
+            chart: istiod
+            targetRevision: 1.24.2
+            valuesPath: Kubernetes/apps/prod/istio-system/istiod/values.yaml
+            syncWave: "1"
+          - name: istio-ingress
+            namespace: istio-system
+            chartRepo: https://istio-release.storage.googleapis.com/charts
+            chart: gateway
+            targetRevision: 1.24.2
+            valuesPath: Kubernetes/apps/prod/istio-system/istio-ingress/values.yaml
+            syncWave: "2"
+          - name: cert-manager
+            namespace: networking
+            chartRepo: https://charts.jetstack.io
+            chart: cert-manager
+            targetRevision: v1.16.2
+            valuesPath: Kubernetes/apps/prod/networking/cert-manager/values.yaml
+            syncWave: "3"
+          - name: external-dns
+            namespace: networking
+            chartRepo: https://kubernetes-sigs.github.io/external-dns/
+            chart: external-dns
+            targetRevision: 1.15.0
+            valuesPath: Kubernetes/apps/prod/networking/external-dns/values.yaml
+            syncWave: "4"
+          - name: kube-prometheus-stack
+            namespace: monitoring
+            chartRepo: https://prometheus-community.github.io/helm-charts
+            chart: kube-prometheus-stack
+            targetRevision: 66.3.1
+            valuesPath: Kubernetes/apps/prod/monitoring/kube-prometheus-stack/values.yaml
+            syncWave: "6"
+          - name: grafana-alloy
+            namespace: monitoring
+            chartRepo: https://grafana.github.io/helm-charts
+            chart: alloy
+            targetRevision: 0.10.1
+            valuesPath: Kubernetes/apps/prod/monitoring/grafana-alloy/values.yaml
+            syncWave: "7"
+          - name: grafana-beyla
+            namespace: monitoring
+            chartRepo: https://grafana.github.io/helm-charts
+            chart: beyla
+            targetRevision: 1.8.9
+            valuesPath: Kubernetes/apps/prod/monitoring/grafana-beyla/values.yaml
+            syncWave: "7"
+          - name: loki
+            namespace: monitoring
+            chartRepo: https://grafana.github.io/helm-charts
+            chart: loki
+            targetRevision: 6.24.0
+            valuesPath: Kubernetes/apps/prod/monitoring/loki/values.yaml
+            syncWave: "8"
+          - name: mimir
+            namespace: monitoring
+            chartRepo: https://grafana.github.io/helm-charts
+            chart: mimir-distributed
+            targetRevision: 5.5.0
+            valuesPath: Kubernetes/apps/prod/monitoring/mimir/values.yaml
+            syncWave: "8"
+          - name: tempo
+            namespace: monitoring
+            chartRepo: https://grafana.github.io/helm-charts
+            chart: tempo-distributed
+            targetRevision: 1.18.3
+            valuesPath: Kubernetes/apps/prod/monitoring/tempo/values.yaml
+            syncWave: "8"
+          - name: pyroscope
+            namespace: monitoring
+            chartRepo: https://grafana.github.io/helm-charts
+            chart: pyroscope
+            targetRevision: 1.12.0
+            valuesPath: Kubernetes/apps/prod/monitoring/pyroscope/values.yaml
+            syncWave: "8"
+          - name: grafana
+            namespace: monitoring
+            chartRepo: https://grafana.github.io/helm-charts
+            chart: grafana
+            targetRevision: 8.8.2
+            valuesPath: Kubernetes/apps/prod/monitoring/grafana/values.yaml
+            syncWave: "9"
+          - name: opentelemetry-operator
+            namespace: monitoring
+            chartRepo: https://open-telemetry.github.io/opentelemetry-helm-charts
+            chart: opentelemetry-operator
+            targetRevision: 0.74.2
+            valuesPath: Kubernetes/apps/prod/monitoring/opentelemetry-operator/values.yaml
+            syncWave: "9"
+          - name: kiali
+            namespace: monitoring
+            chartRepo: https://kiali.org/helm-charts
+            chart: kiali-server
+            targetRevision: 1.89.8
+            valuesPath: Kubernetes/apps/prod/monitoring/kiali/values.yaml
+            syncWave: "10"
+          - name: external-secrets
+            namespace: security
+            chartRepo: https://charts.external-secrets.io
+            chart: external-secrets
+            targetRevision: 0.10.5
+            valuesPath: Kubernetes/apps/prod/security/external-secrets/values.yaml
+            syncWave: "4"
+          - name: kyverno
+            namespace: security
+            chartRepo: https://kyverno.github.io/kyverno
+            chart: kyverno
+            targetRevision: 3.3.4
+            valuesPath: Kubernetes/apps/prod/security/kyverno/values.yaml
+            syncWave: "11"
+          - name: falco
+            namespace: security
+            chartRepo: https://falcosecurity.github.io/charts
+            chart: falco
+            targetRevision: 4.18.0
+            valuesPath: Kubernetes/apps/prod/security/falco/values.yaml
+            syncWave: "11"
+          - name: velero
+            namespace: security
+            chartRepo: https://vmware-tanzu.github.io/helm-charts
+            chart: velero
+            targetRevision: 8.7.0
+            valuesPath: Kubernetes/apps/prod/security/velero/values.yaml
+            syncWave: "12"
+          - name: argo-cd
+            namespace: gitops
+            chartRepo: https://argoproj.github.io/argo-helm
+            chart: argo-cd
+            targetRevision: 7.7.11
+            valuesPath: Kubernetes/apps/prod/gitops/argo-cd/values.yaml
+            syncWave: "13"
+          - name: argo-rollouts
+            namespace: gitops
+            chartRepo: https://argoproj.github.io/argo-helm
+            chart: argo-rollouts
+            targetRevision: 2.38.0
+            valuesPath: Kubernetes/apps/prod/gitops/argo-rollouts/values.yaml
+            syncWave: "14"
+          - name: actions-runner-controller
+            namespace: gitops
+            chartRepo: https://actions-runner-controller.github.io/actions-runner-controller
+            chart: actions-runner-controller
+            targetRevision: 0.23.7
+            valuesPath: Kubernetes/apps/prod/gitops/actions-runner-controller/values.yaml
+            syncWave: "14"
+          - name: cockroachdb
+            namespace: helix-ai
+            chartRepo: https://charts.cockroachdb.com/
+            chart: cockroachdb
+            targetRevision: 14.0.6
+            valuesPath: Kubernetes/apps/prod/helix-ai/cockroachdb/values.yaml
+            syncWave: "18"
+          - name: redis
+            namespace: helix-ai
+            chartRepo: https://charts.bitnami.com/bitnami
+            chart: redis
+            targetRevision: 20.11.3
+            valuesPath: Kubernetes/apps/prod/helix-ai/redis/values.yaml
+            syncWave: "18"
+          - name: nats
+            namespace: helix-ai
+            chartRepo: https://nats-io.github.io/k8s/helm/charts/
+            chart: nats
+            targetRevision: 1.2.4
+            valuesPath: Kubernetes/apps/prod/helix-ai/nats/values.yaml
+            syncWave: "18"
+          - name: qdrant
+            namespace: helix-ai
+            chartRepo: https://qdrant.github.io/qdrant-helm
+            chart: qdrant
+            targetRevision: 1.13.3
+            valuesPath: Kubernetes/apps/prod/helix-ai/qdrant/values.yaml
+            syncWave: "18"
+  template:
+    metadata:
+      name: "{{name}}"
+      namespace: gitops
+      annotations:
+        argocd.argoproj.io/sync-wave: "{{syncWave}}"
+    spec:
+      project: platform
+      sources:
+        - repoURL: "{{chartRepo}}"
+          chart: "{{chart}}"
+          targetRevision: "{{targetRevision}}"
+          helm:
+            valueFiles:
+              - "$values/{{valuesPath}}"
+        - repoURL: https://github.com/Sinless777/Infrastructure.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{namespace}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

@@ -1,0 +1,21 @@
+provider: cloudflare
+env:
+  - name: CF_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: platform-integrations
+        key: external_dns_api_token
+policy: sync
+registry: txt
+txtOwnerId: rke2-prod
+domainFilters:
+  - sinlessgames.com
+  - helixaibot.com
+sources:
+  - service
+  - istio-gateway
+  - istio-virtualservice
+extraArgs:
+  - --cloudflare-dns-records-per-page=5000
+serviceMonitor:
+  enabled: true

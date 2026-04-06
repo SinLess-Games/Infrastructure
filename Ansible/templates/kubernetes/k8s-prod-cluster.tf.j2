@@ -1,0 +1,89 @@
+module "kubernetes_prod_control_plane" {
+  source = "./modules/proxmox-vm-cluster"
+
+  cluster_name = "{{ kubernetes_cluster_name }}"
+  environment  = "{{ kubernetes_environment }}"
+  service_name = "kubernetes"
+  node_role    = "control-plane"
+
+  nodes = [
+{% for node in kubernetes_nodes.control_plane %}
+    {
+      name        = "{{ node.name }}"
+      vmid        = {{ node.vmid }}
+      target_node = "{{ node.target_node }}"
+{% if node.clone_template is defined %}
+      clone_template = "{{ node.clone_template }}"
+{% endif %}
+      ip_address  = "{{ node.ip }}"
+      hostname    = "{{ node.hostname }}"
+      fqdn        = "{{ node.fqdn }}"
+    }{{ "," if not loop.last else "" }}
+{% endfor %}
+  ]
+
+  clone_template                = "{{ kubernetes_control_plane.clone_template }}"
+  storage                       = "{{ kubernetes_proxmox.storage }}"
+  resource_pool                 = "{{ kubernetes_resource_pool }}"
+  cpu_cores                     = {{ kubernetes_control_plane.cpu_cores }}
+  cpu_sockets                   = {{ kubernetes_control_plane.cpu_sockets }}
+  memory_mb                     = {{ kubernetes_control_plane.memory_mb }}
+  disk_size                     = "{{ kubernetes_control_plane.disk_size }}"
+  network_bridge                = "{{ kubernetes_network.bridge }}"
+  vlan_id                       = {{ kubernetes_network.vlan_id }}
+  gateway                       = "{{ kubernetes_network.gateway }}"
+  cidr_subnet                   = "{{ kubernetes_network.cidr_suffix }}"
+  nameservers                   = "{{ kubernetes_network.nameservers }}"
+  search_domain                 = "{{ kubernetes_search_domain }}"
+  ssh_keys                      = var.kubernetes_ssh_keys
+  default_user                  = "{{ kubernetes_ansible.default_user }}"
+  cicustom_user_snippet_enabled = false
+  tags                          = ["kubernetes", "rke2", "prod", "control-plane"]
+  startup_order                 = {{ kubernetes_control_plane.startup_order }}
+  force_create                  = {{ kubernetes_force_create | bool | lower }}
+}
+
+module "kubernetes_prod_workers" {
+  source = "./modules/proxmox-vm-cluster"
+
+  cluster_name = "{{ kubernetes_cluster_name }}"
+  environment  = "{{ kubernetes_environment }}"
+  service_name = "kubernetes"
+  node_role    = "worker"
+
+  nodes = [
+{% for node in kubernetes_nodes.workers %}
+    {
+      name        = "{{ node.name }}"
+      vmid        = {{ node.vmid }}
+      target_node = "{{ node.target_node }}"
+{% if node.clone_template is defined %}
+      clone_template = "{{ node.clone_template }}"
+{% endif %}
+      ip_address  = "{{ node.ip }}"
+      hostname    = "{{ node.hostname }}"
+      fqdn        = "{{ node.fqdn }}"
+    }{{ "," if not loop.last else "" }}
+{% endfor %}
+  ]
+
+  clone_template                = "{{ kubernetes_workers.clone_template }}"
+  storage                       = "{{ kubernetes_proxmox.storage }}"
+  resource_pool                 = "{{ kubernetes_resource_pool }}"
+  cpu_cores                     = {{ kubernetes_workers.cpu_cores }}
+  cpu_sockets                   = {{ kubernetes_workers.cpu_sockets }}
+  memory_mb                     = {{ kubernetes_workers.memory_mb }}
+  disk_size                     = "{{ kubernetes_workers.disk_size }}"
+  network_bridge                = "{{ kubernetes_network.bridge }}"
+  vlan_id                       = {{ kubernetes_network.vlan_id }}
+  gateway                       = "{{ kubernetes_network.gateway }}"
+  cidr_subnet                   = "{{ kubernetes_network.cidr_suffix }}"
+  nameservers                   = "{{ kubernetes_network.nameservers }}"
+  search_domain                 = "{{ kubernetes_search_domain }}"
+  ssh_keys                      = var.kubernetes_ssh_keys
+  default_user                  = "{{ kubernetes_ansible.default_user }}"
+  cicustom_user_snippet_enabled = false
+  tags                          = ["kubernetes", "rke2", "prod", "worker"]
+  startup_order                 = {{ kubernetes_workers.startup_order }}
+  force_create                  = {{ kubernetes_force_create | bool | lower }}
+}

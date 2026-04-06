@@ -3,6 +3,7 @@
 # Shared Ansible and infrastructure defaults
 # =============================================================================
 
+infra_repo_root: "{{ playbook_dir | dirname | dirname }}"
 infra_bootstrap_default_user: "sinless777"
 infra_bootstrap_ansible_user: "{{ infra_bootstrap_default_user }}"
 infra_bootstrap_ssh_keys:
@@ -13,5 +14,5 @@ infra_bootstrap_ssh_keys:
 
 infra_proxmox_api_url: "https://10.10.10.14:8006/api2/json"
 infra_proxmox_tls_insecure: true
-infra_proxmox_api_token_file: ".outputs/api-tokens/terraform-prov-api-token.txt"
-infra_proxmox_api_token_file_ansible: ".outputs/api-tokens/ansible-prov-api-token.txt"
+infra_proxmox_api_token_file: "{{ infra_repo_root }}/.outputs/api-tokens/terraform-prov-api-token.txt"
+infra_proxmox_api_token_file_ansible: "{{ infra_repo_root }}/.outputs/api-tokens/ansible-prov-api-token.txt"

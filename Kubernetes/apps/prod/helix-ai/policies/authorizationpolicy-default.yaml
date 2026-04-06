@@ -1,0 +1,13 @@
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: helix-namespace-allow
+  namespace: helix-ai
+spec:
+  rules:
+    - from:
+        - source:
+            namespaces:
+              - helix-ai
+              - istio-system
+              - monitoring

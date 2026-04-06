@@ -98,6 +98,23 @@ tasks:
           --tags setup \
           {{.CLI_ARGS}}
 
+  update-secrets:
+    desc: "Run only Vault secrets phase to update secrets/config in Vault"
+    aliases:
+      - vault:update-secrets
+      - vlt:update-secrets
+      - v:update-secrets
+    cmds:
+      - |
+        set -e
+        ANSIBLE_CONFIG="{{.ANSIBLE_CONFIG_FILE}}" \
+        ANSIBLE_ROLES_PATH="{{.ROLES_PATH}}" \
+        "{{.VENV_DIR}}/bin/ansible-playbook" \
+          "{{.DEPLOY_PLAYBOOK}}" \
+          -i "{{.INVENTORY_FILE}}" \
+          --tags secrets \
+          {{.CLI_ARGS}}
+
   users:
     desc: "Run Vault users phase"
     cmds:

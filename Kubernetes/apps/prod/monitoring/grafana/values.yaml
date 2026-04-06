@@ -1,0 +1,36 @@
+admin:
+  existingSecret: grafana-admin
+  userKey: admin-user
+  passwordKey: grafana_admin_password
+persistence:
+  enabled: true
+  storageClassName: longhorn
+  size: 20Gi
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        access: proxy
+      - name: Loki
+        type: loki
+        url: http://loki-gateway.monitoring.svc.cluster.local
+        access: proxy
+      - name: Tempo
+        type: tempo
+        url: http://tempo-query-frontend.monitoring.svc.cluster.local:3100
+        access: proxy
+      - name: Pyroscope
+        type: grafana-pyroscope-datasource
+        url: http://pyroscope.monitoring.svc.cluster.local:4040
+        access: proxy
+      - name: Mimir
+        type: prometheus
+        url: http://mimir-nginx.monitoring.svc.cluster.local/prometheus
+        access: proxy
+env:
+  GF_SERVER_ROOT_URL: https://grafana.sinlessgames.com
+serviceMonitor:
+  enabled: true

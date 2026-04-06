@@ -1,0 +1,209 @@
+---
+- name: Ensure generated directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ kubernetes_generated_dir }}"
+    - "{{ kubernetes_generated_env_dir }}"
+    - "{{ kubernetes_role_generated_snippets_dir }}"
+    - "{{ kubernetes_role_generated_logs_dir }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Render control plane cloud-init snippets
+  ansible.builtin.template:
+    src: "{{ kubernetes_templates_dir }}/cloud-init-master.yaml.j2"
+    dest: "{{ kubernetes_role_generated_snippets_dir }}/{{ item.name }}-cloud-init.yaml"
+    mode: "0644"
+  loop: "{{ kubernetes_nodes.control_plane }}"
+  loop_control:
+    index_var: node_index
+  vars:
+    kubernetes_default_user: "{{ kubernetes_ansible.default_user }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Render worker cloud-init snippets
+  ansible.builtin.template:
+    src: "{{ kubernetes_templates_dir }}/cloud-init-worker.yaml.j2"
+    dest: "{{ kubernetes_role_generated_snippets_dir }}/{{ item.name }}-cloud-init.yaml"
+    mode: "0644"
+  loop: "{{ kubernetes_nodes.workers }}"
+  loop_control:
+    index_var: node_index
+  vars:
+    kubernetes_default_user: "{{ kubernetes_ansible.default_user }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Render production Terraform for Kubernetes cluster
+  ansible.builtin.template:
+    src: "{{ kubernetes_templates_dir }}/k8s-prod-cluster.tf.j2"
+    dest: "{{ kubernetes_role_generated_tf_file }}"
+    mode: "0644"
+  delegate_to: localhost
+  run_once: true
+
+- name: Check for Proxmox API token file
+  ansible.builtin.stat:
+    path: "{{ kubernetes_deploy_proxmox_api_token_file }}"
+  register: kubernetes_proxmox_api_token_file_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Assert Proxmox API token file exists
+  ansible.builtin.assert:
+    that:
+      - kubernetes_proxmox_api_token_file_stat.stat.exists | default(false)
+    fail_msg: >-
+      Missing Proxmox API token file at {{ kubernetes_deploy_proxmox_api_token_file }}.
+      Generate or refresh the Terraform automation token before deploying Kubernetes.
+  delegate_to: localhost
+  run_once: true
+
+- name: Read Proxmox API token file
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_deploy_proxmox_api_token_file }}"
+  register: kubernetes_proxmox_api_token_file_content
+  delegate_to: localhost
+  run_once: true
+  no_log: true
+
+- name: Decode Proxmox API token file text
+  ansible.builtin.set_fact:
+    kubernetes_proxmox_api_token_file_text: "{{ kubernetes_proxmox_api_token_file_content.content | b64decode }}"
+  delegate_to: localhost
+  run_once: true
+  no_log: true
+
+- name: Extract Proxmox API token ID
+  ansible.builtin.shell: |
+    set -euo pipefail
+    awk -F= '/^FULL_TOKENID=/{print $2; exit}' "{{ kubernetes_deploy_proxmox_api_token_file }}"
+  args:
+    executable: /bin/bash
+  register: kubernetes_terraform_proxmox_api_token_id_result
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  no_log: true
+
+- name: Extract Proxmox API token secret
+  ansible.builtin.shell: |
+    set -euo pipefail
+    awk -F= '/^TOKEN_SECRET=/{print $2; exit}' "{{ kubernetes_deploy_proxmox_api_token_file }}"
+  args:
+    executable: /bin/bash
+  register: kubernetes_terraform_proxmox_api_token_secret_result
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  no_log: true
+
+- name: Build Terraform runtime credentials
+  ansible.builtin.set_fact:
+    kubernetes_terraform_proxmox_api_token_id: "{{ kubernetes_terraform_proxmox_api_token_id_result.stdout | trim }}"
+    kubernetes_terraform_proxmox_api_token_secret: "{{ kubernetes_terraform_proxmox_api_token_secret_result.stdout | trim }}"
+  delegate_to: localhost
+  run_once: true
+  no_log: true
+
+- name: Assert Terraform runtime credentials are complete
+  ansible.builtin.assert:
+    that:
+      - kubernetes_terraform_proxmox_api_token_id | length > 0
+      - kubernetes_terraform_proxmox_api_token_secret | length > 0
+      - kubernetes_deploy_proxmox_api_url | length > 0
+      - kubernetes_deploy_ssh_keys | length > 0
+    fail_msg: "Terraform runtime credentials or SSH keys are incomplete for Kubernetes deployment."
+  delegate_to: localhost
+  run_once: true
+  no_log: true
+
+- name: Clear stale Proxmox VM locks before Terraform apply
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - StrictHostKeyChecking=no
+      - root@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] }}
+      - /bin/bash
+      - -lc
+      - >-
+        set -euo pipefail;
+        vmid="{{ item.vmid }}";
+        if [ -f "/etc/pve/qemu-server/${vmid}.conf" ]; then
+          timeout 10 /usr/sbin/qm unlock "${vmid}" || true;
+        fi
+        rm -f "/var/lock/qemu-server/lock-${vmid}.conf";
+  loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  when: not kubernetes_operation.plan_only | bool
+
+- name: Initialize Terraform working directory
+  ansible.builtin.command:
+    argv:
+      - terraform
+      - -chdir={{ kubernetes_terraform_dir }}
+      - init
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  when: not kubernetes_operation.plan_only | bool
+  environment:
+    TF_VAR_proxmox_api_url: "{{ kubernetes_deploy_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ kubernetes_terraform_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ kubernetes_terraform_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
+    TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
+  no_log: true
+
+- name: Apply Terraform cluster plan
+  ansible.builtin.command:
+    argv:
+      - terraform
+      - -chdir={{ kubernetes_terraform_dir }}
+      - apply
+      - -auto-approve
+      - -target=module.kubernetes_prod_control_plane
+      - -target=module.kubernetes_prod_workers
+  delegate_to: localhost
+  run_once: true
+  when:
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+  environment:
+    TF_VAR_proxmox_api_url: "{{ kubernetes_deploy_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ kubernetes_terraform_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ kubernetes_terraform_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
+    TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
+  no_log: true
+
+- name: Configure GPU passthrough on dedicated worker VM
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - StrictHostKeyChecking=no
+      - root@{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] }}
+      - qm
+      - set
+      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
+      - --hostpci0
+      - "mapping={{ kubernetes_proxmox_gpu.devices[0] }},pcie=1"
+      - --hostpci1
+      - "mapping={{ kubernetes_proxmox_gpu.devices[1] }},pcie=1"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool

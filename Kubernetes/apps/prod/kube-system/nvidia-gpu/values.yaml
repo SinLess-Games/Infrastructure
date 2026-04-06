@@ -1,0 +1,18 @@
+driver:
+  enabled: true
+toolkit:
+  enabled: true
+dcgmExporter:
+  serviceMonitor:
+    enabled: true
+nfd:
+  enabled: true
+node-feature-discovery:
+  enableNodeFeatureApi: true
+gfd:
+  enabled: true
+operator:
+  defaultRuntime: containerd
+devicePlugin:
+  config:
+    create: false

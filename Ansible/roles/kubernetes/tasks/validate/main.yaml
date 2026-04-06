@@ -1,0 +1,20 @@
+---
+- name: Gather cluster node status
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - get
+      - nodes
+      - -o
+      - wide
+  changed_when: false
+  register: kubernetes_validate_nodes
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Show cluster node status
+  ansible.builtin.debug:
+    var: kubernetes_validate_nodes.stdout_lines
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_validate_nodes is defined

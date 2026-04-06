@@ -1,0 +1,15 @@
+config:
+  data:
+    beyla-config.yml: |
+      discovery:
+        services:
+          - namespace: helix-ai
+          - namespace: sinless-games
+      otel_metrics_export:
+        endpoint: http://alloy-receiver.monitoring.svc.cluster.local:4318
+      otel_traces_export:
+        endpoint: http://tempo-distributor.monitoring.svc.cluster.local:4318
+daemonset:
+  enabled: true
+serviceMonitor:
+  enabled: true

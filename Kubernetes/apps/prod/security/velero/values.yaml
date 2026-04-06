@@ -1,0 +1,21 @@
+credentials:
+  useSecret: true
+configuration:
+  backupStorageLocation:
+    - name: default
+      provider: aws
+      bucket: k8s-prod-velero
+      config:
+        region: ${S3_REGION}
+        s3ForcePathStyle: ${S3_FORCE_PATH_STYLE}
+        s3Url: ${S3_ENDPOINT}
+  volumeSnapshotLocation:
+    - name: default
+      provider: aws
+deployNodeAgent: true
+schedules:
+  daily:
+    disabled: false
+    schedule: "0 2 * * *"
+    template:
+      ttl: 168h

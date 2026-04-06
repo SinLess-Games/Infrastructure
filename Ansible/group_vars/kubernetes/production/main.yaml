@@ -5,10 +5,16 @@
 
 kubernetes_default_environment: "prod"
 kubernetes_environment: "prod"
-kubernetes_cluster_name: "k8s-prod"
-kubernetes_resource_pool: "prod"
+kubernetes_cluster_name: "rke2-prod"
+kubernetes_resource_pool: ""
 kubernetes_domain_suffix: "prod.k8s.sinlessgames.com"
 kubernetes_search_domain: "{{ kubernetes_domain_suffix }}"
+kubernetes_primary_domains:
+  - "sinlessgames.com"
+  - "helixaibot.com"
+kubernetes_api_vip: "10.10.40.10"
+kubernetes_api_fqdn: "api.prod.k8s.sinlessgames.com"
+kubernetes_proxmox_snippets_storage: "local:snippets"
 
 kubernetes_network:
   bridge: "vmbr40"
@@ -26,7 +32,7 @@ kubernetes_proxmox_target_nodes:
 kubernetes_control_plane:
   count: 3
   vmid_start: 400
-  name_prefix: "k8s-prod-master"
+  name_prefix: "rke2-prod-cp"
   cpu_cores: 4
   cpu_sockets: 1
   memory_mb: 8192
@@ -41,16 +47,16 @@ kubernetes_control_plane:
 kubernetes_workers:
   count: 3
   vmid_start: 410
-  name_prefix: "k8s-prod-worker"
-  cpu_cores: 4
+  name_prefix: "rke2-prod-wk"
+  cpu_cores: 6
   cpu_sockets: 1
-  memory_mb: 8192
-  disk_size: "100G"
+  memory_mb: 16384
+  disk_size: "150G"
   clone_template: "debian-13-template"
   target_nodes:
-    - pve-05
     - pve-01
     - pve-04
+    - pve-05
   startup_order: 20
 
 kubernetes_master: "{{ kubernetes_control_plane }}"
@@ -68,43 +74,111 @@ kubernetes_worker_ips:
 
 kubernetes_nodes:
   control_plane:
-    - name: "k8s-prod-master-01"
-      hostname: "k8s-prod-master-01"
-      fqdn: "k8s-prod-master-01.prod.k8s.sinlessgames.com"
+    - name: "rke2-prod-cp-01"
+      hostname: "rke2-prod-cp-01"
+      fqdn: "rke2-prod-cp-01.prod.k8s.sinlessgames.com"
       ip: "10.10.40.11"
       vmid: 400
       target_node: "pve-01"
-    - name: "k8s-prod-master-02"
-      hostname: "k8s-prod-master-02"
-      fqdn: "k8s-prod-master-02.prod.k8s.sinlessgames.com"
+      clone_template: "debian-13-template-pve-01"
+    - name: "rke2-prod-cp-02"
+      hostname: "rke2-prod-cp-02"
+      fqdn: "rke2-prod-cp-02.prod.k8s.sinlessgames.com"
       ip: "10.10.40.12"
       vmid: 401
       target_node: "pve-04"
-    - name: "k8s-prod-master-03"
-      hostname: "k8s-prod-master-03"
-      fqdn: "k8s-prod-master-03.prod.k8s.sinlessgames.com"
+      clone_template: "debian-13-template-pve-04"
+    - name: "rke2-prod-cp-03"
+      hostname: "rke2-prod-cp-03"
+      fqdn: "rke2-prod-cp-03.prod.k8s.sinlessgames.com"
       ip: "10.10.40.13"
       vmid: 402
       target_node: "pve-05"
+      clone_template: "debian-13-template-pve-05"
   workers:
-    - name: "k8s-prod-worker-01"
-      hostname: "k8s-prod-worker-01"
-      fqdn: "k8s-prod-worker-01.prod.k8s.sinlessgames.com"
+    - name: "rke2-prod-wk-01"
+      hostname: "rke2-prod-wk-01"
+      fqdn: "rke2-prod-wk-01.prod.k8s.sinlessgames.com"
       ip: "10.10.40.20"
       vmid: 410
-      target_node: "pve-05"
-    - name: "k8s-prod-worker-02"
-      hostname: "k8s-prod-worker-02"
-      fqdn: "k8s-prod-worker-02.prod.k8s.sinlessgames.com"
+      target_node: "pve-01"
+      clone_template: "debian-13-template-pve-01"
+      gpu_passthrough_devices:
+        - "NVidia-1060"
+        - "Nvidia-3060"
+      labels:
+        - "accelerator.nvidia.com/gpu=true"
+        - "node.kubernetes.io/gpu=true"
+      taints:
+        - "nvidia.com/gpu=true:NoSchedule"
+    - name: "rke2-prod-wk-02"
+      hostname: "rke2-prod-wk-02"
+      fqdn: "rke2-prod-wk-02.prod.k8s.sinlessgames.com"
       ip: "10.10.40.21"
       vmid: 411
-      target_node: "pve-01"
-    - name: "k8s-prod-worker-03"
-      hostname: "k8s-prod-worker-03"
-      fqdn: "k8s-prod-worker-03.prod.k8s.sinlessgames.com"
+      target_node: "pve-04"
+      clone_template: "debian-13-template-pve-04"
+    - name: "rke2-prod-wk-03"
+      hostname: "rke2-prod-wk-03"
+      fqdn: "rke2-prod-wk-03.prod.k8s.sinlessgames.com"
       ip: "10.10.40.22"
       vmid: 412
-      target_node: "pve-04"
+      target_node: "pve-05"
+      clone_template: "debian-13-template-pve-05"
+
+kubernetes_platform:
+  storage_class_default: "longhorn"
+  backup_bucket_prefix: "k8s-prod"
+  cloudflare_zone_filters:
+    - "sinlessgames.com"
+    - "helixaibot.com"
+  namespaces:
+    - "kube-system"
+    - "networking"
+    - "monitoring"
+    - "security"
+    - "gitops"
+    - "istio-system"
+    - "helix-ai"
+    - "sinless-games"
+  vault:
+    auth_mount: "kubernetes"
+    cluster_secret_store_name: "vault-backend"
+    kv_mount: "secrets"
+    common_path: "kubernetes/production/common"
+    integrations_path: "kubernetes/production/integrations"
+    workloads_path: "kubernetes/production/workloads"
+  r2:
+    region: "auto"
+    buckets:
+      velero: "k8s-prod-velero"
+      longhorn: "k8s-prod-longhorn"
+      loki: "k8s-prod-loki"
+      mimir: "k8s-prod-mimir"
+      tempo: "k8s-prod-tempo"
+      pyroscope: "k8s-prod-pyroscope"
+  object_storage:
+    provider: "garage"
+    preferred_self_hosted_engine: "garage"
+    endpoint_secret_key: "s3_endpoint"
+    region_secret_key: "s3_region"
+    access_key_secret_key: "s3_access_key_id"
+    secret_key_secret_key: "s3_secret_access_key"
+    force_path_style_secret_key: "s3_force_path_style"
+  observability:
+    grafana_hostname: "grafana.sinlessgames.com"
+    kiali_hostname: "kiali.sinlessgames.com"
+    mimir_hostname: "mimir.sinlessgames.com"
+    loki_hostname: "loki.sinlessgames.com"
+    tempo_hostname: "tempo.sinlessgames.com"
+    pyroscope_hostname: "pyroscope.sinlessgames.com"
+  edge:
+    argocd_hostname: "argocd.sinlessgames.com"
+    istio_ingress_hostname: "apps.sinlessgames.com"
+    cloudflared_hostname: "tunnel.sinlessgames.com"
+  github:
+    runners_namespace: "gitops"
+    runner_scale_set_name: "prod-runners"
 
 vault_kubernetes_prod_data: {}
 vault_kubernetes_ansible_prod_data: {}
@@ -122,8 +196,8 @@ kubernetes_externaldns:
     token: "{{ lookup('env', 'CLOUDFLARE_API_TOKEN') | default('', true) }}"
 
 kubernetes_flux_path: "./Kubernetes/clusters/prod"
-kubernetes_vault_kv_path: "secret/data/kubernetes/prod"
-kubernetes_vault_eso_secret_path: "kubernetes/prod"
+kubernetes_vault_kv_path: "secret/data/kubernetes/production"
+kubernetes_vault_eso_secret_path: "kubernetes/production"
 kubernetes_externaldns_technitium_enabled: false
 
 kubernetes_operation:

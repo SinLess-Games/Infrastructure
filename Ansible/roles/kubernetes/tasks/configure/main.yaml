@@ -1,0 +1,130 @@
+---
+- name: Create required kernel module config
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/rke2.conf
+    mode: "0644"
+    content: |
+      {% for module in kubernetes_role_kernel_modules %}
+      {{ module }}
+      {% endfor %}
+
+- name: Load required kernel modules
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ kubernetes_role_kernel_modules }}"
+
+- name: Configure Kubernetes sysctl values
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: true
+    reload: true
+  loop: "{{ kubernetes_role_sysctl | dict2items }}"
+
+- name: Disable swap at runtime
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+  failed_when: false
+
+- name: Disable swap in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s+sw\s+.*)$'
+    replace: '# \1'
+
+- name: Install required operating system packages
+  ansible.builtin.package:
+    name: "{{ kubernetes_role_required_packages }}"
+    state: present
+
+- name: Ensure RKE2 configuration directory exists
+  ansible.builtin.file:
+    path: "{{ kubernetes_role_rke2_config_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Install RKE2
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION="{{ kubernetes_rke2_version }}" sh -
+  args:
+    creates: /usr/local/bin/rke2
+
+- name: Render kube-vip manifest on control plane nodes
+  ansible.builtin.template:
+    src: kube-vip-static-pod.yaml.j2
+    dest: /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
+    mode: "0644"
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - kubernetes_kube_vip.enabled | bool
+
+- name: Render RKE2 server configuration
+  ansible.builtin.template:
+    src: rke2-server-config.yaml.j2
+    dest: "{{ kubernetes_role_rke2_config_dir }}/config.yaml"
+    mode: "0600"
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+  notify: Restart rke2-server
+
+- name: Render RKE2 agent configuration
+  ansible.builtin.template:
+    src: rke2-agent-config.yaml.j2
+    dest: "{{ kubernetes_role_rke2_config_dir }}/config.yaml"
+    mode: "0600"
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+  notify: Restart rke2-agent
+
+- name: Ensure RKE2 server service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ kubernetes_role_rke2_server_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+
+- name: Ensure RKE2 agent service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ kubernetes_role_rke2_agent_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+
+- name: Wait for kubeconfig on bootstrap control plane
+  ansible.builtin.wait_for:
+    path: /etc/rancher/rke2/rke2.yaml
+    timeout: "{{ kubernetes_wait_for_kubeconfig_timeout }}"
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Fetch admin kubeconfig from bootstrap node
+  ansible.builtin.fetch:
+    src: /etc/rancher/rke2/rke2.yaml
+    dest: "{{ kubernetes_role_local_kubeconfig_path }}"
+    flat: true
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Rewrite kubeconfig server endpoint to production API VIP
+  ansible.builtin.replace:
+    path: "{{ kubernetes_role_local_kubeconfig_path }}"
+    regexp: 'https://127.0.0.1:6443'
+    replace: "https://{{ kubernetes_rke2_api_ip }}:6443"
+  delegate_to: localhost
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Wait for current node to report Ready
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - wait
+      - --for=condition=Ready
+      - node/{{ inventory_hostname }}
+      - --timeout=300s
+  changed_when: false
+  delegate_to: "{{ kubernetes_control_plane_first_host }}"
+  when:
+    - inventory_hostname != kubernetes_control_plane_first_host
+    - inventory_hostname in groups[kubernetes_rke2_cluster_group_name]

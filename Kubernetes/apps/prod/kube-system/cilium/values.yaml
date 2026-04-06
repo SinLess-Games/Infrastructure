@@ -1,0 +1,32 @@
+operator:
+  replicas: 2
+ipam:
+  mode: kubernetes
+k8sServiceHost: 10.10.40.10
+k8sServicePort: 6443
+kubeProxyReplacement: false
+hubble:
+  relay:
+    enabled: true
+  ui:
+    enabled: false
+prometheus:
+  enabled: true
+envoy:
+  enabled: true
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - BPF
+      - PERFMON

@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-system-config
+  namespace: gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "-7"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/Sinless777/Infrastructure.git
+    targetRevision: main
+    path: Kubernetes/apps/prod/kube-system/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces-kube-system.yaml
+  - namespaces-istio-system.yaml
+  - namespaces-networking.yaml
+  - namespaces-monitoring.yaml
+  - namespaces-security.yaml
+  - namespaces-gitops.yaml
+  - namespaces-helix-ai.yaml
+  - namespaces-sinless-games.yaml
+  - local-istio-mesh-policies.yaml
+  - local-kube-system-config.yaml
+  - local-networking-config.yaml
+  - local-monitoring-config.yaml
+  - local-external-secrets-config.yaml
+  - local-security-policies.yaml
+  - local-cloudflared.yaml
+  - local-wazuh.yaml
+  - local-helix-ai-policies.yaml
+  - local-helix-ai-mesh.yaml
+  - local-sinless-games-policies.yaml
+  - local-sinless-games-mesh.yaml
+  - local-platform-examples.yaml
+  - platform-helm-applicationset.yaml

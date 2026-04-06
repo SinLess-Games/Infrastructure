@@ -12,3 +12,10 @@
   tags:
     - vault
     - configure
+
+- name: Include Vault secrets-only tasks
+  ansible.builtin.include_tasks: secrets.yaml
+  when: "'secrets' in vault_role_phases"
+  tags:
+    - vault
+    - secrets

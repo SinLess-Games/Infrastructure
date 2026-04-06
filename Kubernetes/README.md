@@ -1,28 +1,19 @@
 # Kubernetes Layout
 
-This directory is organized for a mixed model:
+This directory now supports a production Argo CD operating model while preserving the existing cluster entrypoints.
 
-- `clusters/flux/`: the shared FluxCD sync entrypoint for GitOps-managed clusters.
-- `clusters/dev/`: local or manually applied development manifests.
-- `apps/base/`: reusable application manifests.
-- `apps/<env>/`: environment-specific application composition.
-- `infrastructure/`: shared cluster services, controllers, and supporting config.
+Top-level conventions:
 
-Current operating model:
+- `clusters/<env>/`: environment bootstrap entrypoints and cluster-level docs.
+- `apps/prod/<namespace>/`: production applications grouped by namespace ownership.
+- `validation/prod/`: production health checks, smoke tests, and debugging helpers.
+- `infrastructure/`: shared notes and legacy infrastructure guidance.
 
-- `dev` is not managed by FluxCD.
-- FluxCD manages both `staging` and `prod` from the shared `clusters/flux/` entrypoint.
-- Shared manifests should be included once from `clusters/flux/` to avoid duplicate objects across environments.
+Production conventions:
 
-Recommended growth pattern:
+- Every namespace has its own folder and `namespace.yaml`.
+- Helm values, mesh policies, examples, and Kustomize overlays live under the namespace they belong to.
+- Argo CD applications point at these namespace-scoped folders and values files.
+- Phase ordering is expressed with Argo CD sync waves plus bootstrap documentation.
 
-- Put reusable app manifests in `apps/base/<app>/`.
-- Put staging-only manifests in `apps/staging/`.
-- Put production-only manifests in `apps/prod/`.
-- Include shared resources once from `clusters/flux/`.
-- Add Flux bootstrap output under `clusters/flux/flux-system/`.
-
-Expected Flux bootstrap output:
-
-- `clusters/flux/flux-system/gotk-components.yaml`
-- `clusters/flux/flux-system/gotk-sync.yaml`
+Legacy Flux content remains in place for compatibility, but the production source of truth in this change set is the Argo CD layout under `clusters/prod` and `apps/prod`.

@@ -130,3 +130,10 @@
       tags:
         - vault
         - configure
+
+    - role: vault
+      vars:
+        vault_role_phases: ["secrets"]
+      tags:
+        - vault
+        - secrets

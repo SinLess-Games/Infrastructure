@@ -1,0 +1,13 @@
+falco:
+  grpc:
+    enabled: true
+  grpcOutput:
+    enabled: true
+  jsonOutput: true
+serviceMonitor:
+  create: true
+falcosidekick:
+  enabled: true
+  config:
+    discord:
+      webhookurl: ${DISCORD_ALERT_WEBHOOK_URL}

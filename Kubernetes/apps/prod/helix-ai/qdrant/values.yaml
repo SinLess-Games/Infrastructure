@@ -1,0 +1,15 @@
+replicaCount: 3
+persistence:
+  accessModes:
+    - ReadWriteOnce
+  size: 100Gi
+  storageClassName: longhorn
+serviceMonitor:
+  enabled: true
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    cpu: 2
+    memory: 8Gi

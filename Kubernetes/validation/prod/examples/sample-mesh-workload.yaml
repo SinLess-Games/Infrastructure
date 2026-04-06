@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mesh-echo
+  namespace: sinless-games
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mesh-echo
+  template:
+    metadata:
+      labels:
+        app: mesh-echo
+    spec:
+      containers:
+        - name: echo
+          image: hashicorp/http-echo:1.0.0
+          args:
+            - "-text=sinless-mesh"
+          ports:
+            - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mesh-echo
+  namespace: sinless-games
+  labels:
+    app: mesh-echo
+spec:
+  selector:
+    app: mesh-echo
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5678

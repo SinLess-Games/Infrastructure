@@ -1,0 +1,12 @@
+---
+- name: Run deploy phase
+  ansible.builtin.include_tasks: deploy/main.yaml
+  when: "'deploy' in kubernetes_role_phases"
+
+- name: Run configure phase
+  ansible.builtin.include_tasks: configure/main.yaml
+  when: "'configure' in kubernetes_role_phases"
+
+- name: Run validate phase
+  ansible.builtin.include_tasks: validate/main.yaml
+  when: "'validate' in kubernetes_role_phases"

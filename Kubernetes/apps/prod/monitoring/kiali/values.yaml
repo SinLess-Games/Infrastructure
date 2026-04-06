@@ -1,0 +1,18 @@
+auth:
+  strategy: anonymous
+deployment:
+  accessible_namespaces:
+    - "**"
+external_services:
+  prometheus:
+    url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+  grafana:
+    enabled: true
+    in_cluster_url: http://grafana.monitoring.svc.cluster.local
+    url: https://grafana.sinlessgames.com
+  tracing:
+    enabled: true
+    provider: tempo
+    in_cluster_url: http://tempo-query-frontend.monitoring.svc.cluster.local:3100
+server:
+  web_root: /kiali

@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: n8n
+  namespace: helix-ai
+spec:
+  gateways:
+    - istio-system/shared-edge
+  hosts:
+    - n8n.helixaibot.com
+  http:
+    - route:
+        - destination:
+            host: n8n.helix-ai.svc.cluster.local
+            port:
+              number: 80

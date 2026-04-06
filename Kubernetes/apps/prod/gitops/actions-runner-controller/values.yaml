@@ -1,0 +1,8 @@
+authSecret:
+  enabled: false
+controllerManager:
+  metrics:
+    serviceMonitor:
+      enable: true
+githubWebhookServer:
+  enabled: false

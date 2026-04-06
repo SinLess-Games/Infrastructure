@@ -1,0 +1,11 @@
+global:
+  proxy:
+    autoInject: enabled
+meshConfig:
+  accessLogFile: /dev/stdout
+  enablePrometheusMerge: true
+pilot:
+  replicaCount: 3
+  autoscaleEnabled: true
+  env:
+    EXTERNAL_ISTIOD: "false"

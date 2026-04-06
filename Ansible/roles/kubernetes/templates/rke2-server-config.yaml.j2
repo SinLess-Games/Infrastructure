@@ -1,0 +1,43 @@
+token: "{{ rke2_server_token }}"
+write-kubeconfig-mode: "{{ kubernetes_rke2_write_kubeconfig_mode }}"
+tls-san:
+{% for san in (kubernetes_rke2_additional_sans + (kubernetes_rke2_server_tls_sans | default([]))) | unique %}
+  - "{{ san }}"
+{% endfor %}
+cni:
+{% for cni in kubernetes_rke2_cni %}
+  - "{{ cni }}"
+{% endfor %}
+cluster-cidr: "{{ kubernetes_cluster_cidr }}"
+service-cidr: "{{ kubernetes_service_cidr }}"
+cluster-dns: "{{ kubernetes_cluster_dns }}"
+node-ip: "{{ ansible_host | default(ansible_default_ipv4.address) }}"
+node-name: "{{ inventory_hostname }}"
+selinux: {{ kubernetes_rke2_selinux | bool | lower }}
+disable:
+{% for item in kubernetes_rke2_disable %}
+  - "{{ item }}"
+{% endfor %}
+etcd-expose-metrics: {{ kubernetes_rke2_etcd_expose_metrics | bool | lower }}
+etcd-snapshot-schedule-cron: "{{ kubernetes_rke2_snapshot_schedule_cron }}"
+etcd-snapshot-retention: {{ kubernetes_rke2_snapshot_retention }}
+pause-image: "{{ kubernetes_rke2_pause_image }}"
+node-label:
+{% for label in kubernetes_rke2_server_node_labels %}
+  - "{{ label }}"
+{% endfor %}
+{% if kubernetes_rke2_server_node_taints | length > 0 %}
+node-taint:
+{% for taint in kubernetes_rke2_server_node_taints %}
+  - "{{ taint }}"
+{% endfor %}
+{% endif %}
+kubelet-arg:
+  - "cloud-provider=external"
+  - "protect-kernel-defaults=true"
+{% for arg in kubernetes_rke2_kubelet_arg %}
+  - "{{ arg }}"
+{% endfor %}
+{% if inventory_hostname != kubernetes_control_plane_first_host %}
+server: "{{ kubernetes_server_url }}"
+{% endif %}

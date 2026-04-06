@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mesh-echo
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - sinless-games
+  selector:
+    matchLabels:
+      app: mesh-echo
+  endpoints:
+    - port: http
+      interval: 30s

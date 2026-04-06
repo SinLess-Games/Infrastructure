@@ -1,0 +1,27 @@
+server: "{{ kubernetes_server_url }}"
+token: "{{ rke2_server_token }}"
+node-ip: "{{ ansible_host | default(ansible_default_ipv4.address) }}"
+node-name: "{{ inventory_hostname }}"
+selinux: {{ kubernetes_rke2_selinux | bool | lower }}
+pause-image: "{{ kubernetes_rke2_pause_image }}"
+node-label:
+{% for label in kubernetes_rke2_agent_node_labels %}
+  - "{{ label }}"
+{% endfor %}
+{% if inventory_hostname == kubernetes_rke2_gpu_worker_name %}
+  - "accelerator.nvidia.com/gpu=true"
+  - "node.kubernetes.io/gpu=true"
+{% endif %}
+node-taint:
+{% for taint in kubernetes_rke2_agent_node_taints %}
+  - "{{ taint }}"
+{% endfor %}
+{% if inventory_hostname == kubernetes_rke2_gpu_worker_name %}
+  - "nvidia.com/gpu=true:NoSchedule"
+{% endif %}
+kubelet-arg:
+  - "cloud-provider=external"
+  - "protect-kernel-defaults=true"
+{% for arg in kubernetes_rke2_kubelet_arg %}
+  - "{{ arg }}"
+{% endfor %}

@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: gitops
+spec:
+  description: Production platform workloads for the RKE2 cluster
+  sourceRepos:
+    - https://github.com/Sinless777/Infrastructure.git
+    - https://helm.cilium.io
+    - https://charts.longhorn.io
+    - https://helm.ngc.nvidia.com/nvidia
+    - https://istio-release.storage.googleapis.com/charts
+    - https://charts.jetstack.io
+    - https://kubernetes-sigs.github.io/external-dns/
+    - https://grafana.github.io/helm-charts
+    - https://prometheus-community.github.io/helm-charts
+    - https://open-telemetry.github.io/opentelemetry-helm-charts
+    - https://kiali.org/helm-charts
+    - https://charts.external-secrets.io
+    - https://kyverno.github.io/kyverno
+    - https://falcosecurity.github.io/charts
+    - https://vmware-tanzu.github.io/helm-charts
+    - https://argoproj.github.io/argo-helm
+    - https://actions-runner-controller.github.io/actions-runner-controller
+    - https://charts.cockroachdb.com/
+    - https://charts.bitnami.com/bitnami
+    - https://nats-io.github.io/k8s/helm/charts/
+    - https://qdrant.github.io/qdrant-helm
+  destinations:
+    - namespace: '*'
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

@@ -1,0 +1,18 @@
+config:
+  cluster:
+    enabled: true
+    replicas: 3
+  jetstream:
+    enabled: true
+    fileStore:
+      enabled: true
+      pvc:
+        enabled: true
+        size: 100Gi
+        storageClassName: longhorn
+podDisruptionBudget:
+  enabled: true
+promExporter:
+  enabled: true
+serviceMonitor:
+  enabled: true

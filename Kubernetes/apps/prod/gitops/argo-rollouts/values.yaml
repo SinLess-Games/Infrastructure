@@ -1,0 +1,6 @@
+controller:
+  replicas: 2
+dashboard:
+  enabled: true
+  ingress:
+    enabled: false
