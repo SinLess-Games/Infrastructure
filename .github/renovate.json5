@@ -26,43 +26,37 @@
     "helm-values",
     "kubernetes",
     "kustomize",
-    "packer",
     "terraform",
   ],
 
   // The repo keeps Ansible Galaxy dependencies in a single canonical file.
   "ansible-galaxy": {
-    fileMatch: ["(^|/)Ansible/requirements\\.ya?ml$"],
+    managerFilePatterns: ["(^|/)Ansible/requirements\\.ya?ml$"],
   },
 
   // Flux, Kustomize, Helm values, and plain Kubernetes manifests all live
   // under the Kubernetes/ tree.
   flux: {
-    fileMatch: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+    managerFilePatterns: ["(^|/)Kubernetes/.+\\.ya?ml$"],
   },
 
   "helm-values": {
-    fileMatch: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+    managerFilePatterns: ["(^|/)Kubernetes/.+\\.ya?ml$"],
   },
 
   kubernetes: {
-    fileMatch: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+    managerFilePatterns: ["(^|/)Kubernetes/.+\\.ya?ml$"],
   },
 
   kustomize: {
-    fileMatch: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+    managerFilePatterns: ["(^|/)Kubernetes/.+\\.ya?ml$"],
   },
 
   // Only scan the root Terraform configuration checked into the repo.
   // Local state, generated modules, and vendored provider directories are
   // intentionally excluded below.
   terraform: {
-    fileMatch: ["(^|/)Terraform/.+\\.tf$"],
-  },
-
-  // Limit Packer updates to the actual template definitions.
-  packer: {
-    fileMatch: ["(^|/)Packer/.+\\.pkr\\.hcl$"],
+    managerFilePatterns: ["(^|/)Terraform/.+\\.tf$"],
   },
 
   // Ignore generated, vendored, and secret-bearing paths so Renovate focuses
@@ -99,7 +93,7 @@
       // Group Flux and Kubernetes repo changes so GitOps updates arrive in a
       // smaller number of reviewable PRs.
       matchManagers: ["flux", "helm-values", "kubernetes", "kustomize"],
-      matchPaths: ["Kubernetes/**"],
+      matchFileNames: ["Kubernetes/**"],
       groupName: "flux kubernetes manifests",
       commitMessageTopic: "Flux Kubernetes manifests",
     },
@@ -108,12 +102,6 @@
       matchManagers: ["terraform"],
       groupName: "terraform providers",
       commitMessageTopic: "Terraform providers",
-    },
-    {
-      // Packer plugin updates are relatively low volume and fit well together.
-      matchManagers: ["packer"],
-      groupName: "packer plugins",
-      commitMessageTopic: "Packer plugins",
     },
     {
       // GitHub Actions updates are grouped for simpler workflow maintenance.
