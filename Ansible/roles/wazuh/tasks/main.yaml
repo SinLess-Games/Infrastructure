@@ -1,0 +1,12 @@
+---
+- name: Include Wazuh runtime secret loading tasks
+  ansible.builtin.include_tasks: load-secrets.yaml
+  when: "'secrets' in wazuh_role_phases"
+
+- name: Include Wazuh VM deployment tasks
+  ansible.builtin.include_tasks: deploy.yaml
+  when: "'deploy' in wazuh_role_phases"
+
+- name: Include Wazuh node configuration tasks
+  ansible.builtin.include_tasks: configure.yaml
+  when: "'configure' in wazuh_role_phases"

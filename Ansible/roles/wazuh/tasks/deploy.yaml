@@ -1,0 +1,286 @@
+---
+- name: Assert required Wazuh deployment variables are defined
+  ansible.builtin.assert:
+    that:
+      - wazuh_nodes | length > 0
+      - wazuh_proxmox_api_url | length > 0
+      - wazuh_proxmox_api_token_file | length > 0
+    fail_msg: "Missing one or more required Wazuh deployment variables."
+
+- name: Read Proxmox API token file for Wazuh deployment
+  ansible.builtin.slurp:
+    src: "{{ wazuh_repo_root }}/{{ wazuh_proxmox_api_token_file }}"
+  register: wazuh_proxmox_token_file
+  no_log: true
+
+- name: Decode Proxmox API token file contents
+  ansible.builtin.set_fact:
+    wazuh_proxmox_token_file_text: "{{ wazuh_proxmox_token_file.content | b64decode }}"
+  no_log: true
+
+- name: Parse Proxmox API token data
+  ansible.builtin.set_fact:
+    wazuh_proxmox_full_token_id: >-
+      {{
+        (
+          wazuh_proxmox_token_file_text.split('FULL_TOKENID=')[1].splitlines()[0].strip()
+          if 'FULL_TOKENID=' in wazuh_proxmox_token_file_text
+          else ''
+        )
+      }}
+    wazuh_proxmox_token_secret: >-
+      {{
+        (
+          wazuh_proxmox_token_file_text.split('TOKEN_SECRET=')[1].splitlines()[0].strip()
+          if 'TOKEN_SECRET=' in wazuh_proxmox_token_file_text
+          else ''
+        )
+      }}
+  no_log: true
+
+- name: Derive Wazuh Proxmox token user and token name
+  ansible.builtin.set_fact:
+    wazuh_proxmox_api_user: >-
+      {{
+        wazuh_proxmox_full_token_id.split('!')[0]
+        if ('!' in wazuh_proxmox_full_token_id)
+        else (wazuh_proxmox_api_user | default(''))
+      }}
+    wazuh_proxmox_api_token_id: >-
+      {{
+        wazuh_proxmox_full_token_id.split('!')[1]
+        if ('!' in wazuh_proxmox_full_token_id)
+        else ''
+      }}
+  no_log: true
+
+- name: Assert Proxmox token parsing succeeded
+  ansible.builtin.assert:
+    that:
+      - wazuh_proxmox_api_user | length > 0
+      - wazuh_proxmox_full_token_id | length > 0
+      - wazuh_proxmox_api_token_id | length > 0
+      - wazuh_proxmox_token_secret | length > 0
+    fail_msg: "Unable to parse the Wazuh Proxmox API token file."
+
+- name: Query current Wazuh VMs from Proxmox
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ wazuh_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (wazuh_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ wazuh_proxmox_api_user }}"
+    api_token_id: "{{ wazuh_proxmox_api_token_id }}"
+    api_token_secret: "{{ wazuh_proxmox_token_secret }}"
+    validate_certs: "{{ not (wazuh_proxmox_tls_insecure | bool) }}"
+    type: qemu
+    config: current
+  register: wazuh_existing_vm_info
+  retries: "{{ wazuh_proxmox_api_retries }}"
+  delay: "{{ wazuh_proxmox_api_retry_delay }}"
+  until: wazuh_existing_vm_info is succeeded
+
+- name: Build existing Wazuh VM ID list
+  ansible.builtin.set_fact:
+    wazuh_existing_vmids: "{{ wazuh_existing_vm_info.proxmox_vms | default([]) | map(attribute='vmid') | map('int') | list }}"
+
+- name: Resolve Wazuh clone template metadata
+  ansible.builtin.set_fact:
+    wazuh_clone_template_name: "{{ wazuh_clone_template_by_node[item.target_node] | default(wazuh_clone_template) }}"
+    wazuh_clone_template_info: >-
+      {{
+        wazuh_existing_vm_info.proxmox_vms
+        | default([])
+        | selectattr('node', 'equalto', item.target_node)
+        | selectattr('name', 'equalto', wazuh_clone_template_by_node[item.target_node] | default(wazuh_clone_template))
+        | list
+        | first
+        | default({})
+      }}
+  loop: "{{ wazuh_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: (item.vmid | int) not in wazuh_existing_vmids
+  register: wazuh_clone_template_metadata
+
+- name: Assert Wazuh clone template exists on target node
+  ansible.builtin.assert:
+    that:
+      - item.ansible_facts.wazuh_clone_template_info != {}
+      - item.ansible_facts.wazuh_clone_template_info.vmid is defined
+    fail_msg: >-
+      Unable to find clone template '{{ item.ansible_facts.wazuh_clone_template_name }}'
+      on node '{{ item.item.target_node }}'.
+  loop: "{{ wazuh_clone_template_metadata.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.skipped is not defined or not item.skipped
+
+- name: Request Wazuh VM clone from Proxmox API
+  ansible.builtin.uri:
+    url: "{{ wazuh_proxmox_api_url }}/nodes/{{ item.item.target_node }}/qemu/{{ item.ansible_facts.wazuh_clone_template_info.vmid }}/clone"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ wazuh_proxmox_full_token_id }}={{ wazuh_proxmox_token_secret }}"
+    validate_certs: "{{ not (wazuh_proxmox_tls_insecure | bool) }}"
+    body_format: form-urlencoded
+    body:
+      newid: "{{ item.item.vmid }}"
+      name: "{{ item.item.name }}"
+      full: "1"
+      storage: "{{ wazuh_storage_by_node[item.item.target_node] | default(wazuh_storage) }}"
+      target: "{{ item.item.target_node }}"
+    status_code: 200
+    return_content: true
+  register: wazuh_clone_request
+  no_log: true
+  loop: "{{ wazuh_clone_template_metadata.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.skipped is not defined or not item.skipped
+
+- name: Wait for Wazuh VM clone task to finish
+  ansible.builtin.uri:
+    url: "{{ wazuh_proxmox_api_url }}/nodes/{{ item.item.item.target_node }}/tasks/{{ item.json.data | urlencode }}/status"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ wazuh_proxmox_full_token_id }}={{ wazuh_proxmox_token_secret }}"
+    validate_certs: "{{ not (wazuh_proxmox_tls_insecure | bool) }}"
+    status_code: 200
+    return_content: true
+  register: wazuh_clone_status
+  until:
+    - wazuh_clone_status.json.data is defined
+    - wazuh_clone_status.json.data.status == 'stopped'
+  retries: 180
+  delay: 5
+  no_log: true
+  loop: "{{ wazuh_clone_request.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.name }}"
+  when:
+    - item.skipped is not defined or not item.skipped
+
+- name: Assert Wazuh VM clone task succeeded
+  ansible.builtin.assert:
+    that:
+      - item.json.data.exitstatus | default('') == 'OK'
+    fail_msg: >-
+      Wazuh VM clone failed for {{ item.item.item.item.name }} on {{ item.item.item.item.target_node }}:
+      {{ item.json.data | default({}) }}
+  loop: "{{ wazuh_clone_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.item.name }}"
+  when:
+    - item.skipped is not defined or not item.skipped
+
+- name: Refresh Wazuh VM information after provisioning
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ wazuh_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (wazuh_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ wazuh_proxmox_api_user }}"
+    api_token_id: "{{ wazuh_proxmox_api_token_id }}"
+    api_token_secret: "{{ wazuh_proxmox_token_secret }}"
+    validate_certs: "{{ not (wazuh_proxmox_tls_insecure | bool) }}"
+    type: qemu
+    config: current
+  register: wazuh_proxmox_vms_after
+  retries: "{{ wazuh_proxmox_api_retries }}"
+  delay: "{{ wazuh_proxmox_api_retry_delay }}"
+  until: wazuh_proxmox_vms_after is succeeded
+
+- name: Update Wazuh VM cloud-init and hardware settings
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ wazuh_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (wazuh_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ wazuh_proxmox_api_user }}"
+    api_token_id: "{{ wazuh_proxmox_api_token_id }}"
+    api_token_secret: "{{ wazuh_proxmox_token_secret }}"
+    validate_certs: "{{ not (wazuh_proxmox_tls_insecure | bool) }}"
+    vmid: "{{ item.vmid }}"
+    node: "{{ item.target_node }}"
+    name: "{{ item.name }}"
+    cores: "{{ wazuh_cpu_cores }}"
+    sockets: "{{ wazuh_cpu_sockets }}"
+    memory: "{{ wazuh_memory_mb }}"
+    onboot: "{{ wazuh_start_at_node_boot | bool }}"
+    protection: "{{ wazuh_protection | bool }}"
+    agent: "{{ wazuh_agent_enabled | ternary('enabled=1', '0') }}"
+    ciuser: "{{ wazuh_default_user }}"
+    cipassword: "{{ wazuh_default_password }}"
+    sshkeys: "{{ wazuh_ssh_keys | join('\n') }}"
+    nameservers: "{{ wazuh_nameservers }}"
+    searchdomains: "{{ wazuh_domain }}"
+    tags: "{{ wazuh_tags | join(',') }}"
+    net:
+      net0: >-
+        virtio,bridge={{ wazuh_network_bridge }}{% if (wazuh_vlan_id | int) > 0 %},tag={{ wazuh_vlan_id }}{% endif %}
+    ipconfig:
+      ipconfig0: "ip={{ item.ip }}{{ wazuh_cidr_subnet }},gw={{ wazuh_gateway }}"
+    startup: "order={{ wazuh_startup_order }}"
+    update_unsafe: true
+    update: true
+    state: present
+  loop: "{{ wazuh_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Resize Wazuh root disks when needed
+  community.proxmox.proxmox_disk:
+    api_host: "{{ wazuh_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (wazuh_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ wazuh_proxmox_api_user }}"
+    api_token_id: "{{ wazuh_proxmox_api_token_id }}"
+    api_token_secret: "{{ wazuh_proxmox_token_secret }}"
+    validate_certs: "{{ not (wazuh_proxmox_tls_insecure | bool) }}"
+    vmid: "{{ item.vmid }}"
+    disk: "{{ wazuh_disk_name }}"
+    state: resized
+    size: "+{{ wazuh_resize_amount_gb }}G"
+  vars:
+    wazuh_vm_config: >-
+      {{
+        (wazuh_proxmox_vms_after.proxmox_vms | default([])
+        | selectattr('vmid', 'equalto', item.vmid)
+        | first)
+      }}
+    wazuh_disk_name: "{{ 'scsi0' if (wazuh_vm_config.config.scsi0 is defined) else 'virtio0' }}"
+    wazuh_current_disk_config: "{{ wazuh_vm_config.config[wazuh_disk_name] | default('') }}"
+    wazuh_current_disk_size_gb: "{{ ((wazuh_current_disk_config | regex_search('size=(\\d+)', '\\1') | first | default('0')) | int) }}"
+    wazuh_target_disk_size_gb: "{{ wazuh_disk_size | regex_replace('[^0-9]', '') | int }}"
+    wazuh_resize_amount_gb: "{{ (wazuh_target_disk_size_gb | int) - (wazuh_current_disk_size_gb | int) }}"
+  when: (wazuh_resize_amount_gb | int) > 0
+  loop: "{{ wazuh_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Start Wazuh VMs
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ wazuh_proxmox_api_url | regex_replace('^https?://([^/:]+).*$','\\1') }}"
+    api_port: "{{ (wazuh_proxmox_api_url | regex_search(':(\\d+)', '\\1') | first | default('8006')) | int }}"
+    api_user: "{{ wazuh_proxmox_api_user }}"
+    api_token_id: "{{ wazuh_proxmox_api_token_id }}"
+    api_token_secret: "{{ wazuh_proxmox_token_secret }}"
+    validate_certs: "{{ not (wazuh_proxmox_tls_insecure | bool) }}"
+    vmid: "{{ item.vmid }}"
+    node: "{{ item.target_node }}"
+    state: started
+  loop: "{{ wazuh_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Repair Wazuh guest networking after first boot
+  ansible.builtin.shell: >-
+    export ANSIBLE_CONFIG={{ wazuh_repo_root }}/Ansible/ansible.cfg;
+    {{ wazuh_repo_root }}/Ansible/.venv/bin/ansible
+    -i {{ wazuh_repo_root }}/Ansible/inventory/proxmox.yaml
+    {{ item.target_node }}
+    -b
+    -m script
+    -a "{{ role_path }}/files/repair_guest_network.sh {{ item.vmid | string }} {{ item.ip }} {{ wazuh_cidr_subnet }} {{ wazuh_gateway }} '{{ wazuh_nameservers }}' {{ wazuh_domain }}"
+    -o
+  args:
+    executable: /bin/bash
+  loop: "{{ wazuh_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"

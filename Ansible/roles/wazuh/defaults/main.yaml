@@ -1,0 +1,16 @@
+---
+wazuh_role_phases:
+  - secrets
+  - deploy
+  - configure
+
+wazuh_repo_root: "{{ playbook_dir | dirname | dirname }}"
+wazuh_primary_inventory_host: "{{ (groups['wazuh'] | default([])) | first | default(wazuh_node_name) }}"
+wazuh_proxmox_api_user: "root@pam"
+wazuh_proxmox_api_retries: 5
+wazuh_proxmox_api_retry_delay: 3
+
+wazuh_vault_secret_field_map:
+  api_username: wazuh_api_username
+  api_password: wazuh_api_password
+  admin_password: wazuh_admin_password

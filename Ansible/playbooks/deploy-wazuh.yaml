@@ -1,0 +1,145 @@
+---
+- name: Load Wazuh runtime secrets and deploy VM
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  any_errors_fatal: true
+
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/wazuh/main.yaml
+
+  vars:
+    ansible_python_interpreter: "{{ playbook_dir | dirname }}/.venv/bin/python"
+
+  roles:
+    - role: wazuh
+      vars:
+        wazuh_role_phases:
+          - secrets
+          - deploy
+      tags:
+        - wazuh
+        - secrets
+        - deploy
+
+- name: Wait for Wazuh node
+  hosts: wazuh
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/wazuh/main.yaml
+
+  tasks:
+    - name: Wait for SSH on Wazuh node
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 900
+        connect_timeout: 10
+      tags:
+        - wazuh
+        - wait
+
+    - name: Gather facts after SSH is available
+      ansible.builtin.setup:
+      tags:
+        - wazuh
+        - wait
+
+- name: Configure Wazuh node
+  hosts: wazuh
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/wazuh/main.yaml
+    - ../group_vars/all/packages.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+
+  vars:
+    packages_role_groups:
+      - production
+      - shell
+    dns_servers: "{{ wazuh_dns_servers }}"
+    dns_search_domains:
+      - "{{ wazuh_domain }}"
+      - local
+
+  pre_tasks:
+    - name: Validate localhost Wazuh runtime cache exists
+      ansible.builtin.assert:
+        that:
+          - "'localhost' in hostvars"
+          - hostvars['localhost'].wazuh_runtime_secrets is defined
+          - hostvars['localhost'].wazuh_runtime_secrets | length > 0
+        fail_msg: "Wazuh runtime secrets were not loaded on localhost."
+      tags:
+        - wazuh
+        - validate
+
+    - name: Wait for cloud-init to finish on Wazuh node
+      ansible.builtin.command: cloud-init status --wait
+      register: wazuh_cloud_init_wait
+      changed_when: false
+      failed_when: false
+      tags:
+        - wazuh
+        - validate
+
+    - name: Wait for dpkg and apt locks to clear on Wazuh node
+      ansible.builtin.shell: |
+        set -eu
+        while fuser /var/lib/dpkg/lock >/dev/null 2>&1 \
+          || fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+          || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+          sleep 5
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      tags:
+        - wazuh
+        - validate
+
+  roles:
+    - role: dns-resolver
+      tags:
+        - wazuh
+        - dns
+
+    - role: packages
+      tags:
+        - wazuh
+        - packages
+
+    - role: users
+      tags:
+        - wazuh
+        - users
+
+    - role: shell-config
+      vars:
+        shell_install_oh_my_zsh: false
+        plugins: []
+      tags:
+        - wazuh
+        - shell
+
+    - role: ssh
+      tags:
+        - wazuh
+        - ssh
+
+    - role: wazuh
+      vars:
+        wazuh_role_phases:
+          - configure
+      tags:
+        - wazuh
+        - configure

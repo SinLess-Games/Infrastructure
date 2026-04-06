@@ -1,0 +1,313 @@
+---
+- name: Set Wazuh runtime secrets from localhost cache
+  ansible.builtin.set_fact:
+    wazuh_api_username: "{{ hostvars['localhost'].wazuh_api_username }}"
+    wazuh_api_password: "{{ hostvars['localhost'].wazuh_api_password }}"
+    wazuh_admin_password: "{{ hostvars['localhost'].wazuh_admin_password }}"
+  no_log: true
+
+- name: Assert Wazuh runtime secrets are available
+  ansible.builtin.assert:
+    that:
+      - wazuh_api_username | length > 0
+      - wazuh_api_password | length > 0
+      - wazuh_admin_password | length > 0
+    fail_msg: "Required Wazuh runtime secrets are missing from localhost cache."
+
+- name: Install Wazuh repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - adduser
+      - ca-certificates
+      - curl
+      - debconf
+      - gnupg
+      - libcap2-bin
+      - tar
+      - unzip
+      - procps
+      - apt-transport-https
+      - cloud-guest-utils
+      - parted
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Expand Wazuh root filesystem when template disk layout is undersized
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    root_device="$(findmnt -n -o SOURCE /)"
+    root_disk="${root_device%[0-9]}"
+    root_size_bytes="$(blockdev --getsize64 "${root_device}")"
+    target_size_bytes="$(( {{ wazuh_root_min_size_gb | int }} * 1024 * 1024 * 1024 ))"
+    swapfile_size_mb="$(( {{ wazuh_swapfile_size_gb | int }} * 1024 ))"
+    changed=0
+
+    if [ "${root_size_bytes}" -lt "${target_size_bytes}" ]; then
+      swapoff -a || true
+      sed -i '/\sswap\s/d' /etc/fstab
+
+      parted -s "${root_disk}" rm 5 || true
+      parted -s "${root_disk}" rm 2 || true
+      growpart "${root_disk}" 1
+      partprobe "${root_disk}" || true
+      udevadm settle || true
+      sleep 2
+      resize2fs "${root_device}"
+      changed=1
+    fi
+
+    if [ ! -f /swapfile ]; then
+      fallocate -l "${swapfile_size_mb}M" /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      swapon /swapfile
+      changed=1
+    else
+      swapon /swapfile || true
+    fi
+
+    echo "changed=${changed}"
+  args:
+    executable: /bin/bash
+  register: wazuh_rootfs_expand
+  changed_when: "'changed=1' in (wazuh_rootfs_expand.stdout | default(''))"
+
+- name: Ensure Wazuh assistant working directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_assistant_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Wazuh installation assistant
+  ansible.builtin.get_url:
+    url: "{{ wazuh_assistant_url }}"
+    dest: "{{ wazuh_assistant_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check whether Wazuh dashboard is already installed
+  ansible.builtin.stat:
+    path: "/usr/share/wazuh-dashboard"
+  register: wazuh_dashboard_install_stat
+
+- name: Check whether wazuh-manager package is currently installed
+  ansible.builtin.command: dpkg-query -W -f='${Status}' wazuh-manager
+  register: wazuh_manager_package_status
+  changed_when: false
+  failed_when: false
+  when: not wazuh_dashboard_install_stat.stat.exists
+
+- name: Set Wazuh legacy package state fact
+  ansible.builtin.set_fact:
+    wazuh_manager_package_present: "{{ not wazuh_dashboard_install_stat.stat.exists and wazuh_manager_package_status.rc == 0 }}"
+  when: not wazuh_dashboard_install_stat.stat.exists
+
+- name: Ensure legacy /var/ossec/bin directory exists for broken package cleanup
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ wazuh_install_dir }}/bin"
+    - "{{ wazuh_install_dir }}/etc"
+    - "{{ wazuh_install_dir }}/etc/shared/default"
+    - "{{ wazuh_install_dir }}/api"
+    - "{{ wazuh_install_dir }}/tmp/conffiles/shared/default"
+  when:
+    - wazuh_manager_package_present | default(false)
+
+- name: Install legacy wazuh-control compatibility stub for package removal
+  ansible.builtin.copy:
+    dest: "{{ wazuh_install_dir }}/bin/wazuh-control"
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      exit 0
+  when:
+    - wazuh_manager_package_present | default(false)
+
+- name: Install legacy wazuh-keystore compatibility stub for package cleanup
+  ansible.builtin.copy:
+    dest: "{{ wazuh_install_dir }}/bin/wazuh-keystore"
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      exit 0
+  when:
+    - wazuh_manager_package_present | default(false)
+
+- name: Force-remove broken legacy wazuh-manager package before full-stack deployment
+  ansible.builtin.shell: |
+    set -eu
+    dpkg --remove --force-remove-reinstreq wazuh-manager || true
+    dpkg --purge --force-all wazuh-manager || true
+    apt-get -y --fix-broken install || true
+  args:
+    executable: /bin/bash
+  register: wazuh_force_remove_result
+  changed_when: >-
+    'Removing wazuh-manager' in (wazuh_force_remove_result.stdout | default(''))
+    or 'Purging configuration files for wazuh-manager' in (wazuh_force_remove_result.stdout | default(''))
+  when:
+    - wazuh_manager_package_present | default(false)
+
+- name: Stop legacy Wazuh manager service before full-stack deployment
+  ansible.builtin.systemd:
+    name: "{{ wazuh_manager_service_name }}"
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: not wazuh_dashboard_install_stat.stat.exists
+
+- name: Stop stale listeners on legacy Wazuh manager ports before full-stack deployment
+  ansible.builtin.shell: |
+    set -eu
+    for port in 1515 55000; do
+      pids="$(ss -ltnp "sport = :${port}" | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u || true)"
+      if [ -n "${pids}" ]; then
+        kill ${pids} || true
+        sleep 2
+        kill -9 ${pids} || true
+      fi
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false
+  when: not wazuh_dashboard_install_stat.stat.exists
+
+- name: Remove partial legacy Wazuh manager install before full-stack deployment
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ wazuh_source_dir }}"
+  when: not wazuh_dashboard_install_stat.stat.exists
+
+- name: Recreate legacy /var/ossec compatibility paths before assistant cleanup
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ wazuh_install_dir }}"
+    - "{{ wazuh_install_dir }}/bin"
+    - "{{ wazuh_install_dir }}/etc"
+    - "{{ wazuh_install_dir }}/etc/shared/default"
+    - "{{ wazuh_install_dir }}/api"
+    - "{{ wazuh_install_dir }}/tmp/conffiles/shared/default"
+  when: not wazuh_dashboard_install_stat.stat.exists
+
+- name: Reinstall legacy cleanup compatibility stubs before assistant cleanup
+  ansible.builtin.copy:
+    dest: "{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      exit 0
+  loop:
+    - "{{ wazuh_install_dir }}/bin/wazuh-control"
+    - "{{ wazuh_install_dir }}/bin/wazuh-keystore"
+  when: not wazuh_dashboard_install_stat.stat.exists
+
+- name: Clean apt package cache before Wazuh stack install
+  ansible.builtin.command: apt-get clean
+  changed_when: false
+
+- name: Install full Wazuh single-node stack with assistant
+  ansible.builtin.command:
+    cmd: >-
+      bash {{ wazuh_assistant_script }} -a
+      {% if wazuh_assistant_overwrite | bool %}-o{% endif %}
+    chdir: "{{ wazuh_assistant_dir }}"
+    creates: "/usr/share/wazuh-dashboard"
+  environment:
+    USER_PASSWORD: "{{ wazuh_admin_password }}"
+
+- name: Extract Wazuh passwords file from install archive when present
+  ansible.builtin.command:
+    cmd: "tar -O -xvf {{ wazuh_install_files_tar }} wazuh-install-files/wazuh-passwords.txt"
+  register: wazuh_passwords_txt
+  changed_when: false
+  failed_when: false
+
+- name: Cache discovered Wazuh dashboard admin password from installer output
+  ansible.builtin.set_fact:
+    wazuh_installed_admin_password: >-
+      {{
+        wazuh_passwords_txt.stdout
+        | regex_findall("indexer_username: 'admin'\\s+indexer_password: '([^']+)'")
+        | first
+        | default(wazuh_admin_password, true)
+      }}
+  no_log: true
+
+- name: Ensure Wazuh repository is disabled after installation
+  ansible.builtin.replace:
+    path: "{{ wazuh_repo_file }}"
+    regexp: '^deb '
+    replace: '#deb '
+  failed_when: false
+
+- name: Ensure Wazuh API auth directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_api_users_file | dirname }}"
+    state: directory
+    owner: root
+    group: wazuh
+    mode: "0750"
+
+- name: Deploy Wazuh API users file
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/wazuh/api-users.j2"
+    dest: "{{ wazuh_api_users_file }}"
+    owner: root
+    group: wazuh
+    mode: "0640"
+  notify: Restart wazuh-manager
+
+- name: Ensure Wazuh manager service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ wazuh_manager_service_name }}"
+    state: started
+    enabled: true
+
+- name: Ensure Wazuh indexer service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ wazuh_indexer_service_name }}"
+    state: started
+    enabled: true
+
+- name: Ensure Wazuh dashboard service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ wazuh_dashboard_service_name }}"
+    state: started
+    enabled: true
+
+- name: Expose Wazuh manager ports in UFW when available
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "{{ wazuh_dashboard_bind_port | string }}"
+    - "1514"
+    - "1515"
+    - "{{ wazuh_api_bind_port | string }}"
+  failed_when: false

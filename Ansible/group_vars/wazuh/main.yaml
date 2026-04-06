@@ -1,0 +1,119 @@
+---
+# =============================================================================
+# Wazuh Single-Node Deployment
+# =============================================================================
+
+wazuh_environment: "prod"
+
+wazuh_proxmox_api_url: "{{ infra_proxmox_api_url }}"
+wazuh_proxmox_tls_insecure: "{{ infra_proxmox_tls_insecure }}"
+wazuh_proxmox_api_token_file: "{{ infra_proxmox_api_token_file }}"
+
+wazuh_vault_kv_path: "ansible/wazuh"
+wazuh_vault_addr: "https://10.10.10.180:8200"
+wazuh_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
+wazuh_vault_skip_verify: true
+wazuh_vault_token_file: "{{ playbook_dir }}/../../.outputs/vault/unseal-keys.json"
+wazuh_vault_required_keys:
+  - "api_username"
+  - "api_password"
+  - "admin_password"
+
+wazuh_node_name: "wazuh-01"
+wazuh_node_count: 1
+wazuh_vm_id: 106
+wazuh_vm_id_start: 106
+wazuh_target_node: "pve-04"
+wazuh_target_nodes:
+  - "pve-04"
+wazuh_nodes:
+  - name: "wazuh-01"
+    ip: "10.10.10.21"
+    vmid: 106
+    target_node: "pve-04"
+
+wazuh_clone_template: "debian-13-template-pve-04"
+wazuh_clone_template_by_node:
+  pve-04: "debian-13-template-pve-04"
+wazuh_storage: "vm_disks_04"
+wazuh_storage_by_node:
+  pve-04: "vm_disks_04"
+
+wazuh_cpu_cores: 4
+wazuh_cpu_sockets: 1
+wazuh_memory_mb: 8192
+wazuh_disk_size: "120G"
+wazuh_root_min_size_gb: 60
+wazuh_swapfile_size_gb: 2
+
+wazuh_network_bridge: "vmbr0"
+wazuh_vlan_id: 0
+wazuh_gateway: "10.10.10.1"
+wazuh_cidr_subnet: "/24"
+wazuh_ip_address: "10.10.10.21"
+wazuh_nameservers: "10.10.10.12 1.1.1.1 1.0.0.1"
+wazuh_dns_servers:
+  - "10.10.10.12"
+  - "1.1.1.1"
+  - "1.0.0.1"
+  - "10.10.10.13"
+  - "10.10.10.9"
+  - "10.10.10.20"
+wazuh_domain: "local.sinlessgames.com"
+
+wazuh_default_user: "{{ infra_bootstrap_default_user }}"
+wazuh_ansible_user: "{{ infra_bootstrap_ansible_user }}"
+wazuh_default_password: "Shellshocker93!"
+wazuh_ssh_keys: "{{ infra_bootstrap_ssh_keys }}"
+
+wazuh_version_major: "4.x"
+wazuh_assistant_version: "4.14"
+wazuh_assistant_url: "https://packages.wazuh.com/{{ wazuh_assistant_version }}/wazuh-install.sh"
+wazuh_assistant_dir: "/root/wazuh-install"
+wazuh_assistant_script: "{{ wazuh_assistant_dir }}/wazuh-install.sh"
+wazuh_install_files_tar: "{{ wazuh_assistant_dir }}/wazuh-install-files.tar"
+wazuh_passwords_file: "{{ wazuh_assistant_dir }}/wazuh-passwords.txt"
+wazuh_assistant_overwrite: true
+wazuh_repo_key_url: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_keyring_dir: "/usr/share/keyrings"
+wazuh_repo_keyring_file: "{{ wazuh_repo_keyring_dir }}/wazuh.gpg"
+wazuh_repo_file: "/etc/apt/sources.list.d/wazuh.list"
+wazuh_repo: "deb [signed-by={{ wazuh_repo_keyring_file }}] https://packages.wazuh.com/{{ wazuh_version_major }}/apt/ stable main"
+wazuh_packages:
+  - "wazuh-manager"
+wazuh_source_version: "4.14.3"
+wazuh_source_dir: "/usr/local/src/wazuh-{{ wazuh_source_version }}"
+wazuh_source_tarball_url: "https://github.com/wazuh/wazuh/archive/v{{ wazuh_source_version }}.tar.gz"
+wazuh_source_dependencies:
+  - python3
+  - gcc
+  - g++
+  - make
+  - libc6-dev
+  - curl
+  - policycoreutils
+  - automake
+  - autoconf
+  - libtool
+  - libssl-dev
+  - procps
+  - build-essential
+wazuh_install_dir: "/var/ossec"
+
+wazuh_api_users_file: "/var/ossec/api/configuration/auth/user"
+wazuh_manager_service_name: "wazuh-manager"
+wazuh_indexer_service_name: "wazuh-indexer"
+wazuh_dashboard_service_name: "wazuh-dashboard"
+wazuh_api_bind_port: 55000
+wazuh_dashboard_bind_port: 443
+
+wazuh_start_at_node_boot: true
+wazuh_agent_enabled: true
+wazuh_protection: false
+wazuh_startup_order: 30
+
+wazuh_tags:
+  - "wazuh"
+  - "siem"
+  - "security"
+wazuh_description: "Wazuh single-node VM"
