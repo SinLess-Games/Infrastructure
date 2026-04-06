@@ -136,14 +136,14 @@
       - UserKnownHostsFile=/dev/null
       - root@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] }}
       - /bin/bash
-      - -lc
-      - >-
-        set -euo pipefail;
-        vmid="{{ item.vmid }}";
+      - -c
+      - |
+        set -euo pipefail
+        vmid="{{ item.vmid }}"
         if [ -f "/etc/pve/qemu-server/${vmid}.conf" ]; then
-          timeout 5 /usr/sbin/qm unlock "${vmid}" || true;
+          timeout 5 /usr/sbin/qm unlock "${vmid}" 2>/dev/null || true
         fi
-        rm -f "/var/lock/qemu-server/lock-${vmid}.conf";
+        rm -f "/var/lock/qemu-server/lock-${vmid}.conf"
   loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
   loop_control:
     label: "{{ item.name }}@{{ item.target_node }}"

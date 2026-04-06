@@ -5,11 +5,13 @@
   // Start from Renovate's safe defaults, then layer in repo-specific behavior.
   extends: [
     "config:recommended",
-    ":dependencyDashboard",
     ":rebaseStalePrs",
     ":semanticCommits",
     ":semanticCommitTypeAll(chore)",
   ],
+
+  // Keep the dashboard explicitly enabled.
+  dependencyDashboard: true,
 
   // Keep Renovate timestamps aligned with the repo owner's local timezone.
   timezone: "America/Boise",
@@ -52,9 +54,7 @@
     managerFilePatterns: ["(^|/)Kubernetes/.+\\.ya?ml$"],
   },
 
-  // Only scan the root Terraform configuration checked into the repo.
-  // Local state, generated modules, and vendored provider directories are
-  // intentionally excluded below.
+  // Only scan Terraform configuration checked into the repo.
   terraform: {
     managerFilePatterns: ["(^|/)Terraform/.+\\.tf$"],
   },
@@ -76,8 +76,7 @@
     ".secrets/**",
   ],
 
-  // Keep lock file maintenance on so Terraform lock files can be refreshed when
-  // the manager starts tracking them in future commits.
+  // Keep lock file maintenance on so Terraform lock files can be refreshed.
   lockFileMaintenance: {
     enabled: true,
   },
