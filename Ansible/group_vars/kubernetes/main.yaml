@@ -24,12 +24,16 @@ kubernetes_proxmox:
   tls_insecure: "{{ infra_proxmox_tls_insecure }}"
   api_token_file: "{{ infra_proxmox_api_token_file }}"
   storage: "VM_Disks"
+  storage_by_node:
+    pve-01: "vm_disks_01"
+    pve-04: "vm_disks_04"
+    pve-05: "vm_disks_05"
   node_ssh_hosts:
-    pve-01: "10.10.10.15"
-    pve-02: "10.10.10.16"
-    pve-03: "10.10.10.17"
-    pve-04: "10.10.10.18"
-    pve-05: "10.10.10.19"
+    pve-01: "10.10.10.14"
+    pve-02: "10.10.10.15"
+    pve-03: "10.10.10.16"
+    pve-04: "10.10.10.17"
+    pve-05: "10.10.10.18"
 
 kubernetes_node_defaults:
   template: "flatcar-template"
@@ -42,7 +46,7 @@ kubernetes_node_defaults:
 kubernetes_ansible:
   default_user: "{{ infra_bootstrap_default_user }}"
   user: "{{ infra_bootstrap_ansible_user }}"
-  ssh_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519"
+  ssh_private_key_file: "{{ kubernetes_repo_root }}/.outputs/ssh/sinless777/id_ed25519"
   python_interpreter: "{{ ansible_python_interpreter }}"
   become: true
   become_method: sudo
@@ -76,6 +80,11 @@ kubernetes_operation:
   wait_for_ssh_timeout: 600
   wait_for_kubeconfig_timeout: 300
   wait_for_api_timeout: 600
+  wait_for_node_ready_timeout: 60
+  wait_for_node_ready_retries: 15
+  wait_for_node_ready_delay: 20
+  wait_for_rke2_active_retries: 120
+  wait_for_rke2_active_delay: 10
 
 kubernetes_vault:
   addr: "https://10.10.10.180:443"
@@ -107,6 +116,11 @@ kubernetes_cluster_dns: "{{ kubernetes_network_defaults.cluster_dns }}"
 kubernetes_wait_for_ssh_timeout: "{{ kubernetes_operation.wait_for_ssh_timeout }}"
 kubernetes_wait_for_kubeconfig_timeout: "{{ kubernetes_operation.wait_for_kubeconfig_timeout }}"
 kubernetes_wait_for_api_timeout: "{{ kubernetes_operation.wait_for_api_timeout }}"
+kubernetes_wait_for_node_ready_timeout: "{{ kubernetes_operation.wait_for_node_ready_timeout | default(60) }}"
+kubernetes_wait_for_node_ready_retries: "{{ kubernetes_operation.wait_for_node_ready_retries | default(15) }}"
+kubernetes_wait_for_node_ready_delay: "{{ kubernetes_operation.wait_for_node_ready_delay | default(20) }}"
+kubernetes_wait_for_rke2_active_retries: "{{ kubernetes_operation.wait_for_rke2_active_retries | default(120) }}"
+kubernetes_wait_for_rke2_active_delay: "{{ kubernetes_operation.wait_for_rke2_active_delay | default(10) }}"
 
 kubernetes_proxmox_api_token_file: "{{ kubernetes_proxmox.api_token_file }}"
 
@@ -188,6 +202,8 @@ kubernetes_configure_cluster_dns: "{{ kubernetes_cluster_dns }}"
 kubernetes_rke2_api_ip: "{{ kubernetes_api_vip | default(kubernetes_control_plane_first_ip) }}"
 kubernetes_rke2_api_private_port: 9345
 kubernetes_server_url: "https://{{ kubernetes_rke2_api_ip }}:{{ kubernetes_rke2_api_private_port }}"
+kubernetes_rke2_join_ip: "{{ kubernetes_control_plane_first_ip }}"
+kubernetes_join_server_url: "https://{{ kubernetes_rke2_join_ip }}:{{ kubernetes_rke2_api_private_port }}"
 kubernetes_rke2_cni:
   - cilium
 kubernetes_rke2_ingress_controller: "none"
@@ -210,6 +226,7 @@ kubernetes_kube_vip:
   interface: "eth0"
   image: "ghcr.io/kube-vip/kube-vip:v0.8.9"
   vip: "{{ kubernetes_api_vip | default('') }}"
+  cidr: "{{ (kubernetes_network.subnet | default('0.0.0.0/24')).split('/')[-1] }}"
   controlplane: true
   services: false
   arp: true

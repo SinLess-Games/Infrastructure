@@ -10,7 +10,12 @@
 
 - name: Read Proxmox API token file for PostgreSQL deployment
   ansible.builtin.slurp:
-    src: "{{ postgres_repo_root }}/{{ postgres_proxmox_api_token_file }}"
+    src: >-
+      {{
+        postgres_proxmox_api_token_file
+        if (postgres_proxmox_api_token_file is match('^/'))
+        else postgres_repo_root ~ '/' ~ postgres_proxmox_api_token_file
+      }}
   register: postgres_proxmox_token_file
   no_log: true
 

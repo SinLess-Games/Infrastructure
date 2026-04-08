@@ -1,4 +1,4 @@
-server: "{{ kubernetes_server_url }}"
+server: "{{ kubernetes_join_server_url }}"
 token: "{{ rke2_server_token }}"
 node-ip: "{{ ansible_host | default(ansible_default_ipv4.address) }}"
 node-name: "{{ inventory_hostname }}"

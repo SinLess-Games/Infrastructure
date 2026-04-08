@@ -18,7 +18,7 @@ kubernetes_proxmox_snippets_storage: "local:snippets"
 
 kubernetes_network:
   bridge: "vmbr40"
-  vlan_id: 40
+  vlan_id: 0
   subnet: "10.10.40.0/24"
   cidr_suffix: "/24"
   gateway: "10.10.40.1"
@@ -204,6 +204,6 @@ kubernetes_operation:
   plan_only: false
   destroy: false
   force_apply: false
-  wait_for_ssh_timeout: 1200
+  wait_for_ssh_timeout: 300
   wait_for_kubeconfig_timeout: 300
   wait_for_api_timeout: 600

@@ -216,8 +216,32 @@
     authorized_key_paths: >-
       {{
         (
-          hostvars['localhost'].ssh__authorized_keys_map.get(item.name, {}).get('public_keys', [])
-          + hostvars['localhost'].ssh__authorized_keys_map.get(item.name, {}).get('shared_keys', [])
+          (
+            hostvars['localhost'].ssh__authorized_keys_map
+            | default({})
+          ).get(
+            item.name,
+            {}
+          ).get(
+            'public_keys',
+            [_ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ _ssh_key_type ~ '.pub']
+          )
+          + (
+            (
+              hostvars['localhost'].ssh__authorized_keys_map
+              | default({})
+            ).get(
+              item.name,
+              {}
+            ).get(
+              'shared_keys',
+              (
+                item['shared-certs'] | default([])
+                | map('regex_replace', '^(.*)$', _ssh_output_base ~ '/\\1/id_' ~ _ssh_key_type ~ '.pub')
+                | list
+              )
+            )
+          )
         )
         | unique
         | list
@@ -254,6 +278,145 @@
   changed_when: false
   when: _ssh_install_identity_keys | bool
 
+- name: Stat installed private keys in user homes
+  ansible.builtin.stat:
+    path: "{{ ssh__home_by_user[item.name] }}/.ssh/id_{{ _ssh_key_type }}"
+    follow: false
+  loop: "{{ ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: ssh__installed_privkey_stats
+  changed_when: false
+  when:
+    - _ssh_install_identity_keys | bool
+    - item.name in ssh__home_by_user
+
+- name: Stat installed public keys in user homes
+  ansible.builtin.stat:
+    path: "{{ ssh__home_by_user[item.name] }}/.ssh/id_{{ _ssh_key_type }}.pub"
+    follow: false
+  loop: "{{ ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: ssh__installed_pubkey_stats
+  changed_when: false
+  when:
+    - _ssh_install_identity_keys | bool
+    - item.name in ssh__home_by_user
+
+- name: Read installed public keys from user homes
+  ansible.builtin.slurp:
+    src: "{{ ssh__home_by_user[item.name] }}/.ssh/id_{{ _ssh_key_type }}.pub"
+  loop: "{{ ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: ssh__installed_pubkey_slurp
+  changed_when: false
+  failed_when: false
+  when:
+    - _ssh_install_identity_keys | bool
+    - item.name in ssh__home_by_user
+
+- name: Derive public keys from installed private keys
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -y
+      - -f
+      - "{{ ssh__home_by_user[item.name] }}/.ssh/id_{{ _ssh_key_type }}"
+  loop: "{{ ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: ssh__installed_privkey_public
+  changed_when: false
+  failed_when: false
+  when:
+    - _ssh_install_identity_keys | bool
+    - item.name in ssh__home_by_user
+
+- name: Initialize per-user identity refresh map
+  ansible.builtin.set_fact:
+    ssh__identity_refresh_map: {}
+  changed_when: false
+  when: _ssh_install_identity_keys | bool
+
+- name: Determine whether installed user identity keys need refresh
+  ansible.builtin.set_fact:
+    ssh__identity_refresh_map: >-
+      {{
+        ssh__identity_refresh_map
+        | combine(
+            {
+              item.name: (
+                (_ssh_identity_force | bool)
+                or not (
+                  ssh__installed_privkey_stats.results
+                  | default([])
+                  | selectattr('item.name', 'equalto', item.name)
+                  | map(attribute='stat.exists')
+                  | list
+                  | first
+                  | default(false)
+                )
+                or not (
+                  ssh__installed_pubkey_stats.results
+                  | default([])
+                  | selectattr('item.name', 'equalto', item.name)
+                  | map(attribute='stat.exists')
+                  | list
+                  | first
+                  | default(false)
+                )
+                or (
+                  (
+                    ssh__installed_privkey_public.results
+                    | default([])
+                    | selectattr('item.name', 'equalto', item.name)
+                    | map(attribute='stdout')
+                    | list
+                    | first
+                    | default('')
+                    | trim
+                  ) != (
+                    lookup(
+                      'ansible.builtin.file',
+                      _ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ _ssh_key_type ~ '.pub'
+                    )
+                    | trim
+                  )
+                )
+                or (
+                  (
+                    ssh__installed_pubkey_slurp.results
+                    | default([])
+                    | selectattr('item.name', 'equalto', item.name)
+                    | map(attribute='content')
+                    | list
+                    | first
+                    | default('')
+                    | b64decode
+                    | trim
+                  ) != (
+                    lookup(
+                      'ansible.builtin.file',
+                      _ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ _ssh_key_type ~ '.pub'
+                    )
+                    | trim
+                  )
+                )
+              )
+            },
+            recursive=True
+          )
+      }}
+  loop: "{{ ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+  when:
+    - _ssh_install_identity_keys | bool
+    - item.name in ssh__home_by_user
+
 - name: Copy per-user private key to ~/.ssh
   ansible.builtin.copy:
     src: "{{ _ssh_output_base }}/{{ item.name }}/id_{{ _ssh_key_type }}"
@@ -261,7 +424,7 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0600"
-    force: "{{ _ssh_identity_force }}"
+    force: "{{ ssh__identity_refresh_map.get(item.name, _ssh_identity_force | bool) }}"
   loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
@@ -277,7 +440,7 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     mode: "0644"
-    force: "{{ _ssh_identity_force }}"
+    force: "{{ ssh__identity_refresh_map.get(item.name, _ssh_identity_force | bool) }}"
   loop: "{{ ssh_role_users }}"
   loop_control:
     label: "{{ item.name }}"
@@ -308,7 +471,7 @@
     owner: "{{ item.item.name }}"
     group: "{{ item.item.name }}"
     mode: "0644"
-    force: "{{ _ssh_identity_force }}"
+    force: "{{ ssh__identity_refresh_map.get(item.item.name, _ssh_identity_force | bool) }}"
   loop: "{{ ssh__cert_stats.results | default([]) }}"
   loop_control:
     label: "{{ item.item.name | default('unknown') }}"

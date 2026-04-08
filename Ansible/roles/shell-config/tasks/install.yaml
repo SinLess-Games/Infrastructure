@@ -30,10 +30,11 @@
     path: "{{ item.home_directory }}/.oh-my-zsh"
     state: directory
     mode: "0755"
-  loop: "{{ shell__resolved_users }}"
+  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
   when:
     - shell_install_oh_my_zsh
-    - item.shell == '/bin/zsh'
+    - item.shell is defined
+    - item.shell.endswith('zsh')
 
 - name: Fix ownership of Oh My Zsh directory
   ansible.builtin.file:
@@ -41,10 +42,11 @@
     owner: "{{ item.name }}"
     group: "{{ item.name }}"
     recurse: true
-  loop: "{{ shell__resolved_users }}"
+  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
   when:
     - shell_install_oh_my_zsh
-    - item.shell == '/bin/zsh'
+    - item.shell is defined
+    - item.shell.endswith('zsh')
 
 - name: Install Oh My Zsh (git clone as user, idempotent)
   become: false
@@ -53,10 +55,11 @@
     dest: "{{ item.home_directory }}/.oh-my-zsh"
     version: master
     update: false
-  loop: "{{ shell__resolved_users }}"
+  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
   when:
     - shell_install_oh_my_zsh
-    - item.shell == '/bin/zsh'
+    - item.shell is defined
+    - item.shell.endswith('zsh')
 
 # -----------------------------------------------------------------------------
 # Starship cleanup
@@ -84,8 +87,7 @@
   ansible.builtin.file:
     path: "{{ item.0.home_directory }}/{{ item.1 }}"
     state: absent
-  loop: "{{ shell__resolved_users | product(['.config/starship', '.config/starship.toml']) | list }}"
+  loop: "{{ (shell__home_users | default(shell__resolved_users)) | product(['.config/starship', '.config/starship.toml']) | list }}"
   loop_control:
     label: "{{ item.0.name }} -> {{ item.1 }}"
   when: shell_remove_starship | bool
-

@@ -11,6 +11,7 @@ module "kubernetes_prod_control_plane" {
       name        = "rke2-prod-cp-01"
       vmid        = 400
       target_node = "pve-01"
+      storage     = "vm_disks_01"
       clone_template = "debian-13-template-pve-01"
       ip_address  = "10.10.40.11"
       hostname    = "rke2-prod-cp-01"
@@ -20,6 +21,7 @@ module "kubernetes_prod_control_plane" {
       name        = "rke2-prod-cp-02"
       vmid        = 401
       target_node = "pve-04"
+      storage     = "vm_disks_04"
       clone_template = "debian-13-template-pve-04"
       ip_address  = "10.10.40.12"
       hostname    = "rke2-prod-cp-02"
@@ -29,6 +31,7 @@ module "kubernetes_prod_control_plane" {
       name        = "rke2-prod-cp-03"
       vmid        = 402
       target_node = "pve-05"
+      storage     = "vm_disks_05"
       clone_template = "debian-13-template-pve-05"
       ip_address  = "10.10.40.13"
       hostname    = "rke2-prod-cp-03"
@@ -44,7 +47,7 @@ module "kubernetes_prod_control_plane" {
   memory_mb                     = 8192
   disk_size                     = "100G"
   network_bridge                = "vmbr40"
-  vlan_id                       = 40
+  vlan_id                       = 0
   gateway                       = "10.10.40.1"
   cidr_subnet                   = "/24"
   nameservers                   = "10.10.10.1 1.1.1.1"
@@ -70,6 +73,7 @@ module "kubernetes_prod_workers" {
       name        = "rke2-prod-wk-01"
       vmid        = 410
       target_node = "pve-01"
+      storage     = "vm_disks_01"
       clone_template = "debian-13-template-pve-01"
       ip_address  = "10.10.40.20"
       hostname    = "rke2-prod-wk-01"
@@ -79,6 +83,7 @@ module "kubernetes_prod_workers" {
       name        = "rke2-prod-wk-02"
       vmid        = 411
       target_node = "pve-04"
+      storage     = "vm_disks_04"
       clone_template = "debian-13-template-pve-04"
       ip_address  = "10.10.40.21"
       hostname    = "rke2-prod-wk-02"
@@ -88,6 +93,7 @@ module "kubernetes_prod_workers" {
       name        = "rke2-prod-wk-03"
       vmid        = 412
       target_node = "pve-05"
+      storage     = "vm_disks_05"
       clone_template = "debian-13-template-pve-05"
       ip_address  = "10.10.40.22"
       hostname    = "rke2-prod-wk-03"
@@ -103,7 +109,7 @@ module "kubernetes_prod_workers" {
   memory_mb                     = 16384
   disk_size                     = "150G"
   network_bridge                = "vmbr40"
-  vlan_id                       = 40
+  vlan_id                       = 0
   gateway                       = "10.10.40.1"
   cidr_subnet                   = "/24"
   nameservers                   = "10.10.10.1 1.1.1.1"

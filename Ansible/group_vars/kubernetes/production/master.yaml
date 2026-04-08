@@ -12,9 +12,9 @@ kubernetes_rke2_servers_group_name: "kubernetes_prod_control_plane"
 kubernetes_rke2_agents_group_name: "kubernetes_prod_workers"
 
 kubernetes_rke2_server_node_labels:
-  - "node-role.kubernetes.io/control-plane=true"
-  - "topology.kubernetes.io/environment=prod"
-  - "topology.kubernetes.io/region=homelab-prod"
+  - "sinlessgames.com/role=control-plane"
+  - "sinlessgames.com/environment=prod"
+  - "sinlessgames.com/region=homelab-prod"
 kubernetes_rke2_server_tls_sans:
   - "{{ kubernetes_api_vip }}"
   - "{{ kubernetes_api_fqdn }}"

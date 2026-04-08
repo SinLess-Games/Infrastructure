@@ -8,7 +8,7 @@ kubernetes_rke2_servers_group_name: "kubernetes_prod_control_plane"
 kubernetes_rke2_agents_group_name: "kubernetes_prod_workers"
 
 kubernetes_rke2_agent_node_labels:
-  - "node-role.kubernetes.io/worker=true"
-  - "topology.kubernetes.io/environment=prod"
-  - "topology.kubernetes.io/region=homelab-prod"
+  - "sinlessgames.com/role=worker"
+  - "sinlessgames.com/environment=prod"
+  - "sinlessgames.com/region=homelab-prod"
 kubernetes_rke2_gpu_worker_name: "rke2-prod-wk-01"

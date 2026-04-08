@@ -2,7 +2,7 @@
 kubernetes_prod:
   vars:
     ansible_user: "sinless777"
-    ansible_ssh_private_key_file: "/home/sinless777/.ssh/id_ed25519"
+    ansible_ssh_private_key_file: "/home/sinless777/Projects/Infrastructure/.outputs/ssh/sinless777/id_ed25519"
     ansible_python_interpreter: "/usr/bin/python3"
     ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=yes -o PasswordAuthentication=no"
     kubernetes_environment: "prod"

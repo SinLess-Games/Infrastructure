@@ -9,7 +9,12 @@
 
 - name: Read Proxmox API token file for Wazuh deployment
   ansible.builtin.slurp:
-    src: "{{ wazuh_repo_root }}/{{ wazuh_proxmox_api_token_file }}"
+    src: >-
+      {{
+        wazuh_proxmox_api_token_file
+        if (wazuh_proxmox_api_token_file is match('^/'))
+        else wazuh_repo_root ~ '/' ~ wazuh_proxmox_api_token_file
+      }}
   register: wazuh_proxmox_token_file
   no_log: true
 

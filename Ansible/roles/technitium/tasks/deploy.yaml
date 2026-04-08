@@ -18,7 +18,12 @@
 
 - name: Read Proxmox API token file for Terraform
   ansible.builtin.slurp:
-    src: "{{ technitium_repo_root }}/{{ technitium_proxmox_api_token_file }}"
+    src: >-
+      {{
+        technitium_proxmox_api_token_file
+        if (technitium_proxmox_api_token_file is match('^/'))
+        else technitium_repo_root ~ '/' ~ technitium_proxmox_api_token_file
+      }}
   register: technitium_proxmox_token_file
   no_log: true
 

@@ -18,7 +18,7 @@ vault_module_source: "./modules/proxmox-vm-cluster"
 vault_proxmox_api_url: "{{ infra_proxmox_api_url }}"
 vault_proxmox_tls_insecure: "{{ infra_proxmox_tls_insecure }}"
 vault_proxmox_api_token_file: "{{ infra_proxmox_api_token_file }}"
-vault_proxmox_api_token_file_ansible: "{{ infra_proxmox_api_token_file }}"
+vault_proxmox_api_token_file_ansible: "{{ infra_proxmox_api_token_file_ansible }}"
 
 # =============================================================================
 # Cluster Identity

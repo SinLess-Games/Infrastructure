@@ -73,6 +73,10 @@ Host {{ host_cfg.pattern | default('*') }}
   CertificateFile {{ host_cfg.certificate_file }}
   {% endif %}
 
+  {% if host_cfg.identities_only is defined %}
+  IdentitiesOnly {{ 'yes' if host_cfg.identities_only else 'no' }}
+  {% endif %}
+
   {% if host_cfg.strict_host_key_checking is defined %}
   StrictHostKeyChecking {{ host_cfg.strict_host_key_checking }}
   {% endif %}
@@ -93,4 +97,3 @@ Host {{ host_cfg.pattern | default('*') }}
   ServerAliveCountMax {{ host_cfg.server_alive_count_max }}
   {% endif %}
 {% endfor %}
-

@@ -8,6 +8,10 @@
   any_errors_fatal: true
   vars_files:
     - ../group_vars/all/ansible.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/packages.yaml
     - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/production/main.yaml
     - ../group_vars/kubernetes/production/master.yaml
@@ -56,6 +60,20 @@
               | map(attribute='value.public_key')
               | list
             )
+          }}
+      no_log: true
+      tags:
+        - preflight
+        - vault
+
+    - name: Ensure runtime SSH keys include the repo-managed production key
+      ansible.builtin.set_fact:
+        kubernetes_runtime_ssh_keys: >-
+          {{
+            (kubernetes_runtime_ssh_keys | default([]))
+            + [lookup('file', kubernetes_repo_root ~ '/.outputs/ssh/sinless777/id_ed25519.pub') | trim]
+            | unique
+            | list
           }}
       no_log: true
       tags:
@@ -126,17 +144,30 @@
   any_errors_fatal: true
   vars_files:
     - ../group_vars/all/ansible.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/packages.yaml
     - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/production/main.yaml
     - ../group_vars/kubernetes/production/master.yaml
     - ../group_vars/kubernetes/production/worker.yaml
 
   tasks:
+    - name: Announce Kubernetes node SSH wait phase
+      ansible.builtin.debug:
+        msg: >-
+          Terraform has finished; waiting for Kubernetes production nodes to boot
+          and accept SSH before configuration begins.
+      tags:
+        - wait
+        - kubernetes
+
     - name: Wait for SSH on Kubernetes nodes
       ansible.builtin.wait_for_connection:
-        delay: 10
+        delay: 5
         timeout: "{{ kubernetes_wait_for_ssh_timeout | default(900) }}"
-        connect_timeout: 10
+        connect_timeout: 5
       tags:
         - wait
         - kubernetes
@@ -157,12 +188,24 @@
   serial: 1
   vars_files:
     - ../group_vars/all/ansible.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/packages.yaml
     - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/production/main.yaml
     - ../group_vars/kubernetes/production/master.yaml
     - ../group_vars/kubernetes/production/worker.yaml
 
   pre_tasks:
+    - name: Announce Kubernetes node configuration phase
+      ansible.builtin.debug:
+        msg: >-
+          Kubernetes nodes are reachable; beginning OS and RKE2 configuration.
+      tags:
+        - configure
+        - kubernetes
+
     - name: Validate localhost runtime cache exists
       ansible.builtin.assert:
         that:
@@ -179,9 +222,29 @@
         - kubernetes
         - validate
 
+    - name: Read persisted RKE2 bootstrap token from first control plane when available
+      ansible.builtin.command: cat /var/lib/rancher/rke2/server/token
+      register: kubernetes_bootstrap_token_file
+      changed_when: false
+      failed_when: false
+      run_once: true
+      delegate_to: "{{ kubernetes_control_plane_first_host }}"
+      no_log: true
+      tags:
+        - configure
+        - kubernetes
+
     - name: Set runtime secrets from localhost cache
       ansible.builtin.set_fact:
-        rke2_server_token: "{{ hostvars['localhost'].kubernetes_runtime_rke2_server_token }}"
+        rke2_server_token: >-
+          {{
+            (
+              kubernetes_bootstrap_token_file.stdout | trim
+              if (kubernetes_bootstrap_token_file.rc | default(1)) == 0
+              and (kubernetes_bootstrap_token_file.stdout | default('') | trim | length > 0)
+              else hostvars['localhost'].kubernetes_runtime_rke2_server_token
+            )
+          }}
         kubernetes_deploy_ssh_keys: "{{ hostvars['localhost'].kubernetes_runtime_ssh_keys }}"
       no_log: true
       tags:
@@ -238,6 +301,11 @@
       become: true
       ansible.builtin.import_role:
         name: dns-resolver
+      vars:
+        dns_servers:
+          - 10.10.10.1
+          - 1.1.1.1
+          - 1.0.0.1
       failed_when: false
       tags:
         - dns
@@ -247,6 +315,11 @@
       become: true
       ansible.builtin.import_role:
         name: packages
+      vars:
+        packages_role_catalog: "{{ apt_packages }}"
+        packages_enabled_groups:
+          - production
+          - shell
       tags:
         - packages
         - kubernetes

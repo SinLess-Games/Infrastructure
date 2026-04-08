@@ -97,9 +97,22 @@ ssh:
 
   client_config:
     zones: "{{ ssh_local_dns_zones }}"
-    identity_file: "{{ ssh_root_identity_file }}"
-    certificate_file: "{{ ssh_root_certificate_file }}"
+    identity_file: "~/.ssh/id_ed25519"
+    certificate_file: "~/.ssh/id_ed25519-cert.pub"
     identities_only: true
     strict_host_key_checking: "accept-new"
     pubkey_authentication: true
     password_authentication: false
+    server_alive_interval: 30
+    server_alive_count_max: 3
+    hosts:
+      - pattern: "10.10.*"
+        identity_file: "~/.ssh/id_ed25519"
+        certificate_file: "~/.ssh/id_ed25519-cert.pub"
+        identities_only: true
+        strict_host_key_checking: "accept-new"
+      - pattern: "*.local.sinlessgames.com *.local.sinlessgamesllc.com"
+        identity_file: "~/.ssh/id_ed25519"
+        certificate_file: "~/.ssh/id_ed25519-cert.pub"
+        identities_only: true
+        strict_host_key_checking: "accept-new"

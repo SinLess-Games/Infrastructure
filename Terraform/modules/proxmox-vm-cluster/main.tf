@@ -127,6 +127,7 @@ EOT
 
     ignore_changes = [
       description,
+      pcis,
     ]
   }
 }

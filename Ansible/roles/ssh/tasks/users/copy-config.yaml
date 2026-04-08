@@ -75,3 +75,21 @@
   when: item.name in ssh__home_by_user
   vars:
     ansible_template_src: "templates/ssh/config.j2"
+    ssh_client: >-
+      {{
+        {
+          'global': {
+            'strict_host_key_checking': ssh.client_config.strict_host_key_checking | default('accept-new'),
+            'forward_agent': ssh.client_config.forward_agent | default('no'),
+            'forward_x11': ssh.client_config.forward_x11 | default('no'),
+            'server_alive_interval': ssh.client_config.server_alive_interval | default(30),
+            'server_alive_count_max': ssh.client_config.server_alive_count_max | default(3),
+            'identity_file': ssh.client_config.identity_file
+              | default(ssh__home_by_user[item.name] ~ '/.ssh/id_' ~ (ssh_key_type | default('ed25519'))),
+            'certificate_file': ssh.client_config.certificate_file
+              | default(ssh__home_by_user[item.name] ~ '/.ssh/id_' ~ (ssh_key_type | default('ed25519')) ~ '-cert.pub'),
+            'identities_only': ssh.client_config.identities_only | default(true)
+          },
+          'hosts': ssh.client_config.hosts | default([])
+        }
+      }}

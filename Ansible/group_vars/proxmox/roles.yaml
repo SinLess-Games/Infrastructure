@@ -17,6 +17,7 @@ proxmox_roles:
       - "Datastore.Audit"
       - "Pool.Allocate"
       - "Pool.Audit"
+      - "Mapping.Use"
       - "Sys.Audit"
       - "Sys.Console"
       - "Sys.Modify"

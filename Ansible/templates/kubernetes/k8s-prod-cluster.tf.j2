@@ -12,6 +12,7 @@ module "kubernetes_prod_control_plane" {
       name        = "{{ node.name }}"
       vmid        = {{ node.vmid }}
       target_node = "{{ node.target_node }}"
+      storage     = "{{ node.storage | default(kubernetes_proxmox.storage_by_node[node.target_node] | default(kubernetes_proxmox.storage)) }}"
 {% if node.clone_template is defined %}
       clone_template = "{{ node.clone_template }}"
 {% endif %}
@@ -57,6 +58,7 @@ module "kubernetes_prod_workers" {
       name        = "{{ node.name }}"
       vmid        = {{ node.vmid }}
       target_node = "{{ node.target_node }}"
+      storage     = "{{ node.storage | default(kubernetes_proxmox.storage_by_node[node.target_node] | default(kubernetes_proxmox.storage)) }}"
 {% if node.clone_template is defined %}
       clone_template = "{{ node.clone_template }}"
 {% endif %}

@@ -13,6 +13,7 @@ zsh_theme: robbyrussell
 shell_install_zsh: true
 shell_install_oh_my_zsh: true
 shell_install_starship: false
+shell_set_default_shell: true
 
 # -----------------------------------------------------------------------------
 # Users that should receive shell configuration

@@ -7,6 +7,11 @@
   gather_facts: false
   any_errors_fatal: true
   vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/packages.yaml
     - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/staging/main.yaml
     - ../group_vars/kubernetes/staging/master.yaml
@@ -106,6 +111,11 @@
   gather_facts: false
   any_errors_fatal: true
   vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/packages.yaml
     - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/staging/main.yaml
     - ../group_vars/kubernetes/staging/master.yaml
@@ -136,6 +146,11 @@
   gather_facts: true
   any_errors_fatal: true
   vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/packages.yaml
     - ../group_vars/kubernetes/main.yaml
     - ../group_vars/kubernetes/staging/main.yaml
     - ../group_vars/kubernetes/staging/master.yaml
@@ -220,6 +235,43 @@
       failed_when: false
       tags:
         - dns
+        - kubernetes
+
+    - name: Apply packages role
+      become: true
+      ansible.builtin.import_role:
+        name: packages
+      vars:
+        packages_role_catalog: "{{ apt_packages }}"
+        packages_enabled_groups:
+          - production
+          - shell
+      tags:
+        - packages
+        - kubernetes
+
+    - name: Apply shell configuration role
+      become: true
+      ansible.builtin.import_role:
+        name: shell-config
+      tags:
+        - shell
+        - kubernetes
+
+    - name: Apply SSH role
+      become: true
+      ansible.builtin.import_role:
+        name: ssh
+      tags:
+        - ssh
+        - kubernetes
+
+    - name: Apply users role
+      become: true
+      ansible.builtin.import_role:
+        name: users
+      tags:
+        - users
         - kubernetes
 
     - name: Configure Kubernetes node

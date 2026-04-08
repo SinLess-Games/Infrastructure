@@ -13,7 +13,12 @@
 
 - name: Read Proxmox API token file for Vault deployment
   ansible.builtin.slurp:
-    src: "{{ vault_repo_root }}/{{ vault_proxmox_api_token_file_ansible | default(vault_proxmox_api_token_file) }}"
+    src: >-
+      {{
+        vault_proxmox_api_token_file
+        if (vault_proxmox_api_token_file is match('^/'))
+        else vault_repo_root ~ '/' ~ vault_proxmox_api_token_file
+      }}
   register: vault_proxmox_token_file
   no_log: true
 

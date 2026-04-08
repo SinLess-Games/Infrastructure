@@ -37,10 +37,10 @@
 # Change default shell
 # -----------------------------------------------------------------------------
 
-- name: Set default shell to zsh for eligible users
+- name: Set default shell for explicitly configured users
   ansible.builtin.user:
     name: "{{ item.name }}"
-    shell: /usr/bin/zsh
+    shell: "{{ item.shell }}"
   loop: "{{ shell__resolved_users }}"
   loop_control:
     label: "{{ item.name }}"

@@ -82,3 +82,80 @@
     group: root
     mode: "0755"
   become: true
+
+- name: Ensure sshd_config.d directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Ensure sshd_config includes drop-in directory
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    insertafter: BOF
+    regexp: '^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf\s*$'
+    line: 'Include /etc/ssh/sshd_config.d/*.conf'
+    state: present
+  register: ssh__sshd_include_result
+  become: true
+
+- name: Deploy managed sshd configuration drop-in
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/ssh/sshd_config.j2"
+    dest: /etc/ssh/sshd_config.d/50-ansible-ssh.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: ssh__sshd_dropin_result
+  become: true
+  vars:
+    ansible_template_src: "templates/ssh/sshd_config.j2"
+
+- name: Validate sshd configuration syntax
+  ansible.builtin.command: sshd -t
+  changed_when: false
+  become: true
+
+- name: Restart SSH service after sshd config changes
+  ansible.builtin.service:
+    name: "{{ 'sshd' if (ansible_facts.os_family | default('')) in ['RedHat', 'Rocky', 'AlmaLinux', 'Suse'] else 'ssh' }}"
+    state: restarted
+  when:
+    - (ssh__sshd_include_result is changed) or (ssh__sshd_dropin_result is changed)
+  become: true
+
+- name: Read effective sshd configuration
+  ansible.builtin.command: sshd -T
+  register: sshd_effective
+  changed_when: false
+  become: true
+
+- name: Compute expected CA directives
+  ansible.builtin.set_fact:
+    expected_trustedusercakeys: >-
+      trustedusercakeys {{ (ssh.server.trusted_user_ca_keys | default('/etc/ssh/ca/ssh_ca.pub')) | lower }}
+    expected_authorizedprincipalsfile: >-
+      authorizedprincipalsfile {{ (ssh.server.authorized_principals_file | default('/etc/ssh/auth_principals/%u')) | lower }}
+    expected_passwordauthentication: >-
+      passwordauthentication {{ 'yes' if (ssh.server.password_authentication | default(false)) else 'no' }}
+  changed_when: false
+
+- name: Assert managed sshd configuration is active
+  ansible.builtin.assert:
+    that:
+      - expected_trustedusercakeys in (sshd_effective.stdout | lower)
+      - expected_authorizedprincipalsfile in (sshd_effective.stdout | lower)
+      - expected_passwordauthentication in (sshd_effective.stdout | lower)
+    fail_msg: |
+      Managed SSH daemon configuration is not active.
+      Expected:
+        - {{ expected_trustedusercakeys }}
+        - {{ expected_authorizedprincipalsfile }}
+        - {{ expected_passwordauthentication }}
+      Got:
+        {{ (sshd_effective.stdout_lines
+            | select('match', '^(trustedusercakeys|authorizedprincipalsfile|passwordauthentication)\\s')
+            | list) | to_nice_yaml }}

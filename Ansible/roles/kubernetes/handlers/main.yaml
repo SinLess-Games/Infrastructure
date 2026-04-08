@@ -4,6 +4,27 @@
     name: "{{ kubernetes_role_rke2_server_service }}"
     state: restarted
     daemon_reload: true
+  register: kubernetes_role_rke2_server_restart
+  failed_when: false
+  become: true
+
+- name: Wait for rke2-server to become active after restart
+  ansible.builtin.command: systemctl is-active {{ kubernetes_role_rke2_server_service }}
+  register: kubernetes_role_rke2_server_active
+  changed_when: false
+  retries: 24
+  delay: 5
+  until: kubernetes_role_rke2_server_active.stdout == 'active'
+  become: true
+
+- name: Assert rke2-server is active after restart attempt
+  ansible.builtin.assert:
+    that:
+      - kubernetes_role_rke2_server_active.stdout == 'active'
+    fail_msg: >-
+      rke2-server did not become active after restart.
+      restart_result={{ kubernetes_role_rke2_server_restart | to_nice_json }}
+      active_result={{ kubernetes_role_rke2_server_active | to_nice_json }}
   become: true
 
 - name: Restart rke2-agent
@@ -11,4 +32,25 @@
     name: "{{ kubernetes_role_rke2_agent_service }}"
     state: restarted
     daemon_reload: true
+  register: kubernetes_role_rke2_agent_restart
+  failed_when: false
+  become: true
+
+- name: Wait for rke2-agent to become active after restart
+  ansible.builtin.command: systemctl is-active {{ kubernetes_role_rke2_agent_service }}
+  register: kubernetes_role_rke2_agent_active
+  changed_when: false
+  retries: 24
+  delay: 5
+  until: kubernetes_role_rke2_agent_active.stdout == 'active'
+  become: true
+
+- name: Assert rke2-agent is active after restart attempt
+  ansible.builtin.assert:
+    that:
+      - kubernetes_role_rke2_agent_active.stdout == 'active'
+    fail_msg: >-
+      rke2-agent did not become active after restart.
+      restart_result={{ kubernetes_role_rke2_agent_restart | to_nice_json }}
+      active_result={{ kubernetes_role_rke2_agent_active | to_nice_json }}
   become: true

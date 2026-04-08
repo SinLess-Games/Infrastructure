@@ -52,14 +52,41 @@
   args:
     creates: /usr/local/bin/rke2
 
+- name: Ensure RKE2 manifests directory exists on control plane nodes
+  ansible.builtin.file:
+    path: /var/lib/rancher/rke2/server/manifests
+    state: directory
+    mode: "0755"
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+
 - name: Render kube-vip manifest on control plane nodes
   ansible.builtin.template:
     src: kube-vip-static-pod.yaml.j2
     dest: /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
     mode: "0644"
+  register: kubernetes_role_kube_vip_manifest
   when:
     - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
     - kubernetes_kube_vip.enabled | bool
+
+- name: Recreate kube-vip pod when manifest spec changes
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - delete
+      - pod
+      - kube-vip
+      - -n
+      - kube-system
+      - --ignore-not-found=true
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_kube_vip.enabled | bool
+    - kubernetes_role_kube_vip_manifest is defined
+    - kubernetes_role_kube_vip_manifest.changed | bool
 
 - name: Render RKE2 server configuration
   ansible.builtin.template:
@@ -68,6 +95,56 @@
     mode: "0600"
   when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
   notify: Restart rke2-server
+
+- name: Clean stale bootstrap database on control plane nodes before start
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/lib/rancher/rke2/server/db/state.db
+    - /var/lib/rancher/rke2/server/db/etcd-tmp
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name] and inventory_hostname != kubernetes_control_plane_first_host
+  failed_when: false
+
+- name: Detect stale secondary control-plane join state
+  ansible.builtin.command: journalctl -u rke2-server --no-pager -n 120
+  register: kubernetes_role_rke2_recent_journal
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - inventory_hostname != kubernetes_control_plane_first_host
+
+- name: Reset stale secondary control-plane RKE2 state on CA validation failure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/lib/rancher/rke2/server/tls
+    - /var/lib/rancher/rke2/server/cred
+    - /var/lib/rancher/rke2/server/db
+    - /var/lib/rancher/rke2/agent
+    - /etc/rancher/node
+    - /var/lib/rancher/rke2/server/token
+    - /var/lib/rancher/rke2/server/node-token
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - inventory_hostname != kubernetes_control_plane_first_host
+    - kubernetes_role_rke2_recent_journal is defined
+    - kubernetes_role_rke2_recent_journal.stdout is defined
+    - "'CA cert validation failed' in kubernetes_role_rke2_recent_journal.stdout or 'certificate signed by unknown authority' in kubernetes_role_rke2_recent_journal.stdout"
+  failed_when: false
+
+- name: Wait for bootstrap control plane supervisor port to become reachable
+  ansible.builtin.wait_for:
+    host: "{{ kubernetes_control_plane_first_ip }}"
+    port: "{{ kubernetes_rke2_api_private_port }}"
+    delay: 5
+    timeout: 1800
+    connect_timeout: 5
+  when:
+    - inventory_hostname != kubernetes_control_plane_first_host
+    - inventory_hostname in groups[kubernetes_rke2_cluster_group_name]
 
 - name: Render RKE2 agent configuration
   ansible.builtin.template:
@@ -83,6 +160,27 @@
     enabled: true
     state: started
     daemon_reload: true
+  register: kubernetes_role_rke2_server_start
+  failed_when: false
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+
+- name: Wait for RKE2 server service to become active
+  ansible.builtin.command: systemctl is-active {{ kubernetes_role_rke2_server_service }}
+  register: kubernetes_role_rke2_server_active
+  changed_when: false
+  retries: "{{ kubernetes_wait_for_rke2_active_retries | int }}"
+  delay: "{{ kubernetes_wait_for_rke2_active_delay | int }}"
+  until: kubernetes_role_rke2_server_active.stdout == 'active'
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+
+- name: Assert RKE2 server service is active
+  ansible.builtin.assert:
+    that:
+      - kubernetes_role_rke2_server_active.stdout == 'active'
+    fail_msg: >-
+      rke2-server failed to reach active state.
+      start_result={{ kubernetes_role_rke2_server_start | to_nice_json }}
+      active_result={{ kubernetes_role_rke2_server_active | to_nice_json }}
   when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
 
 - name: Ensure RKE2 agent service is enabled and started
@@ -91,6 +189,27 @@
     enabled: true
     state: started
     daemon_reload: true
+  register: kubernetes_role_rke2_agent_start
+  failed_when: false
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+
+- name: Wait for RKE2 agent service to become active
+  ansible.builtin.command: systemctl is-active {{ kubernetes_role_rke2_agent_service }}
+  register: kubernetes_role_rke2_agent_active
+  changed_when: false
+  retries: "{{ kubernetes_wait_for_rke2_active_retries | int }}"
+  delay: "{{ kubernetes_wait_for_rke2_active_delay | int }}"
+  until: kubernetes_role_rke2_agent_active.stdout == 'active'
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+
+- name: Assert RKE2 agent service is active
+  ansible.builtin.assert:
+    that:
+      - kubernetes_role_rke2_agent_active.stdout == 'active'
+    fail_msg: >-
+      rke2-agent failed to reach active state.
+      start_result={{ kubernetes_role_rke2_agent_start | to_nice_json }}
+      active_result={{ kubernetes_role_rke2_agent_active | to_nice_json }}
   when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
 
 - name: Wait for kubeconfig on bootstrap control plane
@@ -122,8 +241,12 @@
       - wait
       - --for=condition=Ready
       - node/{{ inventory_hostname }}
-      - --timeout=300s
+      - --timeout={{ kubernetes_wait_for_node_ready_timeout }}s
+  register: kubernetes_role_node_ready_wait
   changed_when: false
+  retries: "{{ kubernetes_wait_for_node_ready_retries | int }}"
+  delay: "{{ kubernetes_wait_for_node_ready_delay | int }}"
+  until: kubernetes_role_node_ready_wait.rc == 0
   delegate_to: "{{ kubernetes_control_plane_first_host }}"
   when:
     - inventory_hostname != kubernetes_control_plane_first_host

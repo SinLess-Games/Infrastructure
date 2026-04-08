@@ -96,11 +96,23 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: Fail if any home directory does not exist
-  ansible.builtin.fail:
-    msg: "Home directory does not exist for user {{ item.item.name }}: {{ item.item.home_directory }}"
+- name: Build shell users with existing home directories
+  ansible.builtin.set_fact:
+    shell__home_users: >-
+      {{
+        home_dirs.results
+        | selectattr('stat.exists')
+        | map(attribute='item')
+        | list
+      }}
+
+- name: Report shell users skipped because home directories are missing
+  ansible.builtin.debug:
+    msg: "Skipping shell dotfile/plugin management for {{ item.item.name }} because {{ item.item.home_directory }} does not exist"
   when: not item.stat.exists
   loop: "{{ home_dirs.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
 
 - name: Validate shell bin command source directory
   ansible.builtin.stat:

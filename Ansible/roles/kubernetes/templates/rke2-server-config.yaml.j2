@@ -39,5 +39,5 @@ kubelet-arg:
   - "{{ arg }}"
 {% endfor %}
 {% if inventory_hostname != kubernetes_control_plane_first_host %}
-server: "{{ kubernetes_server_url }}"
+server: "{{ kubernetes_join_server_url }}"
 {% endif %}
