@@ -1,5 +1,7 @@
 authSecret:
-  enabled: false
+  enabled: true
+  create: false
+  name: controller-manager
 controllerManager:
   metrics:
     serviceMonitor:

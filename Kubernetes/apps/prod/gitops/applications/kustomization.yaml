@@ -14,6 +14,7 @@ resources:
   - local-networking-config.yaml
   - local-monitoring-config.yaml
   - local-external-secrets-config.yaml
+  - local-gitops-config.yaml
   - local-security-policies.yaml
   - local-cloudflared.yaml
   - local-wazuh.yaml
@@ -22,4 +23,5 @@ resources:
   - local-sinless-games-policies.yaml
   - local-sinless-games-mesh.yaml
   - local-platform-examples.yaml
+  - actions-runner-controller.yaml
   - platform-helm-applicationset.yaml

@@ -413,3 +413,349 @@
       tags:
         - kubeconfig
         - kubernetes
+
+# =============================================================================
+# Bootstrap Production GitOps Apps
+# =============================================================================
+- name: Bootstrap production platform apps
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/production/main.yaml
+    - ../group_vars/kubernetes/production/master.yaml
+    - ../group_vars/kubernetes/production/worker.yaml
+
+  vars:
+    kubernetes_vault_seed_documents: >-
+      {{
+        (
+          lookup('file', playbook_dir ~ '/../group_vars/vault/vault-secrets.yaml')
+          | from_yaml
+        ).secrets | default({})
+      }}
+    kubernetes_argocd_admin_password_raw: >-
+      {{
+        (
+          hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password', '')
+          | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password', ''), true)
+        )
+        if (
+          (
+            hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password', '')
+            | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password', ''), true)
+          ) | length > 0
+        )
+        else (
+          kubernetes_vault_seed_documents.get('kubernetes/production/integrations', {}).get('data', {}).get('argocd_admin_password', '')
+        )
+      }}
+    kubernetes_argocd_admin_password_bcrypt: >-
+      {{
+        (
+          (
+            hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password_bcrypt', '')
+            | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password_bcrypt', ''), true)
+          )
+          if (
+            (
+              hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password_bcrypt', '')
+              | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password_bcrypt', ''), true)
+            ) | length > 0
+          )
+          else (
+            kubernetes_vault_seed_documents.get('kubernetes/production/integrations', {}).get('data', {}).get('argocd_admin_password_bcrypt', '')
+          )
+        )
+        if (
+          (
+            (
+              hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password_bcrypt', '')
+              | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password_bcrypt', ''), true)
+            )
+            if (
+              (
+                hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password_bcrypt', '')
+                | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password_bcrypt', ''), true)
+              ) | length > 0
+            )
+            else (
+              kubernetes_vault_seed_documents.get('kubernetes/production/integrations', {}).get('data', {}).get('argocd_admin_password_bcrypt', '')
+            )
+          ) | length > 0
+        ) else (
+          kubernetes_argocd_admin_password_raw
+          | password_hash('bcrypt')
+        )
+      }}
+
+  tasks:
+    - name: Skip GitOps bootstrap when disabled
+      ansible.builtin.meta: end_play
+      when: not (kubernetes_gitops.bootstrap_enabled | default(true) | bool)
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Verify kubeconfig exists before app bootstrap
+      ansible.builtin.stat:
+        path: "{{ kubernetes_kubeconfig_archive_path }}"
+      register: kubernetes_prod_bootstrap_kubeconfig_stat
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Fail when kubeconfig archive is missing
+      ansible.builtin.assert:
+        that:
+          - kubernetes_prod_bootstrap_kubeconfig_stat.stat.exists
+        fail_msg: >-
+          Expected kubeconfig at {{ kubernetes_kubeconfig_archive_path }} was not found.
+          The production cluster must be configured before GitOps apps can be bootstrapped.
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Validate Argo CD admin bcrypt is available
+      ansible.builtin.assert:
+        that:
+          - kubernetes_argocd_admin_password_raw is defined
+          - kubernetes_argocd_admin_password_raw | length > 0
+          - kubernetes_argocd_admin_password_bcrypt is defined
+          - kubernetes_argocd_admin_password_bcrypt | length > 0
+        fail_msg: >-
+          Missing argocd_admin_password in the cached Vault data.
+          Update Ansible/group_vars/vault/vault-secrets.yaml and run task vault:update-secrets.
+      no_log: true
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+        - validate
+
+    - name: Create temporary rendered Argo CD values file
+      ansible.builtin.tempfile:
+        state: file
+        suffix: "-argocd-values.yaml"
+      register: kubernetes_argocd_values_tempfile
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Render Argo CD Helm values with Vault-backed admin password
+      ansible.builtin.copy:
+        dest: "{{ kubernetes_argocd_values_tempfile.path }}"
+        mode: "0600"
+        content: >-
+          {{
+            lookup('file', kubernetes_gitops.argocd_values_path)
+            | replace('${ARGOCD_ADMIN_PASSWORD_BCRYPT}', kubernetes_argocd_admin_password_bcrypt)
+          }}
+      no_log: true
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Add Argo Helm repository
+      ansible.builtin.command:
+        argv:
+          - helm
+          - repo
+          - add
+          - "{{ kubernetes_gitops.chart_repo_name }}"
+          - "{{ kubernetes_gitops.chart_repo_url }}"
+      register: kubernetes_argocd_repo_add
+      changed_when: "'has been added' in (kubernetes_argocd_repo_add.stdout | default(''))"
+      failed_when:
+        - kubernetes_argocd_repo_add.rc != 0
+        - "'already exists' not in (kubernetes_argocd_repo_add.stderr | default(''))"
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Update Helm repositories
+      ansible.builtin.command:
+        argv:
+          - helm
+          - repo
+          - update
+      changed_when: false
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Ensure GitOps namespace exists
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubernetes_kubeconfig_archive_path }}"
+          - apply
+          - -k
+          - "{{ kubernetes_gitops.namespace_kustomization_path }}"
+      changed_when: >-
+        'configured' in (kubernetes_gitops_namespace_apply.stdout | default(''))
+        or 'created' in (kubernetes_gitops_namespace_apply.stdout | default(''))
+      register: kubernetes_gitops_namespace_apply
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Install or upgrade Argo CD bootstrap release
+      ansible.builtin.command:
+        argv:
+          - helm
+          - upgrade
+          - --install
+          - "{{ kubernetes_gitops.release_name }}"
+          - "{{ kubernetes_gitops.chart_repo_name }}/{{ kubernetes_gitops.chart_name }}"
+          - --namespace
+          - "{{ kubernetes_gitops.namespace }}"
+          - --version
+          - "{{ kubernetes_gitops.chart_version }}"
+          - --values
+          - "{{ kubernetes_argocd_values_tempfile.path }}"
+          - --wait
+          - --timeout
+          - "{{ kubernetes_gitops.wait_timeout }}"
+          - --kubeconfig
+          - "{{ kubernetes_kubeconfig_archive_path }}"
+      register: kubernetes_argocd_helm_install
+      changed_when: >-
+        'STATUS: deployed' in (kubernetes_argocd_helm_install.stdout | default(''))
+        or 'STATUS: upgraded' in (kubernetes_argocd_helm_install.stdout | default(''))
+      no_log: true
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Wait for Argo CD server deployment
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubernetes_kubeconfig_archive_path }}"
+          - -n
+          - "{{ kubernetes_gitops.namespace }}"
+          - rollout
+          - status
+          - "deploy/{{ kubernetes_gitops.release_name }}-argocd-server"
+          - --timeout={{ kubernetes_gitops.wait_timeout }}
+      changed_when: false
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Wait for Argo CD repo server deployment
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubernetes_kubeconfig_archive_path }}"
+          - -n
+          - "{{ kubernetes_gitops.namespace }}"
+          - rollout
+          - status
+          - "deploy/{{ kubernetes_gitops.release_name }}-argocd-repo-server"
+          - --timeout={{ kubernetes_gitops.wait_timeout }}
+      changed_when: false
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Wait for Argo CD ApplicationSet deployment
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubernetes_kubeconfig_archive_path }}"
+          - -n
+          - "{{ kubernetes_gitops.namespace }}"
+          - rollout
+          - status
+          - "deploy/{{ kubernetes_gitops.release_name }}-argocd-applicationset-controller"
+          - --timeout={{ kubernetes_gitops.wait_timeout }}
+      changed_when: false
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Wait for Argo CD application controller statefulset
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubernetes_kubeconfig_archive_path }}"
+          - -n
+          - "{{ kubernetes_gitops.namespace }}"
+          - rollout
+          - status
+          - "statefulset/{{ kubernetes_gitops.release_name }}-argocd-application-controller"
+          - --timeout={{ kubernetes_gitops.wait_timeout }}
+      changed_when: false
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Apply production cluster bootstrap manifests
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubernetes_kubeconfig_archive_path }}"
+          - apply
+          - -k
+          - "{{ kubernetes_gitops.bootstrap_kustomization_path }}"
+      register: kubernetes_prod_cluster_bootstrap_apply
+      changed_when: >-
+        'configured' in (kubernetes_prod_cluster_bootstrap_apply.stdout | default(''))
+        or 'created' in (kubernetes_prod_cluster_bootstrap_apply.stdout | default(''))
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Wait for prod platform root application to exist
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ kubernetes_kubeconfig_archive_path }}"
+          - -n
+          - "{{ kubernetes_gitops.namespace }}"
+          - get
+          - application
+          - prod-platform-root
+      changed_when: false
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+  post_tasks:
+    - name: Remove temporary rendered Argo CD values file
+      ansible.builtin.file:
+        path: "{{ kubernetes_argocd_values_tempfile.path }}"
+        state: absent
+      when:
+        - kubernetes_argocd_values_tempfile is defined
+        - kubernetes_argocd_values_tempfile.path is defined
+      tags:
+        - apps
+        - gitops
+        - bootstrap

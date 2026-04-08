@@ -175,13 +175,6 @@ spec:
             targetRevision: 2.38.0
             valuesPath: Kubernetes/apps/prod/gitops/argo-rollouts/values.yaml
             syncWave: "14"
-          - name: actions-runner-controller
-            namespace: gitops
-            chartRepo: https://actions-runner-controller.github.io/actions-runner-controller
-            chart: actions-runner-controller
-            targetRevision: 0.23.7
-            valuesPath: Kubernetes/apps/prod/gitops/actions-runner-controller/values.yaml
-            syncWave: "14"
           - name: cockroachdb
             namespace: helix-ai
             chartRepo: https://charts.cockroachdb.com/

@@ -207,3 +207,16 @@ kubernetes_operation:
   wait_for_ssh_timeout: 300
   wait_for_kubeconfig_timeout: 300
   wait_for_api_timeout: 600
+
+kubernetes_gitops:
+  bootstrap_enabled: true
+  namespace: "gitops"
+  release_name: "argo-cd"
+  chart_repo_name: "argo"
+  chart_repo_url: "https://argoproj.github.io/argo-helm"
+  chart_name: "argo-cd"
+  chart_version: "7.7.11"
+  bootstrap_kustomization_path: "{{ kubernetes_repo_root }}/Kubernetes/clusters/prod"
+  namespace_kustomization_path: "{{ kubernetes_repo_root }}/Kubernetes/apps/prod/gitops/namespace"
+  argocd_values_path: "{{ kubernetes_repo_root }}/Kubernetes/apps/prod/gitops/argo-cd/values.yaml"
+  wait_timeout: "20m"
