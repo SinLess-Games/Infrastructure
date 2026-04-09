@@ -10,10 +10,12 @@ hubble:
     enabled: true
   ui:
     enabled: true
+    replicas: 1
+    service:
+      type: ClusterIP
 prometheus:
   enabled: true
-envoy:
-  enabled: true
+envoy: false
 securityContext:
   capabilities:
     ciliumAgent:

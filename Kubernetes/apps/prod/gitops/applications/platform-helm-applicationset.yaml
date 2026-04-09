@@ -7,13 +7,6 @@ spec:
   generators:
     - list:
         elements:
-          - name: cilium
-            namespace: kube-system
-            chartRepo: https://helm.cilium.io
-            chart: cilium
-            targetRevision: 1.16.5
-            valuesPath: Kubernetes/apps/prod/kube-system/cilium/values.yaml
-            syncWave: "-10"
           - name: longhorn
             namespace: kube-system
             chartRepo: https://charts.longhorn.io
@@ -251,6 +244,24 @@ spec:
           kind: ValidatingWebhookConfiguration
           jqPathExpressions:
             - '.webhooks[]?.clientConfig.caBundle'
+        - group: ""
+          kind: Secret
+          name: cilium-ca
+          namespace: kube-system
+          jqPathExpressions:
+            - '.data'
+        - group: ""
+          kind: Secret
+          name: hubble-relay-client-certs
+          namespace: kube-system
+          jqPathExpressions:
+            - '.data'
+        - group: ""
+          kind: Secret
+          name: hubble-server-certs
+          namespace: kube-system
+          jqPathExpressions:
+            - '.data'
       sources:
         - repoURL: "{{chartRepo}}"
           chart: "{{chart}}"
@@ -258,8 +269,6 @@ spec:
           helm:
             valueFiles:
               - "$values/{{valuesPath}}"
-            values: |
-              {{inlineValues}}
         - repoURL: https://github.com/Sinless777/Infrastructure.git
           targetRevision: main
           ref: values

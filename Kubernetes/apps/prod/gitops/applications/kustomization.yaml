@@ -25,4 +25,5 @@ resources:
   - local-sinless-games-garage.yaml
   - local-platform-examples.yaml
   - actions-runner-controller.yaml
+  - cilium.yaml
   - platform-helm-applicationset.yaml

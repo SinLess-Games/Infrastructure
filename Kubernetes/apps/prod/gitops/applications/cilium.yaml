@@ -1,0 +1,78 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cilium
+  namespace: gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  project: platform
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: cilium-ca
+      namespace: kube-system
+      jqPathExpressions:
+        - '.data'
+    - group: ""
+      kind: Secret
+      name: hubble-relay-client-certs
+      namespace: kube-system
+      jqPathExpressions:
+        - '.data'
+    - group: ""
+      kind: Secret
+      name: hubble-server-certs
+      namespace: kube-system
+      jqPathExpressions:
+        - '.data'
+  sources:
+    - repoURL: https://helm.cilium.io
+      chart: cilium
+      targetRevision: 1.16.5
+      helm:
+        values: |
+          operator:
+            replicas: 2
+          ipam:
+            mode: kubernetes
+          k8sServiceHost: 10.10.40.10
+          k8sServicePort: 6443
+          kubeProxyReplacement: false
+          hubble:
+            relay:
+              enabled: true
+            ui:
+              enabled: true
+              replicas: 1
+              service:
+                type: ClusterIP
+          prometheus:
+            enabled: true
+          envoy: false
+          securityContext:
+            capabilities:
+              ciliumAgent:
+                - CHOWN
+                - KILL
+                - NET_ADMIN
+                - NET_RAW
+                - IPC_LOCK
+                - SYS_ADMIN
+                - SYS_RESOURCE
+                - DAC_OVERRIDE
+                - FOWNER
+                - SETGID
+                - SETUID
+                - BPF
+                - PERFMON
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
