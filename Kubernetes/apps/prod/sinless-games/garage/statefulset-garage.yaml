@@ -141,16 +141,16 @@ spec:
       spec:
         accessModes:
           - ReadWriteOnce
-        storageClassName: longhorn
+        storageClassName: longhorn-garage
         resources:
           requests:
-            storage: 20Gi
+            storage: 10Gi
     - metadata:
         name: garage-data
       spec:
         accessModes:
           - ReadWriteOnce
-        storageClassName: longhorn
+        storageClassName: longhorn-garage
         resources:
           requests:
-            storage: 250Gi
+            storage: 50Gi
