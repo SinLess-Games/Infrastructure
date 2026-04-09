@@ -4,7 +4,7 @@ metadata:
   name: istio-system
   labels:
     kubernetes.io/metadata.name: istio-system
-    istio-injection: disabled
+    istio.io/rev: default
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: restricted
     topology.kubernetes.io/environment: prod

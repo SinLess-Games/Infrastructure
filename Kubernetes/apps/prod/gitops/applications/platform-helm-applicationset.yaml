@@ -34,6 +34,7 @@ spec:
             chart: base
             targetRevision: 1.24.2
             valuesPath: Kubernetes/apps/prod/istio-system/istio-base/values.yaml
+            inlineValues: ""
             syncWave: "0"
           - name: istiod
             namespace: istio-system
@@ -41,6 +42,20 @@ spec:
             chart: istiod
             targetRevision: 1.24.2
             valuesPath: Kubernetes/apps/prod/istio-system/istiod/values.yaml
+            inlineValues: |
+              autoscaleMin: 3
+              autoscaleMax: 5
+              replicaCount: 3
+              global:
+                proxy:
+                  autoInject: enabled
+              meshConfig:
+                accessLogFile: /dev/stdout
+                enablePrometheusMerge: true
+              pilot:
+                autoscaleEnabled: true
+                env:
+                  EXTERNAL_ISTIOD: "false"
             syncWave: "1"
           - name: istio-ingress
             namespace: istio-system
@@ -48,6 +63,22 @@ spec:
             chart: gateway
             targetRevision: 1.24.2
             valuesPath: Kubernetes/apps/prod/istio-system/istio-ingress/values.yaml
+            inlineValues: |
+              service:
+                type: LoadBalancer
+                annotations:
+                  metallb.universe.tf/address-pool: prod-services
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+              autoscaling:
+                enabled: true
+                minReplicas: 2
+                maxReplicas: 4
             syncWave: "2"
           - name: cert-manager
             namespace: networking
@@ -227,6 +258,8 @@ spec:
           helm:
             valueFiles:
               - "$values/{{valuesPath}}"
+            values: |
+              {{inlineValues}}
         - repoURL: https://github.com/Sinless777/Infrastructure.git
           targetRevision: main
           ref: values
