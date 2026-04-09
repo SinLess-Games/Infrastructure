@@ -26,5 +26,6 @@ resources:
   - local-platform-examples.yaml
   - actions-runner-controller.yaml
   - cilium.yaml
+  - kyverno.yaml
   - nvidia-gpu-operator.yaml
   - platform-helm-applicationset.yaml

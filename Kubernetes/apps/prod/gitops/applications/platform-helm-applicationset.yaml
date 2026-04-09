@@ -160,13 +160,6 @@ spec:
             targetRevision: 0.10.5
             valuesPath: Kubernetes/apps/prod/security/external-secrets/values.yaml
             syncWave: "4"
-          - name: kyverno
-            namespace: security
-            chartRepo: https://kyverno.github.io/kyverno
-            chart: kyverno
-            targetRevision: 3.3.4
-            valuesPath: Kubernetes/apps/prod/security/kyverno/values.yaml
-            syncWave: "11"
           - name: falco
             namespace: security
             chartRepo: https://falcosecurity.github.io/charts

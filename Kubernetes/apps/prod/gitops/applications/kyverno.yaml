@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+spec:
+  project: platform
+  destination:
+    namespace: security
+    server: https://kubernetes.default.svc
+  sources:
+    - repoURL: https://kyverno.github.io/kyverno
+      chart: kyverno
+      targetRevision: 3.3.4
+      helm:
+        valueFiles:
+          - $values/Kubernetes/apps/prod/security/kyverno/values.yaml
+    - repoURL: https://github.com/Sinless777/Infrastructure.git
+      targetRevision: main
+      ref: values
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jqPathExpressions:
+        - '.webhooks[]?.clientConfig.caBundle'
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions:
+        - '.webhooks[]?.clientConfig.caBundle'
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+      - ServerSideApply=true

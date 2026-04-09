@@ -4,9 +4,10 @@ defaultSettings:
   backupTarget: s3://k8s-prod-longhorn@auto/
   backupTargetCredentialSecret: longhorn-backup-credentials
   createDefaultDiskLabeledNodes: false
-  storageOverProvisioningPercentage: 150
+  storageOverProvisioningPercentage: 300
   storageMinimalAvailablePercentage: 15
   replicaAutoBalance: best-effort
+  taintToleration: nvidia.com/gpu=true:NoSchedule
 preUpgradeChecker:
   jobEnabled: false
 tolerations:
