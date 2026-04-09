@@ -15,7 +15,8 @@ hubble:
       type: ClusterIP
 prometheus:
   enabled: true
-envoy: false
+envoy:
+  enabled: false
 securityContext:
   capabilities:
     ciliumAgent:
