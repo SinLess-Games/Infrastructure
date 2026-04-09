@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - externalsecret-garage.yaml
+  - service-headless.yaml
+  - service-s3.yaml
+  - service-admin.yaml
+  - networkpolicy-garage.yaml
+  - statefulset-garage.yaml
+  - virtualservice-garage.yaml

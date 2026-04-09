@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: garage-s3
+  namespace: sinless-games
+spec:
+  gateways:
+    - istio-system/shared-edge
+  hosts:
+    - s3.sinlessgames.com
+  http:
+    - route:
+        - destination:
+            host: garage-s3.sinless-games.svc.cluster.local
+            port:
+              number: 3900

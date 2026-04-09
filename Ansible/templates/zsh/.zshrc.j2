@@ -92,6 +92,10 @@ autoload -Uz compinit
 mkdir -p ~/.cache
 compinit -d ~/.cache/zcompdump
 
+if command -v istioctl >/dev/null 2>&1; then
+  source <(istioctl completion zsh)
+fi
+
 # -------------------------- History --------------------------
 HISTFILE=~/.zsh_history
 HISTSIZE=5000

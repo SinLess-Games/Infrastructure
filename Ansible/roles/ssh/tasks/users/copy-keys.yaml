@@ -237,7 +237,8 @@
               'shared_keys',
               (
                 item['shared-certs'] | default([])
-                | map('regex_replace', '^(.*)$', _ssh_output_base ~ '/\\1/id_' ~ _ssh_key_type ~ '.pub')
+                | map('regex_replace', '^', _ssh_output_base ~ '/')
+                | map('regex_replace', '$', '/id_' ~ _ssh_key_type ~ '.pub')
                 | list
               )
             )

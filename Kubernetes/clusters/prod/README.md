@@ -1,6 +1,6 @@
 # RKE2 Production Platform
 
-This production platform targets a three-node HA RKE2 control plane and three worker nodes distributed across `pve-01`, `pve-04`, and `pve-05`. Cilium provides the primary CNI and L3/L4 policy layer, Istio provides service identity and zero-trust traffic policy, Longhorn is the default block storage, and Argo CD is the GitOps control plane for day-2 services.
+This production platform targets a three-node HA RKE2 control plane and three worker nodes distributed across `pve-01`, `pve-04`, and `pve-05`. Cilium provides the primary CNI and L3/L4 policy layer, Istio provides service identity and zero-trust traffic policy, Longhorn is the default block storage, and Argo CD is the GitOps control plane for all cluster applications.
 
 ## Architecture
 
@@ -62,7 +62,7 @@ flowchart TB
 - `security`: External Secrets Operator, Kyverno, Falco, Velero, Wazuh scaffolding.
 - `gitops`: Argo CD, Argo Rollouts, Actions Runner Controller.
 - `helix-ai`: CockroachDB, Redis, NATS JetStream, Qdrant, n8n, Helix policies and mesh config.
-- `sinless-games`: future app workloads, quotas, policies, mesh defaults.
+- `sinless-games`: shared app edge services, Garage S3, quotas, policies, mesh defaults.
 
 ## Node Placement
 
@@ -78,13 +78,25 @@ flowchart TB
 
 1. Use `Ansible/playbooks/deploy-kubernetes-prod.yaml` to create VMs, apply baseline node roles, and configure RKE2.
 2. Bootstrap Argo CD once in the `gitops` namespace.
-3. Apply `Kubernetes/clusters/prod` so the platform root application and project exist.
-4. Let Argo CD reconcile namespace applications, Helm ApplicationSet entries, and local policy/config bundles by sync wave.
-5. Run the validation scripts in `Kubernetes/validation/prod/scripts`.
+3. Apply `Kubernetes/clusters/prod` so the platform project and root app-of-apps exist.
+4. Let Argo CD reconcile `Kubernetes/apps/prod/gitops/applications`.
+5. Let those Argo CD `Application` resources reconcile every namespace-scoped app under `Kubernetes/apps/prod/`.
+6. Run the validation scripts in `Kubernetes/validation/prod/scripts`.
+
+## Directory Usage
+
+- `Kubernetes/clusters/prod/`
+  Use only for the small bootstrap layer that creates the Argo CD project and root application.
+- `Kubernetes/apps/prod/gitops/applications/`
+  Use for Argo CD `Application` definitions and ApplicationSets. This is the routing table for cluster GitOps.
+- `Kubernetes/apps/prod/<namespace>/`
+  Use for the actual workload, policy, mesh, and secret-consumer manifests that Argo CD manages.
+- `Kubernetes/validation/prod/`
+  Use for post-deploy checks, smoke tests, and operator debugging.
 
 ## Backup And DR
 
-- Longhorn is the default storage class and uses Garage as its S3-compatible backup target.
+- Longhorn is the default storage class and uses Garage at `s3.sinlessgames.com` as its S3-compatible backup target.
 - Velero uses Garage for cluster object and PVC backup coverage.
 - Garage is the selected self-hosted S3 backend for this platform.
 - CockroachDB, Redis, NATS, and Qdrant use Longhorn-backed persistent volumes and should also have workload-level backup policies enabled after cluster bring-up.
@@ -132,7 +144,7 @@ flowchart TB
 - The production cluster uses Debian 13 templates in Proxmox with cloud-init and QEMU guest agent enabled.
 - Vault Kubernetes auth mount `kubernetes` and ESO role `eso-production` will be created outside this repo change or alongside Vault automation.
 - Cloudflare tunnel IDs exist before phase 3 cutover.
-- A Garage endpoint exists and `kubernetes/production/integrations` contains `s3_endpoint`, `s3_region`, `s3_access_key_id`, `s3_secret_access_key`, and `s3_force_path_style`.
+- Garage is deployed in `sinless-games` and `kubernetes/production/integrations` contains the S3 endpoint and access credentials used by Longhorn, Velero, and observability backends.
 - A PostgreSQL service already exists for Grafana and n8n integration targets where referenced.
 
 ## Validation

@@ -22,6 +22,7 @@ resources:
   - local-helix-ai-mesh.yaml
   - local-sinless-games-policies.yaml
   - local-sinless-games-mesh.yaml
+  - local-sinless-games-garage.yaml
   - local-platform-examples.yaml
   - actions-runner-controller.yaml
   - platform-helm-applicationset.yaml

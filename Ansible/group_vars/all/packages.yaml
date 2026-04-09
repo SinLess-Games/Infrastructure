@@ -15,6 +15,7 @@ development_runtime_versions:
 
 shell_brew_packages:
   - k9s
+  - istioctl
   - thefuck
 
 apt_packages:

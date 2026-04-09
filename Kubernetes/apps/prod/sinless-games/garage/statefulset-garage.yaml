@@ -1,0 +1,156 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: garage
+  namespace: sinless-games
+spec:
+  serviceName: garage-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: garage
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: garage
+        app.kubernetes.io/part-of: sinless-games-platform
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: garage
+          image: dxflrs/garage:v2.2.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              cat <<EOF >/config/garage.toml
+              metadata_dir = "/var/lib/garage/meta"
+              data_dir = "/var/lib/garage/data"
+              db_engine = "lmdb"
+              metadata_auto_snapshot_interval = "6h"
+              replication_factor = 1
+              compression_level = 2
+              rpc_bind_addr = "[::]:3901"
+              rpc_public_addr = "${POD_IP}:3901"
+              rpc_secret = "${GARAGE_RPC_SECRET}"
+
+              [s3_api]
+              s3_region = "us-east-1"
+              api_bind_addr = "[::]:3900"
+              root_domain = ".s3.sinlessgames.com"
+
+              [admin]
+              api_bind_addr = "[::]:3903"
+              admin_token = "${GARAGE_ADMIN_TOKEN}"
+              metrics_token = "${GARAGE_METRICS_TOKEN}"
+              EOF
+
+              exec /garage server --single-node --default-bucket
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: GARAGE_RPC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: garage_rpc_secret
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: garage_admin_token
+            - name: GARAGE_METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: garage_metrics_token
+            - name: GARAGE_DEFAULT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: s3_access_key_id
+            - name: GARAGE_DEFAULT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: s3_secret_access_key
+            - name: GARAGE_DEFAULT_BUCKET
+              value: sinlessgames-platform
+            - name: GARAGE_CONFIG_FILE
+              value: /config/garage.toml
+          ports:
+            - name: http-s3
+              containerPort: 3900
+            - name: tcp-rpc
+              containerPort: 3901
+            - name: http-admin
+              containerPort: 3903
+          readinessProbe:
+            tcpSocket:
+              port: 3900
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            tcpSocket:
+              port: 3900
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 2
+          startupProbe:
+            tcpSocket:
+              port: 3900
+            failureThreshold: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 2
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: false
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+          volumeMounts:
+            - name: garage-meta
+              mountPath: /var/lib/garage/meta
+            - name: garage-data
+              mountPath: /var/lib/garage/data
+            - name: garage-config
+              mountPath: /config
+      volumes:
+        - name: garage-config
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: garage-meta
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 20Gi
+    - metadata:
+        name: garage-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 250Gi

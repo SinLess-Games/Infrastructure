@@ -9,7 +9,7 @@ hubble:
   relay:
     enabled: true
   ui:
-    enabled: false
+    enabled: true
 prometheus:
   enabled: true
 envoy:
