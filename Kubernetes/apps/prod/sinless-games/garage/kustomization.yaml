@@ -8,6 +8,8 @@ resources:
   - service-admin.yaml
   - service-ui.yaml
   - networkpolicy-garage.yaml
+  - networkpolicy-garage-ui.yaml
   - statefulset-garage.yaml
   - deployment-garage-webui.yaml
+  - ingress-garage-ui.yaml
   - virtualservice-garage.yaml
