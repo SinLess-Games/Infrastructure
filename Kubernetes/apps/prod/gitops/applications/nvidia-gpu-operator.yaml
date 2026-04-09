@@ -20,6 +20,17 @@ spec:
             enabled: false
           toolkit:
             enabled: true
+            env:
+              - name: CONTAINERD_CONFIG
+                value: /var/lib/rancher/rke2/agent/etc/containerd/config.toml
+              - name: CONTAINERD_SOCKET
+                value: /run/k3s/containerd/containerd.sock
+              - name: RUNTIME_CONFIG
+                value: /var/lib/rancher/rke2/agent/etc/containerd/config.toml
+              - name: RUNTIME_SOCKET
+                value: /run/k3s/containerd/containerd.sock
+              - name: CONTAINERD_RUNTIME_CLASS
+                value: nvidia
           dcgmExporter:
             serviceMonitor:
               enabled: true

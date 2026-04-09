@@ -82,6 +82,15 @@
     - kubernetes_gpu_host_driver_management.enabled | bool
     - inventory_hostname == kubernetes_rke2_gpu_worker_name
 
+- name: Re-apply Kubernetes sysctl values after potential GPU worker reboot
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: true
+    reload: true
+  loop: "{{ kubernetes_role_sysctl | dict2items }}"
+
 - name: Ensure RKE2 configuration directory exists
   ansible.builtin.file:
     path: "{{ kubernetes_role_rke2_config_dir }}"
