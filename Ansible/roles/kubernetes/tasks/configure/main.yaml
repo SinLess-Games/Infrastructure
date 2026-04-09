@@ -38,6 +38,43 @@
   ansible.builtin.package:
     name: "{{ kubernetes_role_required_packages }}"
     state: present
+  tags:
+    - rootfs
+
+- name: Expand Kubernetes root filesystem when template disk layout is undersized
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    root_device="$(findmnt -n -o SOURCE /)"
+    root_disk="/dev/$(lsblk -no PKNAME "${root_device}")"
+    root_partnum="$(lsblk -no PARTNUM "${root_device}")"
+    root_size_bytes="$(blockdev --getsize64 "${root_device}")"
+    target_size_gb="{{ ((inventory_hostname in groups[kubernetes_rke2_servers_group_name]) | ternary(kubernetes_control_plane.disk_size, kubernetes_workers.disk_size)) | regex_search('[0-9]+') }}"
+    target_size_bytes="$(( target_size_gb * 1024 * 1024 * 1024 ))"
+    changed=0
+
+    if [ "${root_size_bytes}" -lt "${target_size_bytes}" ]; then
+      swapoff -a || true
+      sed -i '/\sswap\s/d' /etc/fstab
+
+      parted -s "${root_disk}" rm 5 || true
+      parted -s "${root_disk}" rm 2 || true
+      growpart "${root_disk}" "${root_partnum}"
+      partprobe "${root_disk}" || true
+      udevadm settle || true
+      sleep 2
+      resize2fs "${root_device}"
+      changed=1
+    fi
+
+    echo "changed=${changed}"
+  args:
+    executable: /bin/bash
+  register: kubernetes_role_rootfs_expand
+  changed_when: "'changed=1' in (kubernetes_role_rootfs_expand.stdout | default(''))"
+  when: kubernetes_role_expand_rootfs | bool
+  tags:
+    - rootfs
 
 - name: Enable Debian non-free APT components on dedicated GPU worker
   ansible.builtin.replace:
