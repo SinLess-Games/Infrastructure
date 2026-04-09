@@ -62,7 +62,7 @@ flowchart TB
 - `security`: External Secrets Operator, Kyverno, Falco, Velero, Wazuh scaffolding.
 - `gitops`: Argo CD, Argo Rollouts, Actions Runner Controller.
 - `helix-ai`: CockroachDB, Redis, NATS JetStream, Qdrant, n8n, Helix policies and mesh config.
-- `sinless-games`: shared app edge services, Garage S3, quotas, policies, mesh defaults.
+- `sinless-games`: shared app edge services, Garage S3, Garage Web UI, quotas, policies, mesh defaults.
 
 ## Node Placement
 
@@ -137,7 +137,20 @@ flowchart TB
 - cert-manager issues certificates through Cloudflare DNS challenges.
 - ExternalDNS manages public records in Cloudflare for Istio-routed services.
 - East-west service traffic uses Istio sidecars with strict mTLS and namespace/workload authorization policies.
-- cloudflared provides safe tunnel-based exposure for internal UIs that should not rely on public load balancing.
+- cloudflared runs as two worker-node DaemonSets, one for `sinlessgames.com` and one for `helixaibot.com`.
+- The SinLess Games tunnel reads its token from `/v1/secrets/data/cloudflare/tunnel/sinlessgames`.
+- The Helix tunnel reads its token from `/v1/secrets/data/cloudflare/tunnel/helix`.
+- ExternalDNS reads the Cloudflare DNS token from `/v1/secrets/data/cloudflare/api`.
+- Garage S3 stays on `s3.sinlessgames.com`; the Garage Web UI is exposed at `https://s3.sinlessgames.com/ui`.
+- Internal operator routes are published at `vault.sinlessgames.com`, `prometheus.sinlessgames.com`, `alert-manager.sinlessgames.com`, `loki.sinlessgames.com`, `tempo.sinlessgames.com`, and `mimir.sinlessgames.com`.
+
+## Tunnel Hostnames
+
+- `external.sinlessgames.com` routes to the SinLess Games edge entrypoint.
+- `internal.sinlessgames.com` routes to the internal operations entrypoint.
+- `external.helixaibot.com` routes to the Helix external entrypoint.
+- `internal.helixaibot.com` routes to the Helix internal entrypoint.
+- These names are represented in GitOps so ExternalDNS can manage the records in both Cloudflare zones.
 
 ## Assumptions
 
@@ -145,6 +158,7 @@ flowchart TB
 - Vault Kubernetes auth mount `kubernetes` and ESO role `eso-production` will be created outside this repo change or alongside Vault automation.
 - Cloudflare tunnel IDs exist before phase 3 cutover.
 - Garage is deployed in `sinless-games` and `kubernetes/production/integrations` contains the S3 endpoint and access credentials used by Longhorn, Velero, and observability backends.
+- The Vault `kubernetes-prod` secrets engine mount is reserved for production Kubernetes service account roles and role-based secret issuance.
 - A PostgreSQL service already exists for Grafana and n8n integration targets where referenced.
 
 ## Validation

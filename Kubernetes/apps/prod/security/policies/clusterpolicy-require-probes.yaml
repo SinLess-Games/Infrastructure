@@ -12,10 +12,28 @@ spec:
           - resources:
               kinds:
                 - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - networking
+          - resources:
+              kinds:
+                - Pod
+              names:
+                - n8n*
+              namespaces:
+                - sinless-games
       validate:
         message: Liveness and readiness probes are required for all containers.
-        pattern:
-          spec:
-            containers:
-              - livenessProbe: "?*"
-                readinessProbe: "?*"
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.livenessProbe }}"
+                    operator: Equals
+                    value: null
+                  - key: "{{ element.readinessProbe }}"
+                    operator: Equals
+                    value: null

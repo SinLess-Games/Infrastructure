@@ -3,3 +3,5 @@ kind: Kustomization
 resources:
   - externalsecret-observability.yaml
   - externalsecret-grafana-admin.yaml
+  - serviceentry-vault.yaml
+  - virtualservice-observability.yaml

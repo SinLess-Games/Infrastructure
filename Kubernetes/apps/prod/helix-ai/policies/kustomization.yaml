@@ -7,4 +7,3 @@ resources:
   - networkpolicy-default-deny.yaml
   - authorizationpolicy-default.yaml
   - peerauthentication-default.yaml
-  - n8n-deployment.yaml

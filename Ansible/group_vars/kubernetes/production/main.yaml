@@ -176,6 +176,27 @@ kubernetes_platform:
     argocd_hostname: "argocd.sinlessgames.com"
     istio_ingress_hostname: "apps.sinlessgames.com"
     cloudflared_hostname: "tunnel.sinlessgames.com"
+    tunnels:
+      sinlessgames:
+        external_hostname: "external.sinlessgames.com"
+        internal_hostname: "internal.sinlessgames.com"
+        vault_path: "/v1/secrets/data/cloudflare/tunnel/sinlessgames"
+      helix:
+        external_hostname: "external.helixaibot.com"
+        internal_hostname: "internal.helixaibot.com"
+        vault_path: "/v1/secrets/data/cloudflare/tunnel/helix"
+    internal_hostnames:
+      - "vault.sinlessgames.com"
+      - "prometheus.sinlessgames.com"
+      - "alert-manager.sinlessgames.com"
+      - "loki.sinlessgames.com"
+      - "tempo.sinlessgames.com"
+      - "mimir.sinlessgames.com"
+    external_hostnames:
+      - "s3.sinlessgames.com"
+      - "grafana.sinlessgames.com"
+      - "external.sinlessgames.com"
+      - "external.helixaibot.com"
   github:
     runners_namespace: "gitops"
     runner_scale_set_name: "prod-runners"

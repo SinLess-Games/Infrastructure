@@ -8,7 +8,24 @@ spec:
     - istio-system/shared-edge
   hosts:
     - s3.sinlessgames.com
+    - external.sinlessgames.com
   http:
+    - match:
+        - authority:
+            exact: external.sinlessgames.com
+      route:
+        - destination:
+            host: garage-ui.sinless-games.svc.cluster.local
+            port:
+              number: 3909
+    - match:
+        - uri:
+            prefix: /ui
+      route:
+        - destination:
+            host: garage-ui.sinless-games.svc.cluster.local
+            port:
+              number: 3909
     - route:
         - destination:
             host: garage-s3.sinless-games.svc.cluster.local

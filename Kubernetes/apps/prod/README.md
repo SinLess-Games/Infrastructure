@@ -16,6 +16,17 @@
 - `<namespace>/<app>/`
   App-specific manifests or Helm values for a single service or component.
 
+## Current Production Patterns
+
+- `networking/cloudflared/`
+  Owns Cloudflare tunnel connectors. In production this now runs domain-specific worker-node DaemonSets and pulls tunnel tokens from Vault-backed `ExternalSecret` objects.
+- `networking/config/`
+  Owns networking secrets and issuers that other networking apps depend on, such as Cloudflare API credentials for ExternalDNS and cert-manager.
+- `monitoring/config/`
+  Owns monitoring-side `ExternalSecret`, `VirtualService`, and `ServiceEntry` resources that expose internal operator endpoints through the shared Istio edge.
+- `sinless-games/garage/`
+  Owns the Garage S3 API, Garage Web UI, S3 credentials, storage class, and Istio routing for `s3.sinlessgames.com`.
+
 ## Production Rule
 
 Every cluster app should be represented here and reconciled through Argo CD. If a component is live in production, there should be:

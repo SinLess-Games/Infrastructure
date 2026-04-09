@@ -1,0 +1,83 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: observability-routes
+  namespace: monitoring
+spec:
+  gateways:
+    - istio-system/shared-edge
+  hosts:
+    - grafana.sinlessgames.com
+    - internal.sinlessgames.com
+    - prometheus.sinlessgames.com
+    - alert-manager.sinlessgames.com
+    - loki.sinlessgames.com
+    - tempo.sinlessgames.com
+    - mimir.sinlessgames.com
+    - vault.sinlessgames.com
+  http:
+    - name: grafana
+      match:
+        - authority:
+            exact: grafana.sinlessgames.com
+        - authority:
+            exact: internal.sinlessgames.com
+      route:
+        - destination:
+            host: grafana.monitoring.svc.cluster.local
+            port:
+              number: 80
+    - name: prometheus
+      match:
+        - authority:
+            exact: prometheus.sinlessgames.com
+      route:
+        - destination:
+            host: kube-prometheus-stack-prometheus.monitoring.svc.cluster.local
+            port:
+              number: 9090
+    - name: alertmanager
+      match:
+        - authority:
+            exact: alert-manager.sinlessgames.com
+      route:
+        - destination:
+            host: kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local
+            port:
+              number: 9093
+    - name: loki
+      match:
+        - authority:
+            exact: loki.sinlessgames.com
+      route:
+        - destination:
+            host: loki-gateway.monitoring.svc.cluster.local
+            port:
+              number: 80
+    - name: tempo
+      match:
+        - authority:
+            exact: tempo.sinlessgames.com
+      route:
+        - destination:
+            host: tempo-query-frontend.monitoring.svc.cluster.local
+            port:
+              number: 3100
+    - name: mimir
+      match:
+        - authority:
+            exact: mimir.sinlessgames.com
+      route:
+        - destination:
+            host: mimir-nginx.monitoring.svc.cluster.local
+            port:
+              number: 80
+    - name: vault
+      match:
+        - authority:
+            exact: vault.sinlessgames.com
+      route:
+        - destination:
+            host: vault.platform.local
+            port:
+              number: 8200

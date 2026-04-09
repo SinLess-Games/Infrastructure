@@ -6,6 +6,8 @@ resources:
   - service-headless.yaml
   - service-s3.yaml
   - service-admin.yaml
+  - service-ui.yaml
   - networkpolicy-garage.yaml
   - statefulset-garage.yaml
+  - deployment-garage-webui.yaml
   - virtualservice-garage.yaml

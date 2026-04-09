@@ -2,15 +2,17 @@ apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
   name: n8n
-  namespace: helix-ai
+  namespace: sinless-games
 spec:
   gateways:
     - istio-system/shared-edge
   hosts:
     - n8n.helixaibot.com
+    - external.helixaibot.com
+    - internal.helixaibot.com
   http:
     - route:
         - destination:
-            host: n8n.helix-ai.svc.cluster.local
+            host: n8n.sinless-games.svc.cluster.local
             port:
               number: 80
