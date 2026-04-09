@@ -25,32 +25,32 @@ collections:
 
   # POSIX-level system management (users, mounts, sysctl, services)
   - name: ansible.posix
-    version: "1.6.2"
+    version: "2.1.0"
 
   # Filters, lookups, ipaddr, validation helpers
   - name: ansible.utils
-    version: "5.1.2"
+    version: "6.0.1"
 
   # Broad community modules:
   # - filesystem, hardware, networking helpers
   # - lots of glue modules you end up needing everywhere
   - name: community.general
-    version: "9.1.0"
+    version: "12.5.0"
 
   # Cryptography:
   # - TLS certs
   # - SSH keys
   # - PKI workflows
   - name: community.crypto
-    version: "2.22.3"
+    version: "3.1.1"
 
   # Docker / container runtime management
   - name: community.docker
-    version: "3.13.1"
+    version: "5.2.0"
 
   # PostgreSQL automation
   - name: community.postgresql
-    version: "3.6.0"
+    version: "4.2.0"
 
   # ---------------------------------------------------------------------------
   # Kubernetes
@@ -61,7 +61,7 @@ collections:
   # - Helm modules
   # - CRDs
   - name: kubernetes.core
-    version: "5.0.0"
+    version: "6.3.0"
 
   # Supplemental Kubernetes helpers
   # NOTE: Prefer kubernetes.core when possible
