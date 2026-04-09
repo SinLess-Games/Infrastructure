@@ -239,6 +239,17 @@ kubernetes_proxmox_gpu:
   devices:
     - "NVidia-1060"
     - "Nvidia-3060"
+kubernetes_gpu_host_driver_management:
+  enabled: true
+  apt_components:
+    - main
+    - contrib
+    - non-free
+    - non-free-firmware
+  packages:
+    - nvidia-driver
+    - firmware-misc-nonfree
+  reboot_timeout: 900
 kubernetes_validation_scripts_dir: "{{ kubernetes_repo_root }}/Kubernetes/validation/{{ kubernetes_environment }}/scripts"
 kubernetes_rke2_kubelet_arg: []
 kubernetes_rke2_kube_proxy_arg: []
