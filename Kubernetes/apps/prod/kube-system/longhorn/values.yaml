@@ -7,6 +7,8 @@ defaultSettings:
   storageOverProvisioningPercentage: 150
   storageMinimalAvailablePercentage: 15
   replicaAutoBalance: best-effort
+preUpgradeChecker:
+  jobEnabled: false
 longhornUI:
   replicas: 2
 persistence:

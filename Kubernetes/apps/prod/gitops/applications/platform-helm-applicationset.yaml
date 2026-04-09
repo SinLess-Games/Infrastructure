@@ -13,6 +13,9 @@ spec:
             chart: longhorn
             targetRevision: 1.7.2
             valuesPath: Kubernetes/apps/prod/kube-system/longhorn/values.yaml
+            inlineValues: |
+              preUpgradeChecker:
+                jobEnabled: false
             syncWave: "-8"
           - name: istio-base
             namespace: istio-system
@@ -262,6 +265,8 @@ spec:
           helm:
             valueFiles:
               - "$values/{{valuesPath}}"
+            values: |
+              {{inlineValues}}
         - repoURL: https://github.com/Sinless777/Infrastructure.git
           targetRevision: main
           ref: values
