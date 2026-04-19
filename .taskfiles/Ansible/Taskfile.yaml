@@ -64,7 +64,7 @@ tasks:
         {{.VENV_DIR}}/bin/ansible-playbook \
           -i {{.ANSIBLE_DIR}}/inventory \
           {{.ANSIBLE_DIR}}/playbooks/configure-localhost.yaml \
-          --ask-pass {{.CLI_ARGS}}
+          {{.CLI_ARGS}}
 
   fix-apt-lock-dns:
     desc: "Resolve apt lock and update packages on dns hosts"
@@ -75,7 +75,7 @@ tasks:
         {{.VENV_DIR}}/bin/ansible-playbook \
           -i {{.ANSIBLE_DIR}}/inventory \
           {{.ANSIBLE_DIR}}/playbooks/fix-apt-lock.yaml \
-          --ask-pass {{.CLI_ARGS}}
+          {{.CLI_ARGS}}
   
   configure-proxmox:
     desc: "Configure the proxmox nodes"
@@ -88,38 +88,10 @@ tasks:
           . ./.env
           set +a
         fi
-        OVERLAY_INVENTORY="$(mktemp --suffix=.yml)"
-        cleanup() {
-          rm -f "$OVERLAY_INVENTORY"
-        }
-        trap cleanup EXIT
-        yaml_quote() {
-          printf "%s" "$1" | sed "s/'/'\"'\"'/g; 1s/^/'/; \$s/\$/'/"
-        }
-        {
-          echo "---"
-          echo "proxmox:"
-          echo "  vars:"
-          if [ -n "${PROXMOX_SSH_PASSWORD:-}" ]; then
-            printf "    ansible_password: %s\n" "$(yaml_quote "$PROXMOX_SSH_PASSWORD")"
-            printf "    ansible_ssh_pass: %s\n" "$(yaml_quote "$PROXMOX_SSH_PASSWORD")"
-          fi
-          echo "  children:"
-          echo "    pve_nodes:"
-          echo "      hosts:"
-          for node in 01 02 03 04 05; do
-            eval "NODE_PASSWORD=\${PROXMOX_SSH_PASSWORD_PVE_${node}:-}"
-            if [ -n "${NODE_PASSWORD:-}" ]; then
-              echo "        pve-${node}:"
-              printf "          ansible_password: %s\n" "$(yaml_quote "$NODE_PASSWORD")"
-              printf "          ansible_ssh_pass: %s\n" "$(yaml_quote "$NODE_PASSWORD")"
-            fi
-          done
-        } > "$OVERLAY_INVENTORY"
         {{.VENV_DIR}}/bin/ansible-playbook \
           -i {{.ANSIBLE_DIR}}/inventory \
-          -i "$OVERLAY_INVENTORY" \
           {{.ANSIBLE_DIR}}/playbooks/configure-proxmox.yaml \
+          ${PROXMOX_SSH_PASSWORD:+-e proxmox_ssh_password="$PROXMOX_SSH_PASSWORD"} \
           ${PROXMOX_CLUSTER_JOIN_PASSWORD:+-e proxmox_cluster_join_password="$PROXMOX_CLUSTER_JOIN_PASSWORD"} \
           {{.CLI_ARGS}}
 

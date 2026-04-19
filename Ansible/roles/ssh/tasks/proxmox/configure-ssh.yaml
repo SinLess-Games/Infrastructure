@@ -21,17 +21,13 @@
 
 - name: Deploy sshd configuration drop-in
   ansible.builtin.template:
-    src: "{{ role_path }}/templates/ssh/sshd_config.j2"
+    src: "{{ playbook_dir }}/../templates/ssh/sshd_config.j2"
     dest: /etc/ssh/sshd_config.d/50-ansible-ssh.conf
     owner: root
     group: root
     mode: "0644"
   notify: Restart sshd
   become: true
-
-# This is the “manual fix” you did on pve-01
-- name: Ensure principals files exist so cert auth cannot lock us out
-  ansible.builtin.import_tasks: ensure-ssh-works.yaml
 
 - name: Validate sshd configuration syntax
   ansible.builtin.command: sshd -t

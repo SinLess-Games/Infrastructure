@@ -27,6 +27,11 @@ spec:
     - https://charts.bitnami.com/bitnami
     - https://nats-io.github.io/k8s/helm/charts/
     - https://qdrant.github.io/qdrant-helm
+    - https://kedacore.github.io/charts
+    - https://raw.githubusercontent.com/karmada-io/karmada/master/charts
+    - https://releases.rancher.com/server-charts/stable
+    - https://opencost.github.io/opencost-helm-chart
+    - https://mailu.github.io/helm-charts
   destinations:
     - namespace: '*'
       server: https://kubernetes.default.svc

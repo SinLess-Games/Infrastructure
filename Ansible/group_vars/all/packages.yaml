@@ -48,7 +48,6 @@ apt_packages:
     - nfs-common
     - cifs-utils
     - openssh-server
-    - sshpass
     - ufw
     - fail2ban
     - apparmor

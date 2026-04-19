@@ -18,6 +18,7 @@ spec:
               namespaces:
                 - kube-system
                 - security
+                - monitoring
       validate:
         message: Privileged containers are not allowed outside approved namespaces.
         pattern:

@@ -11,26 +11,73 @@ datasources:
     apiVersion: 1
     datasources:
       - name: Prometheus
+        uid: prometheus
         type: prometheus
         url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
         access: proxy
+        jsonData:
+          httpMethod: POST
       - name: Loki
+        uid: loki
         type: loki
         url: http://loki-gateway.monitoring.svc.cluster.local
         access: proxy
+        jsonData:
+          derivedFields:
+            - name: TraceID
+              matcherRegex: '"traceid":"([a-fA-F0-9]+)"'
+              datasourceUid: tempo
+              url: '$${__value.raw}'
       - name: Tempo
+        uid: tempo
         type: tempo
         url: http://tempo-query-frontend.monitoring.svc.cluster.local:3100
         access: proxy
+        jsonData:
+          serviceMap:
+            datasourceUid: mimir
+          tracesToLogsV2:
+            datasourceUid: loki
+            spanStartTimeShift: "-5m"
+            spanEndTimeShift: "5m"
+            filterByTraceID: true
+          search:
+            hide: false
+          nodeGraph:
+            enabled: true
       - name: Pyroscope
+        uid: pyroscope
         type: grafana-pyroscope-datasource
         url: http://pyroscope.monitoring.svc.cluster.local:4040
         access: proxy
       - name: Mimir
+        uid: mimir
         type: prometheus
         url: http://mimir-nginx.monitoring.svc.cluster.local/prometheus
         access: proxy
+        isDefault: true
+        jsonData:
+          httpMethod: POST
+          exemplarTraceIdDestinations:
+            - datasourceUid: tempo
+              name: trace_id
 env:
   GF_SERVER_ROOT_URL: https://grafana.sinlessgames.com
+grafana.ini:
+  users:
+    viewers_can_edit: false
+  panels:
+    disable_sanitize_html: true
+sidecar:
+  dashboards:
+    enabled: true
+    searchNamespace: monitoring
+    label: grafana_dashboard
+    provider:
+      name: sidecarProvider
+      folder: Platform
+      orgid: 1
+      disableDelete: false
+      allowUiUpdates: false
 serviceMonitor:
   enabled: true

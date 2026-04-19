@@ -135,6 +135,24 @@ vault_user_policies:
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
+  # External Secrets Operator production policy
+  eso-production: |
+    path "secrets/data/kubernetes/production/*" {
+      capabilities = ["read"]
+    }
+
+    path "secrets/metadata/kubernetes/production/*" {
+      capabilities = ["read", "list"]
+    }
+
+    path "secrets/data/cloudflare/api" {
+      capabilities = ["read"]
+    }
+
+    path "secrets/metadata/cloudflare/api" {
+      capabilities = ["read", "list"]
+    }
+
   # Cloudflare secrets policy
   cloudflare: |
     path "secrets/data/cloudflare/*" {

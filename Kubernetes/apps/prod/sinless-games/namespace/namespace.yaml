@@ -4,7 +4,7 @@ metadata:
   name: sinless-games
   labels:
     kubernetes.io/metadata.name: sinless-games
-    istio-injection: enabled
+    istio-injection: disabled
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     topology.kubernetes.io/environment: prod

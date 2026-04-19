@@ -202,7 +202,7 @@ kubernetes_configure_cluster_dns: "{{ kubernetes_cluster_dns }}"
 kubernetes_rke2_api_ip: "{{ kubernetes_api_vip | default(kubernetes_control_plane_first_ip) }}"
 kubernetes_rke2_api_private_port: 9345
 kubernetes_server_url: "https://{{ kubernetes_rke2_api_ip }}:{{ kubernetes_rke2_api_private_port }}"
-kubernetes_rke2_join_ip: "{{ kubernetes_control_plane_first_ip }}"
+kubernetes_rke2_join_ip: "{{ kubernetes_api_vip | default(kubernetes_control_plane_first_ip) }}"
 kubernetes_join_server_url: "https://{{ kubernetes_rke2_join_ip }}:{{ kubernetes_rke2_api_private_port }}"
 kubernetes_rke2_cni:
   - cilium

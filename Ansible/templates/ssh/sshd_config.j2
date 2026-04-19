@@ -51,9 +51,14 @@ UsePAM {{ 'yes' if (ssh.server.use_pam | default(true)) else 'no' }}
 # REQUIRED for user cert auth (certs are publickey auth)
 PubkeyAuthentication {{ 'yes' if (ssh.server.pubkey_authentication | default(true)) else 'no' }}
 
-# Keep password off by default (turn on only for bootstrap if you need --ask-pass)
+# Keep password auth disabled by default. Use key or certificate SSH auth.
 PasswordAuthentication {{ 'yes' if (ssh.server.password_authentication | default(false)) else 'no' }}
 KbdInteractiveAuthentication {{ 'yes' if (ssh.server.kbd_interactive_authentication | default(false)) else 'no' }}
+ChallengeResponseAuthentication {{ 'yes' if (ssh.server.challenge_response_authentication | default(false)) else 'no' }}
+
+# Disable legacy trust-based auth paths unless explicitly re-enabled.
+HostbasedAuthentication {{ 'yes' if (ssh.server.hostbased_authentication | default(false)) else 'no' }}
+IgnoreRhosts {{ 'no' if (ssh.server.ignore_rhosts is defined and not ssh.server.ignore_rhosts) else 'yes' }}
 
 PermitRootLogin {{ ssh.server.permit_root_login | default('prohibit-password') }}
 PermitEmptyPasswords {{ 'yes' if (ssh.server.permit_empty_passwords | default(false)) else 'no' }}
@@ -70,6 +75,9 @@ AuthorizedKeysFile {{ ssh.server.authorized_keys_file }}
 PubkeyAcceptedAlgorithms {{ ssh.server.pubkey_accepted_algorithms }}
 {% endif %}
 
+{% if ssh.server.banner_enabled | default(false) %}
+Banner {{ ssh.server.banner_path | default('/etc/issue.net') }}
+{% endif %}
 
 # -----------------------------------------------------------------------------
 # Certificate authentication (User CA)
@@ -121,6 +129,7 @@ GatewayPorts {{ 'yes' if (ssh.server.gateway_ports | default(false)) else 'no' }
 PermitTunnel {{ ssh.server.permit_tunnel | default('no') }}
 
 PermitUserEnvironment {{ 'yes' if (ssh.server.permit_user_environment | default(false)) else 'no' }}
+PermitUserRC {{ 'yes' if (ssh.server.permit_user_rc | default(false)) else 'no' }}
 PermitTTY {{ 'yes' if (ssh.server.permit_tty | default(true)) else 'no' }}
 
 # -----------------------------------------------------------------------------
@@ -137,6 +146,7 @@ LoginGraceTime {{ ssh.server.login_grace_time | default('30s') }}
 MaxAuthTries {{ ssh.server.max_auth_tries | default(10) }}
 
 MaxSessions {{ ssh.server.max_sessions | default(10) }}
+MaxStartups {{ ssh.server.max_startups | default('10:30:60') }}
 
 ClientAliveInterval {{ ssh.server.client_alive_interval | default(300) }}
 ClientAliveCountMax {{ ssh.server.client_alive_count_max | default(2) }}
@@ -196,4 +206,3 @@ Match User root
   PasswordAuthentication no
   KbdInteractiveAuthentication no
 {% endif %}
-

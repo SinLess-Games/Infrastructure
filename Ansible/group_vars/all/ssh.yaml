@@ -72,6 +72,39 @@ ssh:
 
     enable_host_certificate: true
     host_certificate_path: "{{ ssh_host_certificate_path }}"
+    banner_enabled: true
+    banner_path: "/etc/issue.net"
+    banner_content: |
+      ***************************************************************************
+                               AUTHORIZED USE ONLY
+      ***************************************************************************
+                        SinLess Games LLC - SSH Access Policy
+      ---------------------------------------------------------------------------
+
+      This information system is owned and operated by SinLess Games LLC and is
+      provided for authorized use only.
+
+      Access is restricted to authorized users for legitimate business purposes.
+      All access is subject to SinLess Games LLC policies, standards, and Terms
+      of Use, and applicable laws and regulations, including but not limited to
+      HIPAA, SOC 2 Trust Services Criteria, PCI DSS, and NIST SP 800-53, GDPR.
+
+      This system and all data on it may be monitored, intercepted, recorded,
+      copied, audited, inspected, and disclosed by authorized personnel at any
+      time. There is no expectation of privacy.
+
+      By accessing or using this system, you expressly consent to monitoring,
+      recording, and auditing, and agree to comply with all applicable policies
+      and controls.
+
+      Unauthorized access, use, or modification is strictly prohibited and may
+      result in revocation of access, disciplinary action, and civil and/or
+      criminal penalties.
+
+      If you are not an authorized user or do not agree to these terms,
+      disconnect immediately.
+
+      ***************************************************************************
 
     x11_forwarding: false
     client_alive_interval: 300

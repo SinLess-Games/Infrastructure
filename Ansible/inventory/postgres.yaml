@@ -2,31 +2,30 @@
 postgres:
   vars:
     ansible_user: "sinless777"
-    ansible_password: "Shellshocker93!"
     ansible_ssh_private_key_file: "/home/sinless777/Projects/Infrastructure/.outputs/ssh/sinless777/id_ed25519"
     ansible_python_interpreter: "/usr/bin/python3"
     ansible_ssh_common_args: >-
       -o StrictHostKeyChecking=no
       -o UserKnownHostsFile=/dev/null
-      -o PreferredAuthentications=publickey,password
+      -o PreferredAuthentications=publickey
       -o PubkeyAuthentication=yes
-      -o PasswordAuthentication=yes
+      -o PasswordAuthentication=no
       -o ControlMaster=no
       -o ControlPath=none
       -o ControlPersist=no
       -o IdentitiesOnly=yes
       -o IdentityAgent=none
       -o CertificateFile=/home/sinless777/Projects/Infrastructure/.outputs/ssh/sinless777/id_ed25519-cert.pub
-      -o ProxyCommand="sshpass -p 'Shellshocker93!' ssh -T -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=publickey,password -o PubkeyAuthentication=yes -o PasswordAuthentication=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o CertificateFile=/home/sinless777/Projects/Infrastructure/.outputs/ssh/sinless777/id_ed25519-cert.pub -i /home/sinless777/Projects/Infrastructure/.outputs/ssh/sinless777/id_ed25519 sinless777@10.10.10.6 'nc %h %p'"
+      -o ProxyCommand="ssh -T -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=publickey -o PubkeyAuthentication=yes -o PasswordAuthentication=no -o IdentitiesOnly=yes -o IdentityAgent=none -o CertificateFile=/home/sinless777/Projects/Infrastructure/.outputs/ssh/sinless777/id_ed25519-cert.pub -i /home/sinless777/Projects/Infrastructure/.outputs/ssh/sinless777/id_ed25519 sinless777@10.10.10.6 'nc %h %p'"
   hosts:
     postgres-01:
       ansible_host: 10.10.40.2
       ansible_ssh_common_args: >-
         -o StrictHostKeyChecking=no
         -o UserKnownHostsFile=/dev/null
-        -o PreferredAuthentications=publickey,password
+        -o PreferredAuthentications=publickey
         -o PubkeyAuthentication=yes
-        -o PasswordAuthentication=yes
+        -o PasswordAuthentication=no
         -o ControlMaster=no
         -o ControlPath=none
         -o ControlPersist=no
@@ -39,9 +38,9 @@ postgres:
       ansible_ssh_common_args: >-
         -o StrictHostKeyChecking=no
         -o UserKnownHostsFile=/dev/null
-        -o PreferredAuthentications=publickey,password
+        -o PreferredAuthentications=publickey
         -o PubkeyAuthentication=yes
-        -o PasswordAuthentication=yes
+        -o PasswordAuthentication=no
         -o ControlMaster=no
         -o ControlPath=none
         -o ControlPersist=no
@@ -54,9 +53,9 @@ postgres:
       ansible_ssh_common_args: >-
         -o StrictHostKeyChecking=no
         -o UserKnownHostsFile=/dev/null
-        -o PreferredAuthentications=publickey,password
+        -o PreferredAuthentications=publickey
         -o PubkeyAuthentication=yes
-        -o PasswordAuthentication=yes
+        -o PasswordAuthentication=no
         -o ControlMaster=no
         -o ControlPath=none
         -o ControlPersist=no

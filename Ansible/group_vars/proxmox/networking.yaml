@@ -9,7 +9,7 @@
 # =============================================================================
 proxmox_node_interfaces:
   pve-01:
-    enp9s0:
+    nic2:
       inet: "10.10.10.14"
       netmask: "255.255.255.0"
       gateway: "10.10.10.1"
@@ -48,7 +48,8 @@ proxmox_node_bonds:
   pve-01:
     bond0:
       interfaces:
-        - enp8s0
+        - nic2s10g
+        - nic1
       mode: 802.3ad
       miimon: 100
       lacp_rate: fast
@@ -72,7 +73,10 @@ proxmox_node_bonds:
         - eno3
         - eno4
       mode: 802.3ad
-      miimon: 100
+      miimon: 100ip link show nic1s10g
+ethtool nic1s10g
+bridge link
+
       lacp_rate: fast
       xmit_hash_policy: layer3+4
 
@@ -81,7 +85,6 @@ proxmox_node_bonds:
 # Bridges configuration
 # =============================================================================
 # vmbr0  = VLAN 1  (Infrastructure / Management)
-# vmbr20 = VLAN 20 (Development)
 # vmbr30 = VLAN 30 (Testing)
 # vmbr40 = VLAN 40 (Production)
 # vmbr50 = VLAN 50 (DMZ)
@@ -95,19 +98,8 @@ proxmox_node_bridges:
       description: "VM Bridge - VLAN 1 (Infrastructure / Management)"
       vlan_id: 1
       ports:
-        - enp9s0
+        - nic2
       address: "10.10.10.14/24"
-      vlan_aware: true
-      auto: true
-      stp: true
-      stp_forward_delay: 0
-
-    vmbr1:
-      description: "VM Bridge - VLAN 20 (Development, Staging)"
-      vlan_id: 20
-      ports:
-        - bond0
-      address: "10.10.20.14/24"
       vlan_aware: true
       auto: true
       stp: true
@@ -119,7 +111,7 @@ proxmox_node_bridges:
       vlan_id: 40
       vlan_tagged: false
       ports:
-        - enp10s0f0
+        - nic1s10g
       address: "10.10.40.14/24"
       vlan_aware: true
       auto: true
@@ -164,17 +156,6 @@ proxmox_node_bridges:
       stp: true
       stp_forward_delay: 0
 
-    vmbr1:
-      description: "VM Bridge - VLAN 20 (Development, Staging)"
-      vlan_id: 20
-      ports:
-        - bond0
-      address: "10.10.20.17/24"
-      vlan_aware: true
-      auto: true
-      stp: true
-      stp_forward_delay: 0
-
     vmbr40:
       prod: true
       description: "VM Bridge - VLAN 40 (Production)"
@@ -195,17 +176,6 @@ proxmox_node_bridges:
       ports:
         - eno1
       address: "10.10.10.18/24"
-      vlan_aware: true
-      auto: true
-      stp: true
-      stp_forward_delay: 0
-
-    vmbr1:
-      description: "VM Bridge - VLAN 20 (Development, Staging)"
-      vlan_id: 20
-      ports:
-        - bond0
-      address: "10.10.20.18/24"
       vlan_aware: true
       auto: true
       stp: true

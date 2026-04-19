@@ -17,6 +17,7 @@ spec:
           - resources:
               namespaces:
                 - networking
+                - monitoring
           - resources:
               kinds:
                 - Pod

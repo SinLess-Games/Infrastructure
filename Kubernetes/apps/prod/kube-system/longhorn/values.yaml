@@ -1,7 +1,7 @@
 defaultSettings:
   defaultDataPath: /var/lib/longhorn
   defaultReplicaCount: 3
-  backupTarget: s3://k8s-prod-longhorn@auto/
+  backupTarget: s3://k8s-prod-longhorn@us-east-1/
   backupTargetCredentialSecret: longhorn-backup-credentials
   createDefaultDiskLabeledNodes: false
   storageOverProvisioningPercentage: 300

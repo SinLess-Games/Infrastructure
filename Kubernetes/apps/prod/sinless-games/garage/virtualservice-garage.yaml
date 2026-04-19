@@ -11,20 +11,10 @@ spec:
     - external.sinlessgames.com
   http:
     - match:
-        - authority:
-            exact: s3.sinlessgames.com
-          uri:
+        - uri:
             exact: /
       rewrite:
         uri: /ui/
-      route:
-        - destination:
-            host: garage-ui.sinless-games.svc.cluster.local
-            port:
-              number: 3909
-    - match:
-        - authority:
-            exact: external.sinlessgames.com
       route:
         - destination:
             host: garage-ui.sinless-games.svc.cluster.local

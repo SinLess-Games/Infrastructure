@@ -92,6 +92,17 @@
     mode: "0755"
   become: true
 
+- name: Deploy SSH login banner
+  ansible.builtin.copy:
+    content: "{{ ssh.server.banner_content }}"
+    dest: "{{ ssh.server.banner_path | default('/etc/issue.net') }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: ssh__banner_result
+  become: true
+  when: ssh.server.banner_enabled | default(false)
+
 - name: Ensure sshd_config includes drop-in directory
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
@@ -124,7 +135,8 @@
     name: "{{ 'sshd' if (ansible_facts.os_family | default('')) in ['RedHat', 'Rocky', 'AlmaLinux', 'Suse'] else 'ssh' }}"
     state: restarted
   when:
-    - (ssh__sshd_include_result is changed) or (ssh__sshd_dropin_result is changed)
+    - not ('proxmox' in group_names)
+    - (ssh__sshd_include_result is changed) or (ssh__sshd_dropin_result is changed) or ((ssh__banner_result is defined) and (ssh__banner_result is changed))
   become: true
 
 - name: Read effective sshd configuration

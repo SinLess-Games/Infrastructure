@@ -83,7 +83,7 @@
 
 - name: Deploy CA-based known_hosts file
   ansible.builtin.template:
-    src: "{{ role_path }}/templates/ssh/known_hosts.j2"
+    src: "{{ playbook_dir }}/../templates/ssh/known_hosts.j2"
     dest: "{{ ssh__known_hosts_path }}"
     owner: root
     group: root

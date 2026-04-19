@@ -5,3 +5,4 @@ resources:
   - clusterrolebinding-tokenreview.yaml
   - clustersecretstore-vault.yaml
   - externalsecret-platform-integrations.yaml
+  - externalsecret-velero-s3.yaml

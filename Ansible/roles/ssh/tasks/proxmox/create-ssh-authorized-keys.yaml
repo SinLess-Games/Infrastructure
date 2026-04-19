@@ -35,6 +35,32 @@
       }}
   changed_when: false
 
+- name: Resolve controller root public key path
+  ansible.builtin.set_fact:
+    ssh__controller_root_pubkey_path: >-
+      {{
+        ssh_root_pubkey_path
+          | default(
+              (ssh.controller.outputs_dir | default(playbook_dir ~ '/../../.outputs')) ~ '/ssh/root/id_ed25519.pub',
+              true
+            )
+      }}
+  changed_when: false
+
+- name: Assert controller root public key exists
+  ansible.builtin.stat:
+    path: "{{ ssh__controller_root_pubkey_path }}"
+    follow: false
+  delegate_to: localhost
+  register: ssh__controller_root_pubkey_stat
+  changed_when: false
+
+- name: Fail when controller root public key is missing
+  ansible.builtin.fail:
+    msg: "Controller root public key not found: {{ ssh__controller_root_pubkey_path }}"
+  when: not ssh__controller_root_pubkey_stat.stat.exists
+  delegate_to: localhost
+
 # -----------------------------------------------------------------------------
 # Ensure .ssh directory exists
 # -----------------------------------------------------------------------------
@@ -54,7 +80,7 @@
 
 - name: Deploy authorized_keys from template
   ansible.builtin.template:
-    src: "{{ role_path }}/templates/ssh/authorized_keys.j2"
+    src: "{{ playbook_dir }}/../templates/ssh/authorized_keys.j2"
     dest: "{{ ssh__authorized_keys_path }}"
     owner: "{{ ssh.authorized_keys.owner | default('root') }}"
     group: "{{ ssh.authorized_keys.group | default('root') }}"
@@ -63,6 +89,9 @@
   when:
     - ssh.authorized_keys is defined
     - ssh.authorized_keys.enabled | default(true)
+  vars:
+    authorized_key_paths:
+      - "{{ ssh__controller_root_pubkey_path }}"
 
 # -----------------------------------------------------------------------------
 # Optional: remove authorized_keys if disabled

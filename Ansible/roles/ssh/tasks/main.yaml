@@ -508,6 +508,12 @@
 # Phase 4: System / daemon SSH configuration
 # -----------------------------------------------------------------------------
 
+- name: Pre-stage root certificate principals for Proxmox before sshd restart
+  ansible.builtin.import_tasks: proxmox/ensure-ssh-works.yaml
+  when:
+    - "'proxmox' in group_names"
+    - ssh_ca_enabled | default(false) | bool
+
 - name: Configure SSH daemon (generic)
   ansible.builtin.import_tasks: base/configure.yaml
 
@@ -532,14 +538,8 @@
     - name: Create Proxmox known_hosts entries
       ansible.builtin.import_tasks: proxmox/create-known-hosts.yaml
 
-    - name: Create authorized_keys for Proxmox users
-      ansible.builtin.import_tasks: proxmox/create-ssh-authorized-keys.yaml
+    - name: Ensure SSH CA-based user cert auth works for root
+      ansible.builtin.import_tasks: proxmox/ensure-ssh-works.yaml
 
     - name: Configure Proxmox SSH daemon
       ansible.builtin.import_tasks: proxmox/configure-ssh.yaml
-
-    - name: Ensure SSH CA-based user cert auth works for root
-      ansible.builtin.import_tasks: proxmox/ensure-ssh-works.yaml
-    
-    - name: Enforce SSH certificate principals for Proxmox nodes
-      ansible.builtin.import_tasks: proxmox/principles.yaml

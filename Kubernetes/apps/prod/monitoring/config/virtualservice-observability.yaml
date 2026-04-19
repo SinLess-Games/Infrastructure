@@ -8,6 +8,7 @@ spec:
     - istio-system/shared-edge
   hosts:
     - grafana.sinlessgames.com
+    - kiali.sinlessgames.com
     - internal.sinlessgames.com
     - prometheus.sinlessgames.com
     - alert-manager.sinlessgames.com
@@ -27,6 +28,30 @@ spec:
             host: grafana.monitoring.svc.cluster.local
             port:
               number: 80
+    - name: kiali-root
+      match:
+        - authority:
+            exact: kiali.sinlessgames.com
+          uri:
+            exact: /
+      rewrite:
+        uri: /kiali
+      route:
+        - destination:
+            host: kiali.monitoring.svc.cluster.local
+            port:
+              number: 20001
+    - name: kiali
+      match:
+        - authority:
+            exact: kiali.sinlessgames.com
+          uri:
+            prefix: /kiali
+      route:
+        - destination:
+            host: kiali.monitoring.svc.cluster.local
+            port:
+              number: 20001
     - name: prometheus
       match:
         - authority:

@@ -1,8 +1,16 @@
 minio:
   vars:
     ansible_user: "root"
-    ansible_password: "packer"
-    ansible_ssh_common_args: "-o PreferredAuthentications=password -o PubkeyAuthentication=no"
+    ansible_ssh_private_key_file: "/home/sinless777/Projects/Infrastructure/.outputs/ssh/root/id_ed25519"
+    ansible_ssh_common_args: >-
+      -o StrictHostKeyChecking=no
+      -o UserKnownHostsFile=/dev/null
+      -o PreferredAuthentications=publickey
+      -o PubkeyAuthentication=yes
+      -o PasswordAuthentication=no
+      -o IdentitiesOnly=yes
+      -o IdentityAgent=none
+      -o CertificateFile=/home/sinless777/Projects/Infrastructure/.outputs/ssh/root/id_ed25519-cert.pub
   hosts:
     minio-01:
       ansible_host: 10.10.40.5

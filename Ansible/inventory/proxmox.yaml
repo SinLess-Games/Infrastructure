@@ -19,8 +19,8 @@ proxmox:
       hosts:
         pve-01:
           ansible_host: 10.10.10.14
-        pve-02:
-          ansible_host: 10.10.10.15
+        # pve-02:
+        #   ansible_host: 10.10.10.15
         pve-03:
           ansible_host: 10.10.10.16
         pve-04:
@@ -34,7 +34,7 @@ proxmox:
 
     pve_cluster_members:
       hosts:
-        pve-02:
+        # pve-02:
         pve-03:
         pve-04:
         pve-05:

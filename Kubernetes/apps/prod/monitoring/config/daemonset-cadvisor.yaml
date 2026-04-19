@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: cadvisor
-  namespace: monitoring
+  namespace: kube-system
 spec:
   selector:
     matchLabels:
@@ -12,6 +12,7 @@ spec:
       labels:
         app.kubernetes.io/name: cadvisor
     spec:
+      automountServiceAccountToken: false
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       priorityClassName: system-node-critical
@@ -60,8 +61,14 @@ spec:
             - name: docker
               mountPath: /var/lib/docker
               readOnly: true
+            - name: containerd
+              mountPath: /var/lib/containerd
+              readOnly: true
             - name: disk
               mountPath: /dev/disk
+              readOnly: true
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
               readOnly: true
       volumes:
         - name: rootfs
@@ -76,6 +83,12 @@ spec:
         - name: docker
           hostPath:
             path: /var/lib/docker
+        - name: containerd
+          hostPath:
+            path: /var/lib/containerd
         - name: disk
           hostPath:
             path: /dev/disk
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup

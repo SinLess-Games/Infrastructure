@@ -13,6 +13,20 @@ alloy:
           url = "http://mimir-nginx.monitoring.svc.cluster.local/api/v1/push"
         }
       }
+      prometheus.scrape "cadvisor" {
+        targets = [{
+          __address__ = "cadvisor.kube-system.svc.cluster.local:8080",
+          job = "cadvisor",
+        }]
+        forward_to = [prometheus.remote_write.mimir.receiver]
+      }
+      prometheus.scrape "otel_collector" {
+        targets = [{
+          __address__ = "otel-collector.monitoring.svc.cluster.local:8888",
+          job = "otel-collector",
+        }]
+        forward_to = [prometheus.remote_write.mimir.receiver]
+      }
       loki.write "default" {
         endpoint {
           url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"

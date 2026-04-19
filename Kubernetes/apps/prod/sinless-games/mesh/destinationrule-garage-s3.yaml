@@ -1,0 +1,10 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: garage-s3-plaintext
+  namespace: sinless-games
+spec:
+  host: garage-s3.sinless-games.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE

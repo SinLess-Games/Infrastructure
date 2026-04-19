@@ -1,14 +1,15 @@
 credentials:
   useSecret: true
+  existingSecret: velero-s3-credentials
 configuration:
   backupStorageLocation:
     - name: default
       provider: aws
       bucket: k8s-prod-velero
       config:
-        region: ${S3_REGION}
-        s3ForcePathStyle: ${S3_FORCE_PATH_STYLE}
-        s3Url: ${S3_ENDPOINT}
+        region: us-east-1
+        s3ForcePathStyle: "true"
+        s3Url: http://garage-s3.sinless-games.svc.cluster.local:3900
   volumeSnapshotLocation:
     - name: default
       provider: aws

@@ -3,10 +3,10 @@ storage:
     backend: s3
     s3:
       bucket: k8s-prod-tempo
-      endpoint: ${S3_ENDPOINT}
+      endpoint: garage-s3.sinless-games.svc.cluster.local:3900
       access_key: ${S3_ACCESS_KEY_ID}
       secret_key: ${S3_SECRET_ACCESS_KEY}
-      insecure: false
+      insecure: true
 traces:
   otlp:
     grpc:
@@ -16,3 +16,43 @@ traces:
 metricsGenerator:
   enabled: true
   remoteWriteUrl: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/write
+  extraEnvFrom:
+    - secretRef:
+        name: tempo-s3-credentials
+  extraArgs:
+    - -config.expand-env=true
+
+compactor:
+  extraEnvFrom:
+    - secretRef:
+        name: tempo-s3-credentials
+  extraArgs:
+    - -config.expand-env=true
+
+distributor:
+  extraEnvFrom:
+    - secretRef:
+        name: tempo-s3-credentials
+  extraArgs:
+    - -config.expand-env=true
+
+ingester:
+  extraEnvFrom:
+    - secretRef:
+        name: tempo-s3-credentials
+  extraArgs:
+    - -config.expand-env=true
+
+querier:
+  extraEnvFrom:
+    - secretRef:
+        name: tempo-s3-credentials
+  extraArgs:
+    - -config.expand-env=true
+
+queryFrontend:
+  extraEnvFrom:
+    - secretRef:
+        name: tempo-s3-credentials
+  extraArgs:
+    - -config.expand-env=true

@@ -3,5 +3,6 @@ kind: Kustomization
 resources:
   - peer-authentication-default.yaml
   - authorizationpolicy-default-deny.yaml
+  - authorizationpolicy-ingress-allow.yaml
   - destinationrule-default.yaml
   - gateway-shared.yaml

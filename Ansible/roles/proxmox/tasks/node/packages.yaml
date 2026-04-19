@@ -42,6 +42,7 @@
   ansible.builtin.apt:
     upgrade: full
     update_cache: false
+    allow_downgrade: true
   async: 1800
   poll: 10
 

@@ -4,11 +4,55 @@ mimir:
       storage:
         backend: s3
         s3:
-          endpoint: ${S3_ENDPOINT}
-          region: ${S3_REGION}
+          endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+          region: us-east-1
           bucket_name: k8s-prod-mimir
           access_key_id: ${S3_ACCESS_KEY_ID}
           secret_access_key: ${S3_SECRET_ACCESS_KEY}
+          insecure: true
+    blocks_storage:
+      backend: s3
+      storage_prefix: blocks
+      bucket_store:
+        sync_dir: /data/tsdb-sync
+      s3:
+        endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+        region: us-east-1
+        bucket_name: k8s-prod-mimir
+        access_key_id: ${S3_ACCESS_KEY_ID}
+        secret_access_key: ${S3_SECRET_ACCESS_KEY}
+        insecure: true
+      tsdb:
+        dir: /data/tsdb
+    alertmanager_storage:
+      backend: s3
+      storage_prefix: alertmanager
+      s3:
+        endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+        region: us-east-1
+        bucket_name: k8s-prod-mimir
+        access_key_id: ${S3_ACCESS_KEY_ID}
+        secret_access_key: ${S3_SECRET_ACCESS_KEY}
+        insecure: true
+    ruler_storage:
+      backend: s3
+      storage_prefix: ruler
+      s3:
+        endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+        region: us-east-1
+        bucket_name: k8s-prod-mimir
+        access_key_id: ${S3_ACCESS_KEY_ID}
+        secret_access_key: ${S3_SECRET_ACCESS_KEY}
+        insecure: true
+global:
+  extraEnvFrom:
+    - secretRef:
+        name: mimir-s3-credentials
+minio:
+  enabled: false
+nginx:
+  nginxConfig:
+    resolver: 10.43.0.10
 gateway:
   enabled: true
 ingester:
