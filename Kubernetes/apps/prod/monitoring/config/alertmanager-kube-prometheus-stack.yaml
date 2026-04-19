@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Alertmanager
+metadata:
+  name: kube-prometheus-stack-alertmanager
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack-alertmanager
+    app.kubernetes.io/instance: kube-prometheus-stack
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  replicas: 3
+  serviceAccountName: kube-prometheus-stack-alertmanager
+  nodeSelector:
+    sinlessgames.com/role: worker
+  configSecret: alertmanager-kube-prometheus-stack-alertmanager
+  storage:
+    emptyDir: {}

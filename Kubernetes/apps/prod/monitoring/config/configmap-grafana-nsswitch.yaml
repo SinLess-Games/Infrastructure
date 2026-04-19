@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-nsswitch
+  namespace: monitoring
+data:
+  nsswitch.conf: |
+    passwd:         files
+    group:          files
+    shadow:         files
+    hosts:          files dns
+    networks:       files
+    protocols:      files
+    services:       files
+    ethers:         files
+    rpc:            files

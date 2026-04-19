@@ -7,3 +7,4 @@ resources:
   - deployment-homepage.yaml
   - service-homepage.yaml
   - ingress-homepage.yaml
+  - virtualservice-homepage.yaml

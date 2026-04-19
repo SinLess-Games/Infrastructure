@@ -2,6 +2,21 @@ admin:
   existingSecret: grafana-admin
   userKey: admin-user
   passwordKey: grafana_admin_password
+plugins:
+  - blackcowmoo-googleanalytics-datasource
+  - grafana-googlesheets-datasource
+  - marcusolsson-calendar-panel
+  - chaosmeshorg-chaos-mesh-grafana
+  - grafana-gcp-status-datasource
+  - grafana-github-datasource
+  - grafana-advisor-app
+  - grafana-assistant-app
+  - grafana-metricsdrilldown-app
+  - grafana-pyroscope-app
+  - grafana-exploretraces-app
+  - grafana-llm-app
+  - geeks-r-us-mqtt-panel
+  - grafana-sentry-datasource
 persistence:
   enabled: true
   storageClassName: longhorn
@@ -17,6 +32,7 @@ datasources:
         access: proxy
         jsonData:
           httpMethod: POST
+          manageAlerts: false
       - name: Loki
         uid: loki
         type: loki
@@ -41,6 +57,13 @@ datasources:
             spanStartTimeShift: "-5m"
             spanEndTimeShift: "5m"
             filterByTraceID: true
+          tracesToMetrics:
+            datasourceUid: mimir
+            spanStartTimeShift: "-5m"
+            spanEndTimeShift: "5m"
+          tracesToProfiles:
+            datasourceUid: pyroscope
+            profileTypeId: process_cpu:cpu:nanoseconds:cpu:nanoseconds
           search:
             hide: false
           nodeGraph:
@@ -58,11 +81,26 @@ datasources:
         isDefault: true
         jsonData:
           httpMethod: POST
+          manageAlerts: false
           exemplarTraceIdDestinations:
             - datasourceUid: tempo
               name: trace_id
+      - name: Alertmanager
+        uid: alertmanager
+        type: alertmanager
+        url: http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
+        access: proxy
+        jsonData:
+          implementation: prometheus
+          handleGrafanaManagedAlerts: true
 env:
   GF_SERVER_ROOT_URL: https://grafana.sinlessgames.com
+extraConfigmapMounts:
+  - name: grafana-nsswitch
+    configMap: grafana-nsswitch
+    mountPath: /etc/nsswitch.conf
+    subPath: nsswitch.conf
+    readOnly: true
 grafana.ini:
   users:
     viewers_can_edit: false

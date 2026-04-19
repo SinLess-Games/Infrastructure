@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: garage-bootstrap
+  namespace: sinless-games
+subjects:
+  - kind: ServiceAccount
+    name: garage-bootstrap
+    namespace: sinless-games
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: garage-bootstrap
+

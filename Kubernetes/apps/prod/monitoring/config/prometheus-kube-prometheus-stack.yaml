@@ -1,0 +1,37 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: kube-prometheus-stack-prometheus
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack-prometheus
+    app.kubernetes.io/instance: kube-prometheus-stack
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: kube-prometheus-stack
+    release: kube-prometheus-stack
+spec:
+  replicas: 2
+  retention: 15d
+  serviceAccountName: kube-prometheus-stack-prometheus
+  nodeSelector:
+    sinlessgames.com/role: worker
+  serviceMonitorSelector: {}
+  serviceMonitorNamespaceSelector: {}
+  podMonitorSelector: {}
+  podMonitorNamespaceSelector: {}
+  probeSelector: {}
+  probeNamespaceSelector: {}
+  ruleSelector:
+    matchLabels:
+      release: kube-prometheus-stack
+  ruleNamespaceSelector: {}
+  externalLabels:
+    cluster: rke2-prod
+  alerting:
+    alertmanagers:
+      - namespace: monitoring
+        name: kube-prometheus-stack-alertmanager
+        port: http-web
+  storage:
+    emptyDir: {}

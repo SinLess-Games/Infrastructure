@@ -1,0 +1,226 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: garage-bootstrap
+  namespace: sinless-games
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: garage-bootstrap
+        app.kubernetes.io/part-of: sinless-games-platform
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: garage-bootstrap
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: alpine/k8s:1.30.2
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              set -eu
+
+              garage() {
+                kubectl -n sinless-games exec garage-0 -- /garage "$@"
+              }
+
+              until garage status >/dev/null 2>&1; do
+                echo "waiting for garage admin api..."
+                sleep 5
+              done
+
+              ensure_bucket() {
+                bucket="$1"
+                if ! garage bucket info "$bucket" >/dev/null 2>&1; then
+                  garage bucket create "$bucket"
+                fi
+              }
+
+              ensure_key() {
+                name="$1"
+                key_id="$2"
+                secret_key="$3"
+                if ! garage key info "$key_id" >/dev/null 2>&1; then
+                  garage key import --yes -n "$name" "$key_id" "$secret_key"
+                fi
+              }
+
+              grant_bucket() {
+                bucket="$1"
+                key_ref="$2"
+                garage bucket allow "$bucket" --key "$key_ref" --read --write --owner >/dev/null
+              }
+
+              ensure_bucket "sinlessgames-platform"
+              ensure_key "platform" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY"
+              grant_bucket "sinlessgames-platform" "$S3_ACCESS_KEY_ID"
+
+              ensure_bucket "$LOKI_BUCKET"
+              ensure_key "loki" "$LOKI_S3_ACCESS_KEY_ID" "$LOKI_S3_SECRET_ACCESS_KEY"
+              grant_bucket "$LOKI_BUCKET" "$LOKI_S3_ACCESS_KEY_ID"
+
+              ensure_bucket "$MIMIR_BUCKET"
+              ensure_key "mimir" "$MIMIR_S3_ACCESS_KEY_ID" "$MIMIR_S3_SECRET_ACCESS_KEY"
+              grant_bucket "$MIMIR_BUCKET" "$MIMIR_S3_ACCESS_KEY_ID"
+
+              ensure_bucket "$TEMPO_BUCKET"
+              ensure_key "tempo" "$TEMPO_S3_ACCESS_KEY_ID" "$TEMPO_S3_SECRET_ACCESS_KEY"
+              grant_bucket "$TEMPO_BUCKET" "$TEMPO_S3_ACCESS_KEY_ID"
+
+              ensure_bucket "$PYROSCOPE_BUCKET"
+              ensure_key "pyroscope" "$PYROSCOPE_S3_ACCESS_KEY_ID" "$PYROSCOPE_S3_SECRET_ACCESS_KEY"
+              grant_bucket "$PYROSCOPE_BUCKET" "$PYROSCOPE_S3_ACCESS_KEY_ID"
+
+              ensure_bucket "$LONGHORN_BACKUP_BUCKET"
+              ensure_key "longhorn-backup" "$LONGHORN_BACKUP_ACCESS_KEY" "$LONGHORN_BACKUP_SECRET_KEY"
+              grant_bucket "$LONGHORN_BACKUP_BUCKET" "$LONGHORN_BACKUP_ACCESS_KEY"
+
+              ensure_bucket "$VELERO_BUCKET"
+              ensure_key "velero" "$VELERO_ACCESS_KEY" "$VELERO_SECRET_KEY"
+              grant_bucket "$VELERO_BUCKET" "$VELERO_ACCESS_KEY"
+          env:
+            - name: KUBERNETES_SERVICE_HOST
+              value: "10.10.40.10"
+            - name: KUBERNETES_SERVICE_PORT
+              value: "6443"
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: s3_access_key_id
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: s3_secret_access_key
+            - name: LOKI_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: loki_bucket
+            - name: LOKI_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: loki_s3_access_key_id
+            - name: LOKI_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: loki_s3_secret_access_key
+            - name: MIMIR_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: mimir_bucket
+            - name: MIMIR_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: mimir_s3_access_key_id
+            - name: MIMIR_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: mimir_s3_secret_access_key
+            - name: TEMPO_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: tempo_bucket
+            - name: TEMPO_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: tempo_s3_access_key_id
+            - name: TEMPO_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: tempo_s3_secret_access_key
+            - name: PYROSCOPE_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: pyroscope_bucket
+            - name: PYROSCOPE_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: pyroscope_s3_access_key_id
+            - name: PYROSCOPE_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: pyroscope_s3_secret_access_key
+            - name: LONGHORN_BACKUP_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: longhorn_backup_bucket
+            - name: LONGHORN_BACKUP_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: longhorn_backup_access_key
+            - name: LONGHORN_BACKUP_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: longhorn_backup_secret_key
+            - name: VELERO_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: velero_bucket
+            - name: VELERO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: velero_access_key
+            - name: VELERO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: garage-secrets
+                  key: velero_secret_key
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - "true"
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - "true"
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - "true"
+            failureThreshold: 30
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001

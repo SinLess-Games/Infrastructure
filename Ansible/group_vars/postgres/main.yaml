@@ -162,12 +162,12 @@ postgres_description: "PostgreSQL HA cluster node (Terraform-managed)"
 postgres_database_names:
   - authentik
   - grafana
-  - grafana_oncall
   - harbor
-  - netbox
   - backstage
   - boundary
   - defectdojo
+  - helix
+  - sinlessgames
 
 postgres_users: []
 postgres_databases: []

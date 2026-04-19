@@ -18,11 +18,6 @@ spec:
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: kiali.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
     - dnsName: homepage.sinlessgames.com
       recordTTL: 60
       recordType: CNAME
@@ -38,42 +33,7 @@ spec:
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: prometheus.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: alert-manager.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: loki.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: tempo.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: mimir.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: longhorn.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
     - dnsName: rancher.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: opencost.sinlessgames.com
       recordTTL: 60
       recordType: CNAME
       targets:

@@ -12,10 +12,19 @@ data:
     ingress: true
     gateway: true
   settings.yaml: |
-    title: Sinless Games Platform
+    title: SinLess Games
+    showStats: true
     theme: dark
     color: slate
     headerStyle: clean
+    cardBlur: sm
+    groupsInitiallyCollapsed: true
+    headerStyle: boxed
+    background:
+        image: https://img.freepik.com/free-photo/anime-moon-landscape_23-2151645903.jpg
+        saturate: 50
+        brightness: 50
+        opacity: 100
     layout:
       Platform:
         style: row
@@ -29,20 +38,250 @@ data:
       Automation:
         style: row
         columns: 3
+    quicklaunch:
+        searchDescriptions: true
+        hideInternetSearch: true
+        showSearchSuggestions: true
+        hideVisitURL: true
+        provider: [google, duckduckgo, brave]
+
+        hideVersion: true
   bookmarks.yaml: |
-    - Docs:
-        - GitHub:
-            - abbr: GH
-              href: https://github.com/Sinless777/Infrastructure
-        - Vault:
-            - abbr: VT
-              href: https://vault.sinlessgames.com
+    - Anime:
+        - H!anime:
+            - abbr: HA
+            href: https://hianime.to
+        - 9Anime:
+            - abbr: 9A
+            href: https://9animetv.to/
+        - Livechart:
+            - abbr: LC
+            href: https://www.livechart.me/
+        - Nyaa:
+            - abbr: nyaa
+            href: https://nyaa.si/
+        - SeaDex:
+            - abbr: SD
+            href: https://releases.moe/
+        - Crunchyroll:
+            - abbr: CR
+            href: https://crunchyroll.com
+        - Kiss Anime:
+            - abbr: KA
+            href: https://kissanime.com.ru
+
+    - Ai:
+        - ChatGPT:
+            - abbr: GPT
+            href: https://chat.openai.com/
+        - CrushOn AI:
+            - abbr: COAI
+            href: https://crushon.ai/
+        - OniiChat:
+            - abbr: OC
+            href: https://oniichat.com/
+
+    - Calculators:
+        - Desmos:
+            - icon: desmos.svg
+            href: https://www.desmos.com/calculator
+        - WolframAlpha:
+            - icon: wolframalpha.svg
+            href: https://www.wolframalpha.com/
+
+    - Cloud:
+        - Cloudflare:
+            - icon: cloudflare.svg
+            href: https://dash.cloudflare.com/
+        - Cloudflare-Dash:
+            - icon: cloudflare.svg
+            href: https://dash.cloudflare.com/
+        - Cloudflare-Zero-Trust:
+            - icon: cloudflare-zero-trust.svg
+            href: https://one.dash.cloudflare.com/9517bf561f1f713ab87d1523193c7cc5/home
+        - AWS:
+            - icon: aws.svg
+            href: https://aws.amazon.com/
+        - GCP:
+            - icon: google-cloud-platform.svg
+            href: https://cloud.google.com/
+        - Azure:
+            - icon: microsoft-azure.svg
+            href: https://azure.microsoft.com/
+        - Linode:
+            - icon: linode.svg
+            href: https://www.linode.com/
+        - DigitalOcean:
+            - icon: digital-ocean.svg
+            href: https://www.digitalocean.com/
+        - Vercel:
+            - icon: vercel.svg
+            href: https://vercel.com/sinlessgames-projects/helix/
+
+    - Developer:
+        - Github:
+            - icon: si-github
+            href: https://github.com/
+        - Personal-Github:
+            - icon: si-github
+            href: https://github.com/Sinless777?tab=repositories
+        - SinLess-Games-Github:
+            - icon: si-github
+            href: https://github.com/orgs/SinLess-Games/repositories
+        - SinLess-Games-Enterprise-Github:
+            - icon: si-github
+            href: https://github.com/enterprises/sinlessgamesllc
+        - GitLab:
+            - icon: gitlab.svg
+            href: https://gitlab.sinlessgamesllc.com/
+        - Bitbucket:
+            - icon: si-bitbucket-#0052CC
+            href: https://bitbucket.org/
+
+    - Documentation:
+        - Awesome-Prometheus-Rules:
+            - href: https://samber.github.io/awesome-prometheus-alerts/
+            icon: prometheus.svg
+        - Proxmox Helper Scripts:
+            - href: https://community-scripts.github.io/ProxmoxVE/
+            icon: proxmox.svg
+
+    - Entertainment:
+        - YouTube:
+            - icon: youtube.svg
+            href: https://youtube.com/
+        - YouTube-Music:
+            - icon: youtube-music.svg
+            href: https://music.youtube.com/
+        - Netflix:
+            - icon: netflix.svg
+            href: https://www.netflix.com/
+        - Hulu:
+            - icon: sh-hulu
+            href: https://www.hulu.com/
+        - Spotify:
+            - icon: spotify.svg
+            href: https://spotify.com/
+        - Apple-Music:
+            - icon: si-applemusic-#FA243C
+            href: https://music.apple.com/
+        - F2 Movies:
+            - icon: f2movies.svg
+            href: https://f2movies.to/
+        - FMHY-Piracy-Guide:
+            - abbr: FMHY
+            href: https://fmhy.net/videopiracyguide/
+
+    - Manga:
+        - Hentai2Read:
+            - abbr: H2R
+            href: https://hentai2read.com/
+
+    - My Websites:
+        - Helix Ai:
+            - abbr: Helix
+            href: https://helixaibot.com/
+        - Sinless Games:
+            - abbr: SLG
+            href: https://sinlessgamesllc.com/
+
+    - Personal:
+        - Onedrive:
+            - icon: sh-microsoft-onedrive
+            href: https://onedrive.live.com/?id=root&cid=3EFDE119CBC03E98/
+        - Google Drive:
+            - icon: google-drive.svg
+            href: https://drive.google.com/drive/home
+        - Ascend Mental Health:
+            - abbr: AMH
+            href: https://www.valant.io/myio/AscendLLC/home
+
+    - School & Education:
+        - Fullsail One:
+            - abbr: FS1
+            href: https://one.fullsail.edu/
+        - Fullsail Class:
+            - abbr: FSC
+            href: https://online.fullsail.edu/
+        - Software Downloads:
+            - abbr: FS-SD
+            href: "https://portal.azure.com/?Microsoft_Azure_Education_correlationId=7ab8c7ce-1069-49da-92be-45f349b1e5ba#view/Microsoft_Azure_Education/EducationMenuBlade/~/overview"
+        - Github Learning:
+            - abbr: GH-L
+            href: https://education.github.com/learner/learn
+        - Linkedin Learning:
+            - abbr: LL
+            href: https://www.linkedin.com/learning/
+        - Packt Classes Owned:
+            - abbr: PKT
+            href: https://subscription.packtpub.com/owned
+        - HackTheBox:
+            - abbr: HTB
+            href: https://account.hackthebox.com/dashboard
+        - HackTheBox Academy:
+            - abbr: HTB-A
+            href: https://academy.hackthebox.com/dashboard
+
+    - Social:
+        - Reddit:
+            - icon: reddit.svg
+            href: https://reddit.com/
+        - Twitter:
+            - icon: twitter.svg
+            href: https://twitter.com/
+        - Facebook:
+            - icon: facebook.svg
+            href: https://facebook.com/
+        - LinkedIn:
+            - icon: linkedin.svg
+            href: https://www.linkedin.com/
+        - Threads:
+            - abbr: TRD
+            href: https://www.threads.net/
+        - Instagram:
+            - abbr: INS
+            href: https://instagram.com
+        - The Cage:
+            - abbr: TC
+            href: https://thecage.co/
+        - Tumblr:
+            - abbr: TMBR
+            href: https://www.tumblr.com/
+
+    - Tools:
+        - Docker:
+            - icon: docker.svg
+            href: https://www.docker.com/
+        - Kubernetes:
+            - icon: kubernetes.svg
+            href: https://kubernetes.io/
+        - Terraform:
+            - icon: terraform.svg
+            href: https://www.terraform.io/
+        - Ansible:
+            - icon: ansible.svg
+            href: https://www.ansible.com/
+        - Helm:
+            - icon: helm.svg
+            href: https://helm.sh/
+
+    - Work:
+        - Nuclino:
+            - abbr: NUC
+            href: https://app.nuclino.com/
+        - Stackoverflow:
+            - icon: si-stackoverflow-#F58025
+            href: https://stackoverflow.com
   services.yaml: |
     - Platform:
         - Homepage:
             href: https://homepage.sinlessgames.com
             description: Central dashboard for Sinless Games
             icon: homepage.png
+        - Argo CD:
+            href: https://argocd.sinlessgames.com
+            description: GitOps application control plane
+            icon: si-argo
         - Rancher:
             href: https://rancher.sinlessgames.com
             description: Cluster and fleet management
@@ -65,10 +304,30 @@ data:
             href: https://grafana.sinlessgames.com
             description: Metrics, logs, traces, and profiles
             icon: grafana.png
+        - Prometheus:
+            href: https://prometheus.sinlessgames.com
+            description: Cluster metrics and PromQL
+            icon: prometheus.png
+        - Alertmanager:
+            href: https://alert-manager.sinlessgames.com
+            description: Alert routing and silences
+            icon: alertmanager.png
         - Kiali:
             href: https://kiali.sinlessgames.com
             description: Istio service mesh visibility
             icon: kiali.png
+        - Loki:
+            href: https://loki.sinlessgames.com
+            description: Central log query interface
+            icon: loki.png
+        - Tempo:
+            href: https://tempo.sinlessgames.com
+            description: Distributed trace search
+            icon: tempo.png
+        - Mimir:
+            href: https://mimir.sinlessgames.com
+            description: Long-term metrics backend
+            icon: si-grafana
     - Automation:
         - n8n:
             href: https://n8n.helixaibot.com
@@ -79,6 +338,11 @@ data:
             description: Mail administration and webmail
             icon: mailu.png
   widgets.yaml: |
+    - datetime:
+        text_size: xl
+        format:
+              timeStyle: short
+              hourCycle: h23
     - kubernetes:
         cluster:
           show: true
@@ -98,9 +362,6 @@ data:
         memory: true
     - longhorn:
         url: https://longhorn.sinlessgames.com
-    - search:
-        provider: duckduckgo
-        target: _blank
   custom.css: ""
   custom.js: ""
   docker.yaml: ""

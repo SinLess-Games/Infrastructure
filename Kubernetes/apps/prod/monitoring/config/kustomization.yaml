@@ -1,12 +1,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - alertmanager-kube-prometheus-stack.yaml
   - daemonset-cadvisor.yaml
   - deployment-otel-collector.yaml
   - destinationrule-observability.yaml
   - service-cadvisor.yaml
   - configmap-grafana-dashboard-observability.yaml
+  - configmap-grafana-nsswitch.yaml
   - service-otel-collector.yaml
+  - prometheus-kube-prometheus-stack.yaml
   - servicemonitor-cadvisor.yaml
   - servicemonitor-otel-collector.yaml
   - externalsecret-grafana-admin.yaml

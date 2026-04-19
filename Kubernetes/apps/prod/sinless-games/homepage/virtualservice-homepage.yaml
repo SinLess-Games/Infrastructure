@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: homepage
+  namespace: sinless-games
+spec:
+  gateways:
+    - istio-system/shared-edge
+  hosts:
+    - homepage.sinlessgames.com
+  http:
+    - route:
+        - destination:
+            host: homepage.sinless-games.svc.cluster.local
+            port:
+              number: 3000

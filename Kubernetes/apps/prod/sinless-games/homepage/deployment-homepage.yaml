@@ -34,7 +34,7 @@ spec:
                 fieldRef:
                   fieldPath: status.podIP
             - name: HOMEPAGE_ALLOWED_HOSTS
-              value: "$(MY_POD_IP):3000,homepage.sinlessgames.com"
+              value: "$(MY_POD_IP):3000,homepage.sinlessgames.com,localhost:3001,127.0.0.1:3001,10.10.10.10:3001"
           ports:
             - name: http
               containerPort: 3000
@@ -59,6 +59,13 @@ spec:
             runAsGroup: 1000
             runAsNonRoot: true
             runAsUser: 1000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
           volumeMounts:
             - name: homepage-config
               mountPath: /app/config/bookmarks.yaml
@@ -84,7 +91,11 @@ spec:
             - name: homepage-config
               mountPath: /app/config/widgets.yaml
               subPath: widgets.yaml
+            - name: homepage-logs
+              mountPath: /app/config/logs
       volumes:
         - name: homepage-config
           configMap:
             name: homepage
+        - name: homepage-logs
+          emptyDir: {}

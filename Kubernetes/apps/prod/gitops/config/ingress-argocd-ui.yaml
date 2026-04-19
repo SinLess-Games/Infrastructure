@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-ui
+  namespace: gitops
+  annotations:
+    kubernetes.io/ingress.class: istio
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: Platform
+    gethomepage.dev/name: Argo CD
+    gethomepage.dev/icon: si-argo
+    gethomepage.dev/description: GitOps control plane
+    gethomepage.dev/href: https://argocd.sinlessgames.com
+spec:
+  ingressClassName: istio
+  rules:
+    - host: argocd.sinlessgames.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argo-cd-argocd-server
+                port:
+                  number: 80
