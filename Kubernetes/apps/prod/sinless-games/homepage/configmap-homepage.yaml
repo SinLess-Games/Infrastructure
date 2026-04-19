@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: homepage
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: homepage
+    app.kubernetes.io/part-of: sinless-games-platform
+data:
+  kubernetes.yaml: |
+    mode: cluster
+    ingress: true
+    gateway: true
+  settings.yaml: |
+    title: Sinless Games Platform
+    theme: dark
+    color: slate
+    headerStyle: clean
+    layout:
+      Platform:
+        style: row
+        columns: 3
+      Storage:
+        style: row
+        columns: 3
+      Observability:
+        style: row
+        columns: 3
+      Automation:
+        style: row
+        columns: 3
+  bookmarks.yaml: |
+    - Docs:
+        - GitHub:
+            - abbr: GH
+              href: https://github.com/Sinless777/Infrastructure
+        - Vault:
+            - abbr: VT
+              href: https://vault.sinlessgames.com
+  services.yaml: |
+    - Platform:
+        - Homepage:
+            href: https://homepage.sinlessgames.com
+            description: Central dashboard for Sinless Games
+            icon: homepage.png
+        - Rancher:
+            href: https://rancher.sinlessgames.com
+            description: Cluster and fleet management
+            icon: rancher.png
+        - OpenCost:
+            href: https://opencost.sinlessgames.com
+            description: Cluster cost visibility
+            icon: opencost.png
+    - Storage:
+        - Garage:
+            href: https://s3.sinlessgames.com/ui/
+            description: Object storage and bucket administration
+            icon: si-garage
+        - Longhorn:
+            href: https://longhorn.sinlessgames.com
+            description: Persistent volume management
+            icon: longhorn.png
+    - Observability:
+        - Grafana:
+            href: https://grafana.sinlessgames.com
+            description: Metrics, logs, traces, and profiles
+            icon: grafana.png
+        - Kiali:
+            href: https://kiali.sinlessgames.com
+            description: Istio service mesh visibility
+            icon: kiali.png
+    - Automation:
+        - n8n:
+            href: https://n8n.helixaibot.com
+            description: Workflow automation
+            icon: n8n.png
+        - Mailu:
+            href: https://mail.sinlessgames.com
+            description: Mail administration and webmail
+            icon: mailu.png
+  widgets.yaml: |
+    - kubernetes:
+        cluster:
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
+          label: prod
+        nodes:
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
+    - resources:
+        backend: resources
+        expanded: true
+        cpu: true
+        memory: true
+    - longhorn:
+        url: https://longhorn.sinlessgames.com
+    - search:
+        provider: duckduckgo
+        target: _blank
+  custom.css: ""
+  custom.js: ""
+  docker.yaml: ""

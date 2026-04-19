@@ -17,6 +17,22 @@ spec:
               preUpgradeChecker:
                 jobEnabled: false
             syncWave: "-8"
+          - name: keda
+            namespace: kube-system
+            chartRepo: https://kedacore.github.io/charts
+            chart: keda
+            targetRevision: 2.17.0
+            valuesPath: Kubernetes/apps/prod/kube-system/keda/values.yaml
+            inlineValues: ""
+            syncWave: "-6"
+          - name: karmada
+            namespace: kube-system
+            chartRepo: https://raw.githubusercontent.com/karmada-io/karmada/master/charts
+            chart: karmada
+            targetRevision: v1.15.2
+            valuesPath: Kubernetes/apps/prod/kube-system/karmada/values.yaml
+            inlineValues: ""
+            syncWave: "-5"
           - name: istio-base
             namespace: istio-system
             chartRepo: https://istio-release.storage.googleapis.com/charts
@@ -75,6 +91,7 @@ spec:
             chart: cert-manager
             targetRevision: v1.16.2
             valuesPath: Kubernetes/apps/prod/networking/cert-manager/values.yaml
+            inlineValues: ""
             syncWave: "3"
           - name: external-dns
             namespace: networking
@@ -82,6 +99,7 @@ spec:
             chart: external-dns
             targetRevision: 1.15.0
             valuesPath: Kubernetes/apps/prod/networking/external-dns/values.yaml
+            inlineValues: ""
             syncWave: "4"
           - name: kube-prometheus-stack
             namespace: monitoring
@@ -89,6 +107,7 @@ spec:
             chart: kube-prometheus-stack
             targetRevision: 66.3.1
             valuesPath: Kubernetes/apps/prod/monitoring/kube-prometheus-stack/values.yaml
+            inlineValues: ""
             syncWave: "6"
           - name: grafana-alloy
             namespace: monitoring
@@ -96,13 +115,15 @@ spec:
             chart: alloy
             targetRevision: 0.10.1
             valuesPath: Kubernetes/apps/prod/monitoring/grafana-alloy/values.yaml
+            inlineValues: ""
             syncWave: "7"
           - name: grafana-beyla
             namespace: monitoring
             chartRepo: https://grafana.github.io/helm-charts
             chart: beyla
-            targetRevision: 1.8.9
+            targetRevision: 1.16.0
             valuesPath: Kubernetes/apps/prod/monitoring/grafana-beyla/values.yaml
+            inlineValues: ""
             syncWave: "7"
           - name: loki
             namespace: monitoring
@@ -110,6 +131,57 @@ spec:
             chart: loki
             targetRevision: 6.24.0
             valuesPath: Kubernetes/apps/prod/monitoring/loki/values.yaml
+            inlineValues: |
+              loki:
+                auth_enabled: false
+                commonConfig:
+                  replication_factor: 3
+                schemaConfig:
+                  configs:
+                    - from: "2024-01-01"
+                      store: tsdb
+                      object_store: s3
+                      schema: v13
+                      index:
+                        prefix: loki_index_
+                        period: 24h
+                storage:
+                  type: s3
+                  bucketNames:
+                    chunks: k8s-prod-loki
+                    ruler: k8s-prod-loki
+                    admin: k8s-prod-loki
+                  s3:
+                    endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+                    region: us-east-1
+                    accessKeyId: ${S3_ACCESS_KEY_ID}
+                    secretAccessKey: ${S3_SECRET_ACCESS_KEY}
+              singleBinary:
+                replicas: 0
+              write:
+                replicas: 3
+                extraArgs:
+                  - -config.expand-env=true
+                extraEnvFrom:
+                  - secretRef:
+                      name: loki-s3-credentials
+              read:
+                replicas: 2
+                extraArgs:
+                  - -config.expand-env=true
+                extraEnvFrom:
+                  - secretRef:
+                      name: loki-s3-credentials
+              backend:
+                replicas: 2
+                extraArgs:
+                  - -config.expand-env=true
+                extraEnvFrom:
+                  - secretRef:
+                      name: loki-s3-credentials
+              monitoring:
+                serviceMonitor:
+                  enabled: true
             syncWave: "8"
           - name: mimir
             namespace: monitoring
@@ -117,6 +189,70 @@ spec:
             chart: mimir-distributed
             targetRevision: 5.5.0
             valuesPath: Kubernetes/apps/prod/monitoring/mimir/values.yaml
+            inlineValues: |
+              mimir:
+                structuredConfig:
+                  common:
+                    storage:
+                      backend: s3
+                      s3:
+                        endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+                        region: us-east-1
+                        bucket_name: k8s-prod-mimir
+                        access_key_id: ${S3_ACCESS_KEY_ID}
+                        secret_access_key: ${S3_SECRET_ACCESS_KEY}
+                        insecure: true
+                  blocks_storage:
+                    backend: s3
+                    storage_prefix: blocks
+                    bucket_store:
+                      sync_dir: /data/tsdb-sync
+                    s3:
+                      endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+                      region: us-east-1
+                      bucket_name: k8s-prod-mimir
+                      access_key_id: ${S3_ACCESS_KEY_ID}
+                      secret_access_key: ${S3_SECRET_ACCESS_KEY}
+                      insecure: true
+                    tsdb:
+                      dir: /data/tsdb
+                  alertmanager_storage:
+                    backend: s3
+                    storage_prefix: alertmanager
+                    s3:
+                      endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+                      region: us-east-1
+                      bucket_name: k8s-prod-mimir
+                      access_key_id: ${S3_ACCESS_KEY_ID}
+                      secret_access_key: ${S3_SECRET_ACCESS_KEY}
+                      insecure: true
+                  ruler_storage:
+                    backend: s3
+                    storage_prefix: ruler
+                    s3:
+                      endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+                      region: us-east-1
+                      bucket_name: k8s-prod-mimir
+                      access_key_id: ${S3_ACCESS_KEY_ID}
+                      secret_access_key: ${S3_SECRET_ACCESS_KEY}
+                      insecure: true
+              global:
+                extraEnvFrom:
+                  - secretRef:
+                      name: mimir-s3-credentials
+              minio:
+                enabled: false
+              gateway:
+                enabled: true
+              ingester:
+                replicas: 3
+              store_gateway:
+                replicas: 3
+              ruler:
+                enabled: true
+              metaMonitoring:
+                serviceMonitor:
+                  enabled: true
             syncWave: "8"
           - name: tempo
             namespace: monitoring
@@ -124,6 +260,60 @@ spec:
             chart: tempo-distributed
             targetRevision: 1.18.3
             valuesPath: Kubernetes/apps/prod/monitoring/tempo/values.yaml
+            inlineValues: |
+              storage:
+                trace:
+                  backend: s3
+                  s3:
+                    bucket: k8s-prod-tempo
+                    endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+                    access_key: ${S3_ACCESS_KEY_ID}
+                    secret_key: ${S3_SECRET_ACCESS_KEY}
+                    insecure: true
+              traces:
+                otlp:
+                  grpc:
+                    enabled: true
+                  http:
+                    enabled: true
+              metricsGenerator:
+                enabled: true
+                remoteWriteUrl: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/write
+                extraEnvFrom:
+                  - secretRef:
+                      name: tempo-s3-credentials
+                extraArgs:
+                  - -config.expand-env=true
+              compactor:
+                extraEnvFrom:
+                  - secretRef:
+                      name: tempo-s3-credentials
+                extraArgs:
+                  - -config.expand-env=true
+              distributor:
+                extraEnvFrom:
+                  - secretRef:
+                      name: tempo-s3-credentials
+                extraArgs:
+                  - -config.expand-env=true
+              ingester:
+                extraEnvFrom:
+                  - secretRef:
+                      name: tempo-s3-credentials
+                extraArgs:
+                  - -config.expand-env=true
+              querier:
+                extraEnvFrom:
+                  - secretRef:
+                      name: tempo-s3-credentials
+                extraArgs:
+                  - -config.expand-env=true
+              queryFrontend:
+                extraEnvFrom:
+                  - secretRef:
+                      name: tempo-s3-credentials
+                extraArgs:
+                  - -config.expand-env=true
             syncWave: "8"
           - name: pyroscope
             namespace: monitoring
@@ -131,6 +321,7 @@ spec:
             chart: pyroscope
             targetRevision: 1.12.0
             valuesPath: Kubernetes/apps/prod/monitoring/pyroscope/values.yaml
+            inlineValues: ""
             syncWave: "8"
           - name: grafana
             namespace: monitoring
@@ -138,6 +329,7 @@ spec:
             chart: grafana
             targetRevision: 8.8.2
             valuesPath: Kubernetes/apps/prod/monitoring/grafana/values.yaml
+            inlineValues: ""
             syncWave: "9"
           - name: opentelemetry-operator
             namespace: monitoring
@@ -145,13 +337,15 @@ spec:
             chart: opentelemetry-operator
             targetRevision: 0.74.2
             valuesPath: Kubernetes/apps/prod/monitoring/opentelemetry-operator/values.yaml
+            inlineValues: ""
             syncWave: "9"
           - name: kiali
             namespace: monitoring
             chartRepo: https://kiali.org/helm-charts
             chart: kiali-server
-            targetRevision: 1.89.8
+            targetRevision: 2.24.0
             valuesPath: Kubernetes/apps/prod/monitoring/kiali/values.yaml
+            inlineValues: ""
             syncWave: "10"
           - name: external-secrets
             namespace: security
@@ -159,6 +353,7 @@ spec:
             chart: external-secrets
             targetRevision: 0.10.5
             valuesPath: Kubernetes/apps/prod/security/external-secrets/values.yaml
+            inlineValues: ""
             syncWave: "4"
           - name: falco
             namespace: security
@@ -166,6 +361,7 @@ spec:
             chart: falco
             targetRevision: 4.18.0
             valuesPath: Kubernetes/apps/prod/security/falco/values.yaml
+            inlineValues: ""
             syncWave: "11"
           - name: velero
             namespace: security
@@ -173,6 +369,7 @@ spec:
             chart: velero
             targetRevision: 8.7.0
             valuesPath: Kubernetes/apps/prod/security/velero/values.yaml
+            inlineValues: ""
             syncWave: "12"
           - name: argo-cd
             namespace: gitops
@@ -180,6 +377,7 @@ spec:
             chart: argo-cd
             targetRevision: 7.7.11
             valuesPath: Kubernetes/apps/prod/gitops/argo-cd/values.yaml
+            inlineValues: ""
             syncWave: "13"
           - name: argo-rollouts
             namespace: gitops
@@ -187,6 +385,7 @@ spec:
             chart: argo-rollouts
             targetRevision: 2.38.0
             valuesPath: Kubernetes/apps/prod/gitops/argo-rollouts/values.yaml
+            inlineValues: ""
             syncWave: "14"
           - name: cockroachdb
             namespace: helix-ai
@@ -194,6 +393,7 @@ spec:
             chart: cockroachdb
             targetRevision: 14.0.6
             valuesPath: Kubernetes/apps/prod/helix-ai/cockroachdb/values.yaml
+            inlineValues: ""
             syncWave: "18"
           - name: redis
             namespace: helix-ai
@@ -201,6 +401,7 @@ spec:
             chart: redis
             targetRevision: 20.11.3
             valuesPath: Kubernetes/apps/prod/helix-ai/redis/values.yaml
+            inlineValues: ""
             syncWave: "18"
           - name: nats
             namespace: helix-ai
@@ -208,6 +409,7 @@ spec:
             chart: nats
             targetRevision: 1.2.4
             valuesPath: Kubernetes/apps/prod/helix-ai/nats/values.yaml
+            inlineValues: ""
             syncWave: "18"
           - name: qdrant
             namespace: helix-ai
@@ -215,7 +417,32 @@ spec:
             chart: qdrant
             targetRevision: 1.13.3
             valuesPath: Kubernetes/apps/prod/helix-ai/qdrant/values.yaml
+            inlineValues: ""
             syncWave: "18"
+          - name: rancher
+            namespace: sinless-games
+            chartRepo: https://releases.rancher.com/server-charts/stable
+            chart: rancher
+            targetRevision: 2.11.8
+            valuesPath: Kubernetes/apps/prod/sinless-games/rancher/values.yaml
+            inlineValues: ""
+            syncWave: "18"
+          - name: opencost
+            namespace: sinless-games
+            chartRepo: https://opencost.github.io/opencost-helm-chart
+            chart: opencost
+            targetRevision: 1.0.0
+            valuesPath: Kubernetes/apps/prod/sinless-games/open-cost/values.yaml
+            inlineValues: ""
+            syncWave: "18"
+          - name: mailu
+            namespace: sinless-games
+            chartRepo: https://mailu.github.io/helm-charts
+            chart: mailu
+            targetRevision: 2.6.1
+            valuesPath: Kubernetes/apps/prod/sinless-games/mailu/values.yaml
+            inlineValues: ""
+            syncWave: "19"
   template:
     metadata:
       name: "{{name}}"
@@ -273,3 +500,4 @@ spec:
         syncOptions:
           - CreateNamespace=true
           - RespectIgnoreDifferences=true
+          - ServerSideApply=true

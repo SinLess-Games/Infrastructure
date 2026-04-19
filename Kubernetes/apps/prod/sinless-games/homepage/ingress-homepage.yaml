@@ -1,26 +1,26 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: garage-ui
+  name: homepage
   namespace: sinless-games
   annotations:
     kubernetes.io/ingress.class: istio
     gethomepage.dev/enabled: "true"
-    gethomepage.dev/group: Storage
-    gethomepage.dev/name: Garage
-    gethomepage.dev/icon: si-garage
-    gethomepage.dev/description: S3 object storage and Garage web UI
-    gethomepage.dev/href: https://s3.sinlessgames.com/ui/
+    gethomepage.dev/group: Platform
+    gethomepage.dev/name: Homepage
+    gethomepage.dev/icon: homepage.png
+    gethomepage.dev/description: Platform dashboard
+    gethomepage.dev/href: https://homepage.sinlessgames.com
 spec:
   ingressClassName: istio
   rules:
-    - host: garage.sinlessgames.com
+    - host: homepage.sinlessgames.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: garage-ui
+                name: homepage
                 port:
-                  number: 3909
+                  number: 3000

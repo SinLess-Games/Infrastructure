@@ -1,0 +1,13 @@
+hostname: rancher.sinlessgames.com
+bootstrapPassword: "uP&IFLYmw^^zSTix!$ExOo#0jwxw"
+replicas: 1
+tls: external
+ingress:
+  enabled: false
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi

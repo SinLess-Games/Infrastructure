@@ -95,6 +95,13 @@ kind: Service
 metadata:
   name: n8n
   namespace: sinless-games
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: Automation
+    gethomepage.dev/name: n8n
+    gethomepage.dev/icon: si-n8n
+    gethomepage.dev/description: Workflow automation
+    gethomepage.dev/href: https://n8n.helixaibot.com
 spec:
   selector:
     app: n8n

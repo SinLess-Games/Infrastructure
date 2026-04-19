@@ -1,0 +1,30 @@
+domain: sinlessgames.com
+hostnames:
+  - mail.sinlessgames.com
+secretKey: "Ctkl[jwkymQ]VaJo+{yy1p9z8_%i"
+initialAccount:
+  username: tpierce
+  domain: sinlessgames.com
+  password: "UIhjc0848zabUFNpzoE*Y$Z%!UBi"
+subnet: 10.42.0.0/16
+database:
+  type: sqlite
+persistence:
+  single_pvc: true
+  size: 50Gi
+  storageClass: longhorn
+roundcube:
+  enabled: true
+certmanager:
+  enabled: false
+ingress:
+  externalIngress: true
+  className: istio
+  annotations:
+    kubernetes.io/ingress.class: istio
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: Platform
+    gethomepage.dev/name: Mailu
+    gethomepage.dev/icon: mailu.png
+    gethomepage.dev/description: Mail admin and webmail
+    gethomepage.dev/href: https://mail.sinlessgames.com

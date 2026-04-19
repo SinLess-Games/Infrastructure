@@ -1,26 +1,26 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: garage-ui
-  namespace: sinless-games
+  name: longhorn-ui
+  namespace: kube-system
   annotations:
     kubernetes.io/ingress.class: istio
     gethomepage.dev/enabled: "true"
     gethomepage.dev/group: Storage
-    gethomepage.dev/name: Garage
-    gethomepage.dev/icon: si-garage
-    gethomepage.dev/description: S3 object storage and Garage web UI
-    gethomepage.dev/href: https://s3.sinlessgames.com/ui/
+    gethomepage.dev/name: Longhorn
+    gethomepage.dev/icon: si-longhorn
+    gethomepage.dev/description: Longhorn block storage management
+    gethomepage.dev/href: https://longhorn.sinlessgames.com
 spec:
   ingressClassName: istio
   rules:
-    - host: garage.sinlessgames.com
+    - host: longhorn.sinlessgames.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: garage-ui
+                name: longhorn-frontend
                 port:
-                  number: 3909
+                  number: 80

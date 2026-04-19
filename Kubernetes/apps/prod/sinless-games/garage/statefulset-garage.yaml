@@ -6,6 +6,9 @@ metadata:
 spec:
   serviceName: garage-headless
   replicas: 1
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
   selector:
     matchLabels:
       app.kubernetes.io/name: garage
@@ -172,7 +175,6 @@ spec:
               mountPath: /config
       volumes:
         - name: garage-config
-          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: garage-meta
