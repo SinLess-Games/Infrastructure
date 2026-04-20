@@ -4,19 +4,40 @@
     vault_runtime_token: "{{ vault_token | default('') }}"
   no_log: true
 
-- name: Check for Vault token file when explicit token is empty
+- name: Check for Vault token file
   ansible.builtin.stat:
     path: "{{ vault_token_file }}"
   register: vault_token_file_stat
-  when: vault_runtime_token | length == 0
+  when: vault_token_file is defined
 
 - name: Read Vault token file
   ansible.builtin.slurp:
     src: "{{ vault_token_file }}"
   register: vault_token_file_content
   when:
-    - vault_runtime_token | length == 0
+    - vault_token_file is defined
     - vault_token_file_stat.stat.exists | default(false)
+  no_log: true
+
+- name: Build Vault bootstrap token from token file
+  ansible.builtin.set_fact:
+    vault_bootstrap_token: >-
+      {{
+        (
+          vault_token_file_content.content
+          | b64decode
+          | from_json
+        ).root_token | default('')
+      }}
+  when:
+    - vault_token_file is defined
+    - vault_token_file_stat.stat.exists | default(false)
+  no_log: true
+
+- name: Initialize empty Vault bootstrap token when token file is unavailable
+  ansible.builtin.set_fact:
+    vault_bootstrap_token: ""
+  when: vault_bootstrap_token is not defined
   no_log: true
 
 - name: Build Vault runtime token from bootstrap file fallback
@@ -25,13 +46,7 @@
       {{
         vault_runtime_token
         if (vault_runtime_token | length > 0)
-        else (
-          (
-            vault_token_file_content.content
-            | b64decode
-            | from_json
-          ).root_token | default('')
-        )
+        else vault_bootstrap_token
       }}
   when: vault_runtime_token | length == 0
   no_log: true
@@ -43,20 +58,56 @@
     fail_msg: "A Vault token is required to load runtime secrets."
 
 - name: Read Vault documents from KV paths
-  ansible.builtin.uri:
-    url: "{{ vault_addr }}/v1/{{ vault_kv_mount }}/data/{{ item }}"
-    method: GET
-    headers:
-      X-Vault-Token: "{{ vault_runtime_token }}"
-    validate_certs: "{{ not (vault_skip_verify | bool) }}"
-    return_content: true
-    status_code: 200
-  loop: "{{ vault_kv_paths | default([]) }}"
-  loop_control:
-    label: "{{ item }}"
-  register: vault_runtime_document_results
-  changed_when: false
-  no_log: true
+  block:
+    - name: Read Vault documents from KV paths with runtime token
+      ansible.builtin.uri:
+        url: "{{ vault_addr }}/v1/{{ vault_kv_mount }}/data/{{ item }}"
+        method: GET
+        headers:
+          X-Vault-Token: "{{ vault_runtime_token }}"
+        validate_certs: "{{ not (vault_skip_verify | bool) }}"
+        return_content: true
+        status_code: 200
+      loop: "{{ vault_kv_paths | default([]) }}"
+      loop_control:
+        label: "{{ item }}"
+      register: vault_runtime_document_results
+      changed_when: false
+      no_log: true
+  rescue:
+    - name: Retry Vault document reads with bootstrap token fallback
+      when:
+        - vault_bootstrap_token | length > 0
+        - vault_bootstrap_token != vault_runtime_token
+      block:
+        - name: Switch Vault runtime token to bootstrap fallback
+          ansible.builtin.set_fact:
+            vault_runtime_token: "{{ vault_bootstrap_token }}"
+          no_log: true
+
+        - name: Read Vault documents from KV paths with bootstrap token
+          ansible.builtin.uri:
+            url: "{{ vault_addr }}/v1/{{ vault_kv_mount }}/data/{{ item }}"
+            method: GET
+            headers:
+              X-Vault-Token: "{{ vault_runtime_token }}"
+            validate_certs: "{{ not (vault_skip_verify | bool) }}"
+            return_content: true
+            status_code: 200
+          loop: "{{ vault_kv_paths | default([]) }}"
+          loop_control:
+            label: "{{ item }}"
+          register: vault_runtime_document_results
+          changed_when: false
+          no_log: true
+
+    - name: Fail when Vault documents cannot be read with any available token
+      ansible.builtin.fail:
+        msg: >-
+          Failed to read Vault runtime documents from {{ vault_addr }}/v1/{{ vault_kv_mount }}/data/*.
+          The explicit runtime token could not read the requested paths, and no working bootstrap
+          token fallback was available.
+      when: vault_runtime_document_results is not defined
 
 - name: Initialize vault runtime documents cache
   ansible.builtin.set_fact:
@@ -70,9 +121,7 @@
         vault_runtime_documents
         | combine(
             {
-              item.item: (
-                (((item.json | default({})).data | default({})).data | default({})
-              )
+              item.item: ((item.json | default({})).get('data', {}).get('data', {}))
             },
             recursive=True
           )

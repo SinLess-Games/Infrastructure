@@ -25,7 +25,7 @@ kubernetes_prod:
           node_fqdn: "rke2-prod-cp-03.prod.k8s.sinlessgames.com"
           proxmox_host: "pve-05"
         rke2-prod-cp-04:
-          ansible_host: "10.10.40.14"
+          ansible_host: "10.10.40.16"
           node_role: control-plane
           node_fqdn: "rke2-prod-cp-04.prod.k8s.sinlessgames.com"
           proxmox_host: "pve-04"

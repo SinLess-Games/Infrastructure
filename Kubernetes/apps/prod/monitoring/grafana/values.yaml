@@ -32,11 +32,11 @@ datasources:
         access: proxy
         jsonData:
           httpMethod: POST
-          manageAlerts: false
+          manageAlerts: true
       - name: Loki
         uid: loki
         type: loki
-        url: http://loki-gateway.monitoring.svc.cluster.local
+        url: http://loki-read.monitoring.svc.cluster.local:3100
         access: proxy
         jsonData:
           derivedFields:

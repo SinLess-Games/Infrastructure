@@ -57,14 +57,29 @@
       swapoff -a || true
       sed -i '/\sswap\s/d' /etc/fstab
 
-      parted -s "${root_disk}" rm 5 || true
-      parted -s "${root_disk}" rm 2 || true
-      growpart "${root_disk}" "${root_partnum}"
-      partprobe "${root_disk}" || true
-      udevadm settle || true
-      sleep 2
-      resize2fs "${root_device}"
-      changed=1
+      if parted -s "${root_disk}" print | awk '$1 == "5" { found = 1 } END { exit (found ? 0 : 1) }'; then
+        parted -s "${root_disk}" rm 5
+      fi
+
+      if parted -s "${root_disk}" print | awk '$1 == "2" { found = 1 } END { exit (found ? 0 : 1) }'; then
+        parted -s "${root_disk}" rm 2
+      fi
+
+      growpart_output="$(growpart "${root_disk}" "${root_partnum}" 2>&1)" || growpart_rc=$?
+      growpart_rc="${growpart_rc:-0}"
+
+      if [ "${growpart_rc}" -eq 0 ]; then
+        partprobe "${root_disk}" || true
+        udevadm settle || true
+        sleep 2
+        resize2fs "${root_device}"
+        changed=1
+      elif printf '%s\n' "${growpart_output}" | grep -q '^NOCHANGE:'; then
+        :
+      else
+        printf '%s\n' "${growpart_output}" >&2
+        exit "${growpart_rc}"
+      fi
     fi
 
     echo "changed=${changed}"
@@ -146,6 +161,34 @@
     path: /var/lib/rancher/rke2/server/manifests
     state: directory
     mode: "0755"
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+
+- name: Read persisted local RKE2 server token when available
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/rke2/server/token
+  register: kubernetes_role_local_server_token
+  no_log: true
+  failed_when: false
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+
+- name: Prefer persisted local RKE2 server token for control plane config
+  ansible.builtin.set_fact:
+    rke2_server_token: >-
+      {{
+        (
+          kubernetes_role_local_server_token.content
+          | b64decode
+          | trim
+          | regex_replace('^K[^:]+::server:', '')
+        )
+        if (
+          kubernetes_role_local_server_token is defined
+          and (kubernetes_role_local_server_token.failed | default(false)) == false
+          and (kubernetes_role_local_server_token.content | default('') | length > 0)
+        )
+        else rke2_server_token
+      }}
+  no_log: true
   when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
 
 - name: Render kube-vip manifest on control plane nodes

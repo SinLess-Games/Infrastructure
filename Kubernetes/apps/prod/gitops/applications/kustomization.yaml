@@ -13,6 +13,7 @@ resources:
   - local-kube-system-config.yaml
   - local-networking-config.yaml
   - local-monitoring-config.yaml
+  - local-monitoring-prometheus-rules.yaml
   - local-external-secrets-config.yaml
   - local-gitops-config.yaml
   - local-security-policies.yaml

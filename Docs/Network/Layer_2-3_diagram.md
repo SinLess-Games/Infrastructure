@@ -3,6 +3,7 @@
 This document describes the **logical network design** (L2 + L3) for the SinLess Games infrastructure as configured in the UniFi Controller.
 
 It includes:
+
 - VLAN IDs, names, and subnets (as per UniFi)
 - Gateway addressing & routing model
 - Layer 2 topology (switching, trunks)

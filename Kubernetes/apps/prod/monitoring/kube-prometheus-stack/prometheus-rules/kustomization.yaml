@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - argocd.yaml
+  - cert-manager.yaml
+  - cillium.yaml
+  - cloudflare-exporter.yaml
+  - istio.yaml
+  - keycloak-metrics.yaml
+  - nats-exporter.yaml
+  - postgres-exporter.yaml
+  - proxmox-ve.yaml
+  - redis-exporter.yaml
+  - self-monitoring.yaml
+  - vault.yaml

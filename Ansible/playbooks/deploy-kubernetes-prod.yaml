@@ -303,7 +303,11 @@
         rke2_server_token: >-
           {{
             (
-              kubernetes_bootstrap_token_file.stdout | trim
+              (
+                kubernetes_bootstrap_token_file.stdout
+                | trim
+                | regex_replace('^K[^:]+::server:', '')
+              )
               if (kubernetes_bootstrap_token_file.rc | default(1)) == 0
               and (kubernetes_bootstrap_token_file.stdout | default('') | trim | length > 0)
               else hostvars['localhost'].kubernetes_runtime_rke2_server_token

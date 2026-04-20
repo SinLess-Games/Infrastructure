@@ -60,7 +60,7 @@ kubernetes_master_ips:
   - "10.10.40.11"
   - "10.10.40.12"
   - "10.10.40.13"
-  - "10.10.40.14"
+  - "10.10.40.16"
   - "10.10.40.15"
 
 kubernetes_worker_ips:
@@ -97,7 +97,7 @@ kubernetes_nodes:
     - name: "rke2-prod-cp-04"
       hostname: "rke2-prod-cp-04"
       fqdn: "rke2-prod-cp-04.prod.k8s.sinlessgames.com"
-      ip: "10.10.40.14"
+      ip: "10.10.40.16"
       vmid: 403
       target_node: "pve-04"
       clone_template: "debian-13-template-pve-04"

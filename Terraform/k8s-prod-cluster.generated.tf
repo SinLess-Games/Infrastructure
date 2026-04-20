@@ -43,7 +43,7 @@ module "kubernetes_prod_control_plane" {
       target_node = "pve-04"
       storage     = "vm_disks_04"
       clone_template = "debian-13-template-pve-04"
-      ip_address  = "10.10.40.14"
+      ip_address  = "10.10.40.16"
       hostname    = "rke2-prod-cp-04"
       fqdn        = "rke2-prod-cp-04.prod.k8s.sinlessgames.com"
     },
