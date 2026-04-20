@@ -434,9 +434,21 @@
 - name: Unseal primary Vault node when needed
   ansible.builtin.shell: |
     set -euo pipefail
-    {% for key in hostvars['localhost'].vault_bootstrap_data.unseal_keys_b64[:vault_key_threshold | int] %}
-    {{ vault_bin_path }} operator unseal {{ key | quote }}
-    {% endfor %}
+    for key in {{ hostvars['localhost'].vault_bootstrap_data.unseal_keys_b64[:vault_key_threshold | int] | map('quote') | join(' ') }}; do
+      attempt=1
+      while true; do
+        if {{ vault_bin_path }} operator unseal "$key" >/dev/null 2>&1; then
+          break
+        fi
+        if [ "$attempt" -ge 3 ]; then
+          {{ vault_bin_path }} operator unseal "$key"
+          exit 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+      done
+      sleep 1
+    done
   args:
     executable: /bin/bash
   environment:
@@ -531,9 +543,21 @@
 - name: Unseal follower Vault nodes when needed
   ansible.builtin.shell: |
     set -euo pipefail
-    {% for key in hostvars['localhost'].vault_bootstrap_data.unseal_keys_b64[:vault_key_threshold | int] %}
-    {{ vault_bin_path }} operator unseal {{ key | quote }}
-    {% endfor %}
+    for key in {{ hostvars['localhost'].vault_bootstrap_data.unseal_keys_b64[:vault_key_threshold | int] | map('quote') | join(' ') }}; do
+      attempt=1
+      while true; do
+        if {{ vault_bin_path }} operator unseal "$key" >/dev/null 2>&1; then
+          break
+        fi
+        if [ "$attempt" -ge 3 ]; then
+          {{ vault_bin_path }} operator unseal "$key"
+          exit 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+      done
+      sleep 1
+    done
   args:
     executable: /bin/bash
   environment:

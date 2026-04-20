@@ -26,26 +26,22 @@ kubernetes_network:
 
 kubernetes_proxmox_target_nodes:
   - pve-01
-  - pve-04
-  - pve-05
 
 kubernetes_control_plane:
-  count: 3
+  count: 5
   vmid_start: 400
   name_prefix: "rke2-prod-cp"
   cpu_cores: 4
   cpu_sockets: 1
   memory_mb: 8192
-  disk_size: "100G"
+  disk_size: "150G"
   clone_template: "debian-13-template"
   target_nodes:
     - pve-01
-    - pve-04
-    - pve-05
   startup_order: 10
 
 kubernetes_workers:
-  count: 3
+  count: 6
   vmid_start: 410
   name_prefix: "rke2-prod-wk"
   cpu_cores: 6
@@ -55,8 +51,6 @@ kubernetes_workers:
   clone_template: "debian-13-template"
   target_nodes:
     - pve-01
-    - pve-04
-    - pve-05
   startup_order: 20
 
 kubernetes_master: "{{ kubernetes_control_plane }}"
@@ -66,11 +60,16 @@ kubernetes_master_ips:
   - "10.10.40.11"
   - "10.10.40.12"
   - "10.10.40.13"
+  - "10.10.40.14"
+  - "10.10.40.15"
 
 kubernetes_worker_ips:
   - "10.10.40.20"
   - "10.10.40.21"
   - "10.10.40.22"
+  - "10.10.40.23"
+  - "10.10.40.24"
+  - "10.10.40.25"
 
 kubernetes_nodes:
   control_plane:
@@ -93,6 +92,20 @@ kubernetes_nodes:
       fqdn: "rke2-prod-cp-03.prod.k8s.sinlessgames.com"
       ip: "10.10.40.13"
       vmid: 402
+      target_node: "pve-05"
+      clone_template: "debian-13-template-pve-05"
+    - name: "rke2-prod-cp-04"
+      hostname: "rke2-prod-cp-04"
+      fqdn: "rke2-prod-cp-04.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.14"
+      vmid: 403
+      target_node: "pve-04"
+      clone_template: "debian-13-template-pve-04"
+    - name: "rke2-prod-cp-05"
+      hostname: "rke2-prod-cp-05"
+      fqdn: "rke2-prod-cp-05.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.15"
+      vmid: 404
       target_node: "pve-05"
       clone_template: "debian-13-template-pve-05"
   workers:
@@ -125,6 +138,27 @@ kubernetes_nodes:
       vmid: 412
       target_node: "pve-05"
       clone_template: "debian-13-template-pve-05"
+    - name: "rke2-prod-wk-04"
+      hostname: "rke2-prod-wk-04"
+      fqdn: "rke2-prod-wk-04.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.23"
+      vmid: 413
+      target_node: "pve-04"
+      clone_template: "debian-13-template-pve-04"
+    - name: "rke2-prod-wk-05"
+      hostname: "rke2-prod-wk-05"
+      fqdn: "rke2-prod-wk-05.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.24"
+      vmid: 414
+      target_node: "pve-05"
+      clone_template: "debian-13-template-pve-05"
+    - name: "rke2-prod-wk-06"
+      hostname: "rke2-prod-wk-06"
+      fqdn: "rke2-prod-wk-06.prod.k8s.sinlessgames.com"
+      ip: "10.10.40.25"
+      vmid: 415
+      target_node: "pve-01"
+      clone_template: "debian-13-template-pve-01"
 
 kubernetes_platform:
   storage_class_default: "longhorn"

@@ -198,6 +198,30 @@
     TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
     TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
 
+- name: Destroy Terraform cluster resources
+  ansible.builtin.command:
+    argv:
+      - terraform
+      - -chdir={{ kubernetes_terraform_dir }}
+      - destroy
+      - -auto-approve
+      - -no-color
+      - -target=module.kubernetes_prod_control_plane
+      - -target=module.kubernetes_prod_workers
+  delegate_to: localhost
+  run_once: true
+  async: 14400
+  poll: 15
+  when:
+    - not kubernetes_operation.plan_only | bool
+    - kubernetes_operation.destroy | bool
+  environment:
+    TF_VAR_proxmox_api_url: "{{ kubernetes_deploy_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ kubernetes_terraform_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ kubernetes_terraform_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
+    TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
+
 - name: Configure GPU passthrough on dedicated worker VM
   ansible.builtin.command:
     argv:

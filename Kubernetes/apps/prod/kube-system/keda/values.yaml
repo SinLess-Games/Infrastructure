@@ -1,1 +1,10 @@
 watchNamespace: ""
+prometheus:
+  enabled: true
+  prometheusRule:
+    enabled: true
+
+opentelemetry:
+  uri: ""
+  operator:
+    enabled: true

@@ -59,22 +59,35 @@
     VAULT_RUNTIME_TOKEN: "{{ vault_runtime_token }}"
   no_log: true
 
+- name: Initialize vault runtime documents cache
+  ansible.builtin.set_fact:
+    vault_runtime_documents: {}
+  no_log: true
+
 - name: Cache Vault runtime documents keyed by source path
   ansible.builtin.set_fact:
     vault_runtime_documents: >-
       {{
-        dict(
-          (vault_runtime_document_results.results | default([]))
-          | map(attribute='item')
-          | zip(
-              (vault_runtime_document_results.results | default([]))
-              | map(attribute='stdout')
-              | map('from_json')
-              | map(attribute='data')
-              | map(attribute='data')
-            )
-        )
+        vault_runtime_documents
+        | combine(
+            {
+              item.item: (
+                (
+                  item.stdout
+                  | default('{}')
+                  | from_json
+                ).get('data', {}).get('data', {})
+              )
+            },
+            recursive=True
+          )
       }}
+  loop: "{{ vault_runtime_document_results.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - item.item is defined
+    - (item.stdout | default('') | trim | length) > 0
   no_log: true
 
 - name: Initialize merged Vault runtime secret values

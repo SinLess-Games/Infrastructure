@@ -36,6 +36,26 @@ module "kubernetes_prod_control_plane" {
       ip_address  = "10.10.40.13"
       hostname    = "rke2-prod-cp-03"
       fqdn        = "rke2-prod-cp-03.prod.k8s.sinlessgames.com"
+    },
+    {
+      name        = "rke2-prod-cp-04"
+      vmid        = 403
+      target_node = "pve-04"
+      storage     = "vm_disks_04"
+      clone_template = "debian-13-template-pve-04"
+      ip_address  = "10.10.40.14"
+      hostname    = "rke2-prod-cp-04"
+      fqdn        = "rke2-prod-cp-04.prod.k8s.sinlessgames.com"
+    },
+    {
+      name        = "rke2-prod-cp-05"
+      vmid        = 404
+      target_node = "pve-05"
+      storage     = "vm_disks_05"
+      clone_template = "debian-13-template-pve-05"
+      ip_address  = "10.10.40.15"
+      hostname    = "rke2-prod-cp-05"
+      fqdn        = "rke2-prod-cp-05.prod.k8s.sinlessgames.com"
     }
   ]
 
@@ -45,7 +65,7 @@ module "kubernetes_prod_control_plane" {
   cpu_cores                     = 4
   cpu_sockets                   = 1
   memory_mb                     = 8192
-  disk_size                     = "100G"
+  disk_size                     = "150G"
   network_bridge                = "vmbr40"
   vlan_id                       = 0
   gateway                       = "10.10.40.1"
@@ -98,6 +118,36 @@ module "kubernetes_prod_workers" {
       ip_address  = "10.10.40.22"
       hostname    = "rke2-prod-wk-03"
       fqdn        = "rke2-prod-wk-03.prod.k8s.sinlessgames.com"
+    },
+    {
+      name        = "rke2-prod-wk-04"
+      vmid        = 413
+      target_node = "pve-04"
+      storage     = "vm_disks_04"
+      clone_template = "debian-13-template-pve-04"
+      ip_address  = "10.10.40.23"
+      hostname    = "rke2-prod-wk-04"
+      fqdn        = "rke2-prod-wk-04.prod.k8s.sinlessgames.com"
+    },
+    {
+      name        = "rke2-prod-wk-05"
+      vmid        = 414
+      target_node = "pve-05"
+      storage     = "vm_disks_05"
+      clone_template = "debian-13-template-pve-05"
+      ip_address  = "10.10.40.24"
+      hostname    = "rke2-prod-wk-05"
+      fqdn        = "rke2-prod-wk-05.prod.k8s.sinlessgames.com"
+    },
+    {
+      name        = "rke2-prod-wk-06"
+      vmid        = 415
+      target_node = "pve-01"
+      storage     = "vm_disks_01"
+      clone_template = "debian-13-template-pve-01"
+      ip_address  = "10.10.40.25"
+      hostname    = "rke2-prod-wk-06"
+      fqdn        = "rke2-prod-wk-06.prod.k8s.sinlessgames.com"
     }
   ]
 

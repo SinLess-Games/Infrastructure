@@ -4,6 +4,8 @@ deployment:
   accessible_namespaces:
     - "**"
 external_services:
+  custom_dashboards:
+    enabled: true
   prometheus:
     url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
   grafana:
@@ -16,3 +18,4 @@ external_services:
     in_cluster_url: http://tempo-query-frontend.monitoring.svc.cluster.local:3100
 server:
   web_root: /kiali
+

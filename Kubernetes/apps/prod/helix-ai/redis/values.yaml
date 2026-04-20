@@ -9,14 +9,22 @@ master:
     storageClass: longhorn
     size: 20Gi
 replica:
-  replicaCount: 2
+  replicaCount: 3
   persistence:
     enabled: true
     storageClass: longhorn
     size: 20Gi
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
 sentinel:
   enabled: true
 metrics:
   enabled: true
   serviceMonitor:
     enabled: true
+useExternalDNS:
+  enabled: true
+      

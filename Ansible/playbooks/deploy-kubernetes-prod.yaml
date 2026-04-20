@@ -48,6 +48,14 @@
         - preflight
         - vault
 
+    - name: Cache runtime operation flags from CLI overrides
+      ansible.builtin.set_fact:
+        kubernetes_runtime_plan_only: "{{ kubernetes_plan_only | default(kubernetes_operation.plan_only) | bool }}"
+        kubernetes_runtime_destroy: "{{ kubernetes_destroy | default(kubernetes_operation.destroy) | bool }}"
+      tags:
+        - preflight
+        - deploy
+
     - name: Build runtime SSH key list from shared access document
       ansible.builtin.set_fact:
         kubernetes_runtime_ssh_keys: >-
@@ -131,6 +139,16 @@
         kubernetes_role_phases: ["deploy"]
         kubernetes_deploy_rke2_server_token: "{{ kubernetes_runtime_rke2_server_token }}"
         kubernetes_deploy_ssh_keys: "{{ kubernetes_runtime_ssh_keys }}"
+        kubernetes_operation:
+          plan_only: "{{ kubernetes_runtime_plan_only | default(false) | bool }}"
+          destroy: "{{ kubernetes_runtime_destroy | default(false) | bool }}"
+          force_apply: false
+          wait_for_ssh_timeout: 600
+          wait_for_kubeconfig_timeout: 300
+          wait_for_api_timeout: 600
+          wait_for_node_ready_timeout: 60
+          wait_for_node_ready_retries: 15
+          wait_for_node_ready_delay: 20
       tags:
         - deploy
         - infrastructure
@@ -159,6 +177,43 @@
         msg: >-
           Terraform has finished; waiting for Kubernetes production nodes to boot
           and accept SSH before configuration begins.
+      when:
+        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
+        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
+      tags:
+        - wait
+        - kubernetes
+
+    - name: Remediate SSH authorized_keys via Proxmox guest agent before SSH wait
+      ansible.builtin.shell: |
+        set -euo pipefail
+        ssh \
+          -o ConnectTimeout=5 \
+          -o BatchMode=yes \
+          -o StrictHostKeyChecking=no \
+          -o UserKnownHostsFile=/dev/null \
+          root@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] }} \
+          /usr/sbin/qm guest exec {{ item.vmid }} -- /bin/bash -lc {{ ssh_key_remediation_script | quote }}
+      vars:
+        kubernetes_node_login_user: "{{ hostvars[item.name].ansible_user | default(kubernetes_ansible.default_user | default('sinless777')) }}"
+        ssh_key_remediation_script: |
+          install -d -m 700 -o {{ kubernetes_node_login_user }} -g {{ kubernetes_node_login_user }} /home/{{ kubernetes_node_login_user }}/.ssh
+          cat > /home/{{ kubernetes_node_login_user }}/.ssh/authorized_keys <<'EOF'
+          {{ hostvars['localhost'].kubernetes_runtime_ssh_keys | join('\n') }}
+          EOF
+          chown {{ kubernetes_node_login_user }}:{{ kubernetes_node_login_user }} /home/{{ kubernetes_node_login_user }}/.ssh/authorized_keys
+          chmod 600 /home/{{ kubernetes_node_login_user }}/.ssh/authorized_keys
+      loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+      loop_control:
+        label: "{{ item.name }}@{{ item.target_node }}"
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+      failed_when: false
+      no_log: true
+      when:
+        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
+        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - wait
         - kubernetes
@@ -168,12 +223,18 @@
         delay: 5
         timeout: "{{ kubernetes_wait_for_ssh_timeout | default(900) }}"
         connect_timeout: 5
+      when:
+        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
+        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - wait
         - kubernetes
 
     - name: Gather facts after SSH is available
       ansible.builtin.setup:
+      when:
+        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
+        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - wait
         - kubernetes
@@ -202,6 +263,9 @@
       ansible.builtin.debug:
         msg: >-
           Kubernetes nodes are reachable; beginning OS and RKE2 configuration.
+      when:
+        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
+        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - configure
         - kubernetes
@@ -306,6 +370,9 @@
           - 10.10.10.1
           - 1.1.1.1
           - 1.0.0.1
+      when:
+        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
+        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       failed_when: false
       tags:
         - dns
@@ -381,6 +448,9 @@
         path: "{{ kubernetes_generated_env_dir }}"
         state: directory
         mode: "0755"
+      when:
+        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
+        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - kubeconfig
         - kubernetes
@@ -494,7 +564,10 @@
   tasks:
     - name: Skip GitOps bootstrap when disabled
       ansible.builtin.meta: end_play
-      when: not (kubernetes_gitops.bootstrap_enabled | default(true) | bool)
+      when:
+        - not (kubernetes_gitops.bootstrap_enabled | default(true) | bool) or
+          (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool) or
+          (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - apps
         - gitops

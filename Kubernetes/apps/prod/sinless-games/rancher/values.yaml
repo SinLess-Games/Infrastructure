@@ -1,6 +1,5 @@
 hostname: rancher.sinlessgames.com
-bootstrapPassword: "uP&IFLYmw^^zSTix!$ExOo#0jwxw"
-replicas: 1
+replicas: 3
 tls: external
 ingress:
   enabled: false

@@ -10,6 +10,10 @@ config:
         enabled: true
         size: 100Gi
         storageClassName: longhorn
+  mqtt:
+    enabled: true
+  websocket:
+    enabled: true
 podDisruptionBudget:
   enabled: true
 promExporter:

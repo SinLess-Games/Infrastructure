@@ -47,7 +47,7 @@
 
     root_device="$(findmnt -n -o SOURCE /)"
     root_disk="/dev/$(lsblk -no PKNAME "${root_device}")"
-    root_partnum="$(lsblk -no PARTNUM "${root_device}")"
+    root_partnum="$(cat "/sys/class/block/$(basename "${root_device}")/partition")"
     root_size_bytes="$(blockdev --getsize64 "${root_device}")"
     target_size_gb="{{ ((inventory_hostname in groups[kubernetes_rke2_servers_group_name]) | ternary(kubernetes_control_plane.disk_size, kubernetes_workers.disk_size)) | regex_search('[0-9]+') }}"
     target_size_bytes="$(( target_size_gb * 1024 * 1024 * 1024 ))"

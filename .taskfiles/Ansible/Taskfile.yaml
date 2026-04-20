@@ -332,6 +332,32 @@ tasks:
           {{.CLI_ARGS}}
         test -f .outputs/kubernetes/prod/kubeconfig
         echo "Saved kubeconfig: .outputs/kubernetes/prod/kubeconfig"
+
+  k8s:prod:plan:
+    desc: "Show Terraform plan for prod cluster (no apply)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-kubernetes-prod.yaml \
+          -e kubernetes_plan_only=true \
+          {{.CLI_ARGS}}
+
+  k8s:prod:destroy:
+    desc: "Destroy prod cluster VMs (Terraform destroy only, no cluster ops)"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-kubernetes-prod.yaml \
+          -e kubernetes_destroy=true \
+          {{.CLI_ARGS}}
   
   k8s:prod:kubeconfig:
     desc: "Print kubeconfig path for production cluster"

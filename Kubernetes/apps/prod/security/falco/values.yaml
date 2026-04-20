@@ -11,3 +11,8 @@ falcosidekick:
   config:
     discord:
       webhookurl: ${DISCORD_ALERT_WEBHOOK_URL}
+metrics:
+  enabled: true
+grafana:
+  dashboards:
+    enabled: true

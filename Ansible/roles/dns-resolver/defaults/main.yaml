@@ -22,7 +22,6 @@ dns_servers:
 dns_test_domains:
   - google.com
   - cloudflare.com
-  - sinlessgames.com
 
 # Search domains
 dns_search_domains:

@@ -7,4 +7,12 @@ cleanupController:
 reportsController:
   replicas: 2
 grafana:
-  enabled: false
+  enabled: true
+certManager:
+  enabled: true
+serviceMonitor:
+  enabled: true
+tracing:
+  enabled: true
+  address: ""
+  port: 

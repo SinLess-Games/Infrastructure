@@ -17,6 +17,8 @@ prometheus:
   enabled: true
 envoy:
   enabled: false
+dashboards:
+  enabled: true
 securityContext:
   capabilities:
     ciliumAgent:

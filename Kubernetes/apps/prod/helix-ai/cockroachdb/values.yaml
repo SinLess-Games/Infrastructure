@@ -8,6 +8,10 @@ storage:
 conf:
   cache: 4Gi
   max-sql-memory: 4Gi
+visus:
+  enabled: true
+operator:
+  enabled: true
 tls:
   enabled: true
 podDisruptionBudget:
