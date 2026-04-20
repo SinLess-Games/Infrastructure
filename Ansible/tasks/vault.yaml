@@ -43,20 +43,19 @@
     fail_msg: "A Vault token is required to load runtime secrets."
 
 - name: Read Vault documents from KV paths
-  ansible.builtin.shell: |
-    set -euo pipefail
-    curl --silent --show-error {{ (vault_skip_verify | bool) | ternary('--insecure', '') }} \
-      --header "X-Vault-Token: ${VAULT_RUNTIME_TOKEN}" \
-      "{{ vault_addr }}/v1/{{ vault_kv_mount }}/data/{{ item }}"
-  args:
-    executable: /bin/bash
+  ansible.builtin.uri:
+    url: "{{ vault_addr }}/v1/{{ vault_kv_mount }}/data/{{ item }}"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ vault_runtime_token }}"
+    validate_certs: "{{ not (vault_skip_verify | bool) }}"
+    return_content: true
+    status_code: 200
   loop: "{{ vault_kv_paths | default([]) }}"
   loop_control:
     label: "{{ item }}"
   register: vault_runtime_document_results
   changed_when: false
-  environment:
-    VAULT_RUNTIME_TOKEN: "{{ vault_runtime_token }}"
   no_log: true
 
 - name: Initialize vault runtime documents cache
@@ -72,11 +71,7 @@
         | combine(
             {
               item.item: (
-                (
-                  item.stdout
-                  | default('{}')
-                  | from_json
-                ).get('data', {}).get('data', {})
+                (((item.json | default({})).data | default({})).data | default({})
               )
             },
             recursive=True
@@ -87,7 +82,7 @@
     label: "{{ item.item }}"
   when:
     - item.item is defined
-    - (item.stdout | default('') | trim | length) > 0
+    - item.json is defined
   no_log: true
 
 - name: Initialize merged Vault runtime secret values
