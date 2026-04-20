@@ -14,8 +14,8 @@
 # Core Ansible
 # -----------------------------------------------------------------------------
 
-ansible==10.1.0                # Meta-package (includes ansible-core)
-ansible-core==2.17.3           # Explicit pin for execution engine
+ansible==12.2.0                # Meta-package (includes ansible-core)
+ansible-core==2.17.7rc1           # Explicit pin for execution engine
 ansible-lint==24.6.1           # Best-practice enforcement
 ansible-creator==24.6.1        # Role & collection scaffolding
 
@@ -23,8 +23,8 @@ ansible-creator==24.6.1        # Role & collection scaffolding
 # Networking / Infra APIs
 # -----------------------------------------------------------------------------
 
-requests==2.32.4               # HTTP client (shared dependency)
-urllib3==2.2.3                 # Explicit pin to avoid indirect breakage
+requests==2.33.0               # HTTP client (shared dependency)
+urllib3==2.6.3                 # Explicit pin to avoid indirect breakage
 netaddr==1.3.0                 # IP/CIDR manipulation
 cloudflare==3.0.1              # Cloudflare API client (DNS, Tunnels)
 
@@ -39,7 +39,7 @@ proxmoxer==2.0.1               # Proxmox VE API client
 # Cryptography / Auth
 # -----------------------------------------------------------------------------
 
-cryptography==45.0.5           # TLS, SSH, PKI (community.crypto)
+cryptography==46.0.6           # TLS, SSH, PKI (community.crypto)
 passlib[bcrypt]==1.7.4         # Secure password hashing
 
 # -----------------------------------------------------------------------------
