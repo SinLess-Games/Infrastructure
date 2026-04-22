@@ -2,14 +2,18 @@ admin:
   existingSecret: grafana-admin
   userKey: admin-user
   passwordKey: grafana_admin_password
+
 plugins:
   - blackcowmoo-googleanalytics-datasource
   - grafana-googlesheets-datasource
   - marcusolsson-calendar-panel
+
 deploymentStrategy:
   type: Recreate
+
 persistence:
   enabled: false
+
 datasources:
   datasources.yaml:
     apiVersion: 1
@@ -19,9 +23,11 @@ datasources:
         type: prometheus
         url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
         access: proxy
+        isDefault: true
         jsonData:
           httpMethod: POST
           manageAlerts: true
+
       - name: Loki
         uid: loki
         type: loki
@@ -33,6 +39,7 @@ datasources:
               matcherRegex: '"traceid":"([a-fA-F0-9]+)"'
               datasourceUid: tempo
               url: '$${__value.raw}'
+
       - name: Tempo
         uid: tempo
         type: tempo
@@ -57,23 +64,25 @@ datasources:
             hide: false
           nodeGraph:
             enabled: true
+
       - name: Pyroscope
         uid: pyroscope
         type: grafana-pyroscope-datasource
         url: http://pyroscope.monitoring.svc.cluster.local:4040
         access: proxy
+
       - name: Mimir
         uid: mimir
         type: prometheus
         url: http://mimir-nginx.monitoring.svc.cluster.local/prometheus
         access: proxy
-        isDefault: true
         jsonData:
           httpMethod: POST
           manageAlerts: false
           exemplarTraceIdDestinations:
             - datasourceUid: tempo
               name: trace_id
+
       - name: Alertmanager
         uid: alertmanager
         type: alertmanager
@@ -82,39 +91,77 @@ datasources:
         jsonData:
           implementation: prometheus
           handleGrafanaManagedAlerts: true
+
 env:
+  # Postgres Database Configuration
   GF_SERVER_ROOT_URL: https://grafana.sinlessgames.com
   GF_DATABASE_TYPE: postgres
   GF_DATABASE_HOST: 10.10.40.50:5432
   GF_DATABASE_NAME: grafana
   GF_DATABASE_USER: grafana
   GF_DATABASE_SSL_MODE: disable
+
 envValueFrom:
   GF_DATABASE_PASSWORD:
     secretKeyRef:
       name: grafana-admin
       key: postgres_grafana_password
+  DISCORD_WEBHOOK_URL:
+    secretKeyRef:
+      name: grafana-admin
+      key: discord_alert_webhook_url
+
 extraConfigmapMounts:
   - name: grafana-nsswitch
     configMap: grafana-nsswitch
     mountPath: /etc/nsswitch.conf
     subPath: nsswitch.conf
     readOnly: true
+  - name: grafana-alerting
+    configMap: grafana-alerting
+    mountPath: /etc/grafana/provisioning/alerting
+    readOnly: true
+
 grafana.ini:
   users:
     viewers_can_edit: false
   panels:
     disable_sanitize_html: true
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: sidecarProvider
+        orgId: 1
+        folder: ""
+        type: file
+        disableDeletion: false
+        allowUiUpdates: false
+        updateIntervalSeconds: 30
+        options:
+          path: /dashboards
+          foldersFromFilesStructure: true
+
 sidecar:
   dashboards:
     enabled: true
-    searchNamespace: monitoring
+    searchNamespace: ALL
     label: grafana_dashboard
+    labelValue: "1"
+    folder: /dashboards
+    folderAnnotation: grafana_folder
     provider:
       name: sidecarProvider
-      folder: Platform
       orgid: 1
+      folder: ""
       disableDelete: false
       allowUiUpdates: false
+      foldersFromFilesStructure: true
+
 serviceMonitor:
   enabled: true
+
+serviceAccount:
+  create: true
+  name: grafana

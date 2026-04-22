@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: homepage
     app.kubernetes.io/part-of: sinless-games-platform
 spec:
-  replicas: 1
+  replicas: 3
   revisionHistoryLimit: 3
   selector:
     matchLabels:
@@ -20,6 +20,15 @@ spec:
     spec:
       serviceAccountName: homepage
       automountServiceAccountToken: true
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        searches:
+          - sinless-games.svc.cluster.local
+          - svc.cluster.local
+          - cluster.local
+        options:
+          - name: ndots
+            value: "1"
       securityContext:
         fsGroup: 1000
         seccompProfile:
@@ -34,7 +43,13 @@ spec:
                 fieldRef:
                   fieldPath: status.podIP
             - name: HOMEPAGE_ALLOWED_HOSTS
-              value: "$(MY_POD_IP):3000,homepage.sinlessgames.com,homepage.sinless-games.svc,homepage.sinless-games.svc.cluster.local,homepage.sinless-games,localhost:3000,127.0.0.1:3000,0.0.0.0:3000,0.0.0.0:3001"
+              value: "$(MY_POD_IP):3000,homepage.sinlessgames.com,homepage.sinless-games.svc,homepage.sinless-games.svc.cluster.local,homepage.sinless-games,localhost:3000,127.0.0.1:3000,0.0.0.0:3000,0.0.0.0:3001,10.10.10.10"
+            - name: KUBERNETES_SERVICE_HOST
+              value: 10.10.40.10
+            - name: KUBERNETES_SERVICE_PORT
+              value: "6443"
+            - name: KUBERNETES_SERVICE_PORT_HTTPS
+              value: "6443"
           ports:
             - name: http
               containerPort: 3000
@@ -83,6 +98,9 @@ spec:
               mountPath: /app/config/kubernetes.yaml
               subPath: kubernetes.yaml
             - name: homepage-config
+              mountPath: /app/config/proxmox.yaml
+              subPath: proxmox.yaml
+            - name: homepage-config
               mountPath: /app/config/services.yaml
               subPath: services.yaml
             - name: homepage-config
@@ -96,6 +114,6 @@ spec:
       volumes:
         - name: homepage-config
           configMap:
-            name: homepage
+            name: homepage-config
         - name: homepage-logs
           emptyDir: {}

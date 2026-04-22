@@ -8,3 +8,5 @@ resources:
   - service-homepage.yaml
   - ingress-homepage.yaml
   - virtualservice-homepage.yaml
+  - destinationrule-homepage.yaml
+  - networkpolicy-homepage.yaml

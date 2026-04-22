@@ -19,3 +19,4 @@ resources:
   - serviceentry-vault.yaml
   - virtualservice-observability.yaml
   - dashboards
+  - grafana-alerting.yaml

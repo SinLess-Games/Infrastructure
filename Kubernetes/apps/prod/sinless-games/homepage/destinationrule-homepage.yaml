@@ -1,0 +1,10 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: homepage-plain-http
+  namespace: sinless-games
+spec:
+  host: homepage.sinless-games.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE

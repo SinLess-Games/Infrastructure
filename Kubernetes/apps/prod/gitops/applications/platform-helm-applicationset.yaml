@@ -411,6 +411,8 @@ spec:
               configs:
                 params:
                   server.insecure: true
+                secret:
+                  argocdServerAdminPassword: '$2b$10$vJGbHySXxfGK96qjNX5aeO8GcoQm3Db.RAJs7yF3QgqoLqG4FuCMK'
             syncWave: "13"
           - name: argo-rollouts
             namespace: gitops

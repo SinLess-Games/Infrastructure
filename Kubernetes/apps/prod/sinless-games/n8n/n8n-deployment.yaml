@@ -18,6 +18,15 @@ spec:
         app: n8n
     spec:
       enableServiceLinks: false
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        searches:
+          - sinless-games.svc.cluster.local
+          - svc.cluster.local
+          - cluster.local
+        options:
+          - name: ndots
+            value: "1"
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -79,6 +88,13 @@ spec:
             readOnlyRootFilesystem: false
             runAsNonRoot: true
             runAsUser: 1000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
           volumeMounts:
             - name: data
               mountPath: /home/node/.n8n

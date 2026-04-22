@@ -25,6 +25,7 @@ resources:
   - local-sinless-games-mesh.yaml
   - local-sinless-games-garage.yaml
   - local-sinless-games-homepage.yaml
+  - local-sinless-games-n8n.yaml
   - local-platform-examples.yaml
   - actions-runner-controller.yaml
   - cilium.yaml

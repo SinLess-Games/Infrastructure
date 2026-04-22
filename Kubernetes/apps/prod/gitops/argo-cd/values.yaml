@@ -2,7 +2,7 @@ configs:
   params:
     server.insecure: true
   secret:
-    argocdServerAdminPassword: ${ARGOCD_ADMIN_PASSWORD_BCRYPT}
+    argocdServerAdminPassword: '$2b$10$vJGbHySXxfGK96qjNX5aeO8GcoQm3Db.RAJs7yF3QgqoLqG4FuCMK'
 server:
   ingress:
     enabled: false
