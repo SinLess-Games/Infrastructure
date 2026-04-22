@@ -1,0 +1,10 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: argocd-ui-plain-http
+  namespace: gitops
+spec:
+  host: argo-cd-argocd-server.gitops.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE

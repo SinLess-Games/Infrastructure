@@ -100,7 +100,7 @@ spec:
             targetRevision: 1.15.0
             valuesPath: Kubernetes/apps/prod/networking/external-dns/values.yaml
             inlineValues: ""
-            syncWave: "4"
+            syncWave: "10"
           - name: kube-prometheus-stack
             namespace: monitoring
             chartRepo: https://prometheus-community.github.io/helm-charts
@@ -182,7 +182,7 @@ spec:
               monitoring:
                 serviceMonitor:
                   enabled: true
-            syncWave: "8"
+            syncWave: "22"
           - name: mimir
             namespace: monitoring
             chartRepo: https://grafana.github.io/helm-charts
@@ -253,7 +253,7 @@ spec:
               metaMonitoring:
                 serviceMonitor:
                   enabled: true
-            syncWave: "8"
+            syncWave: "22"
           - name: tempo
             namespace: monitoring
             chartRepo: https://grafana.github.io/helm-charts
@@ -314,7 +314,7 @@ spec:
                       name: tempo-s3-credentials
                 extraArgs:
                   - -config.expand-env=true
-            syncWave: "8"
+            syncWave: "22"
           - name: pyroscope
             namespace: monitoring
             chartRepo: https://grafana.github.io/helm-charts
@@ -322,23 +322,45 @@ spec:
             targetRevision: 1.12.0
             valuesPath: Kubernetes/apps/prod/monitoring/pyroscope/values.yaml
             inlineValues: ""
-            syncWave: "8"
+            syncWave: "22"
           - name: grafana
             namespace: monitoring
             chartRepo: https://grafana.github.io/helm-charts
             chart: grafana
             targetRevision: 8.8.2
             valuesPath: Kubernetes/apps/prod/monitoring/grafana/values.yaml
-            inlineValues: ""
-            syncWave: "9"
+            inlineValues: |
+              plugins:
+                - blackcowmoo-googleanalytics-datasource
+                - grafana-googlesheets-datasource
+                - marcusolsson-calendar-panel
+              deploymentStrategy:
+                type: Recreate
+              persistence:
+                enabled: false
+              env:
+                GF_DATABASE_TYPE: postgres
+                GF_DATABASE_HOST: 10.10.40.50:5432
+                GF_DATABASE_NAME: grafana
+                GF_DATABASE_USER: grafana
+                GF_DATABASE_SSL_MODE: disable
+              envValueFrom:
+                GF_DATABASE_PASSWORD:
+                  secretKeyRef:
+                    name: grafana-admin
+                    key: postgres_grafana_password
+            syncWave: "23"
           - name: opentelemetry-operator
             namespace: monitoring
             chartRepo: https://open-telemetry.github.io/opentelemetry-helm-charts
             chart: opentelemetry-operator
             targetRevision: 0.74.2
             valuesPath: Kubernetes/apps/prod/monitoring/opentelemetry-operator/values.yaml
-            inlineValues: ""
-            syncWave: "9"
+            inlineValues: |
+              manager:
+                serviceMonitor:
+                  enabled: false
+            syncWave: "23"
           - name: kiali
             namespace: monitoring
             chartRepo: https://kiali.org/helm-charts
@@ -346,7 +368,7 @@ spec:
             targetRevision: 2.24.0
             valuesPath: Kubernetes/apps/prod/monitoring/kiali/values.yaml
             inlineValues: ""
-            syncWave: "10"
+            syncWave: "24"
           - name: external-secrets
             namespace: security
             chartRepo: https://charts.external-secrets.io
@@ -354,7 +376,7 @@ spec:
             targetRevision: 0.10.5
             valuesPath: Kubernetes/apps/prod/security/external-secrets/values.yaml
             inlineValues: ""
-            syncWave: "4"
+            syncWave: "-5"
           - name: falco
             namespace: security
             chartRepo: https://falcosecurity.github.io/charts
@@ -369,7 +391,15 @@ spec:
             chart: velero
             targetRevision: 8.7.0
             valuesPath: Kubernetes/apps/prod/security/velero/values.yaml
-            inlineValues: ""
+            inlineValues: |
+              upgradeCRDs: false
+              initContainers:
+                - name: velero-plugin-for-aws
+                  image: velero/velero-plugin-for-aws:v1.11.0
+                  imagePullPolicy: IfNotPresent
+                  volumeMounts:
+                    - mountPath: /target
+                      name: plugins
             syncWave: "12"
           - name: argo-cd
             namespace: gitops
@@ -377,7 +407,10 @@ spec:
             chart: argo-cd
             targetRevision: 7.7.11
             valuesPath: Kubernetes/apps/prod/gitops/argo-cd/values.yaml
-            inlineValues: ""
+            inlineValues: |
+              configs:
+                params:
+                  server.insecure: true
             syncWave: "13"
           - name: argo-rollouts
             namespace: gitops

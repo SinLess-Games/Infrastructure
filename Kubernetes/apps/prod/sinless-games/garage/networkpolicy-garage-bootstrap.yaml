@@ -39,6 +39,10 @@ spec:
             cidr: 10.10.40.12/32
         - ipBlock:
             cidr: 10.10.40.13/32
+        - ipBlock:
+            cidr: 10.10.40.15/32
+        - ipBlock:
+            cidr: 10.10.40.16/32
       ports:
         - protocol: TCP
           port: 6443

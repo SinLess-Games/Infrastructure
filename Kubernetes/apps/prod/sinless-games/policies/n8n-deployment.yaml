@@ -4,7 +4,9 @@ metadata:
   name: n8n
   namespace: sinless-games
 spec:
-  replicas: 2
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: n8n
@@ -15,7 +17,17 @@ spec:
       labels:
         app: n8n
     spec:
+      enableServiceLinks: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
       securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
@@ -23,25 +35,23 @@ spec:
         - name: n8n
           image: docker.n8n.io/n8nio/n8n:1.77.3
           env:
-            - name: DB_TYPE
-              value: postgresdb
-            - name: DB_POSTGRESDB_HOST
-              value: postgres-rw.postgres.svc.cluster.local
-            - name: DB_POSTGRESDB_DATABASE
-              value: n8n
-            - name: DB_POSTGRESDB_USER
-              value: n8n
-            - name: DB_POSTGRESDB_PASSWORD
+            - name: N8N_HOST
+              value: n8n.sinlessgames.com
+            - name: N8N_PROTOCOL
+              value: https
+            - name: N8N_EDITOR_BASE_URL
+              value: https://n8n.sinlessgames.com
+            - name: WEBHOOK_URL
+              value: https://n8n.sinlessgames.com/
+            - name: N8N_BASIC_AUTH_ACTIVE
+              value: "true"
+            - name: N8N_BASIC_AUTH_USER
+              value: admin
+            - name: N8N_BASIC_AUTH_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: sinless-games-workload-secrets
                   key: n8n_basic_auth_password
-            - name: QUEUE_BULL_REDIS_HOST
-              value: redis-master.helix-ai.svc.cluster.local
-            - name: N8N_HOST
-              value: n8n.helixaibot.com
-            - name: N8N_PROTOCOL
-              value: https
           ports:
             - containerPort: 5678
           readinessProbe:
@@ -101,7 +111,7 @@ metadata:
     gethomepage.dev/name: n8n
     gethomepage.dev/icon: si-n8n
     gethomepage.dev/description: Workflow automation
-    gethomepage.dev/href: https://n8n.helixaibot.com
+    gethomepage.dev/href: https://n8n.sinlessgames.com
 spec:
   selector:
     app: n8n

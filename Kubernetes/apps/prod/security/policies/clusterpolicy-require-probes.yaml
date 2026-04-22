@@ -18,6 +18,8 @@ spec:
               namespaces:
                 - networking
                 - monitoring
+                - istio-system
+                - security
           - resources:
               kinds:
                 - Pod
@@ -25,6 +27,14 @@ spec:
                 - n8n*
               namespaces:
                 - sinless-games
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - gitops
+              selector:
+                matchLabels:
+                  app.kubernetes.io/name: actions-runner-controller
       validate:
         message: Liveness and readiness probes are required for all containers.
         foreach:

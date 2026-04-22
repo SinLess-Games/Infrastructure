@@ -20,6 +20,13 @@ spec:
       annotations:
         sidecar.istio.io/inject: "false"
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
       securityContext:
         fsGroup: 1000
         seccompProfile:
@@ -78,6 +85,7 @@ spec:
             capabilities:
               drop:
                 - ALL
+            privileged: false
             readOnlyRootFilesystem: false
             runAsGroup: 1000
             runAsNonRoot: true
@@ -162,6 +170,7 @@ spec:
             capabilities:
               drop:
                 - ALL
+            privileged: false
             readOnlyRootFilesystem: false
             runAsGroup: 1000
             runAsNonRoot: true

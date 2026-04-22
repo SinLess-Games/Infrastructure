@@ -16,7 +16,6 @@ data:
     showStats: true
     theme: dark
     color: slate
-    headerStyle: clean
     cardBlur: sm
     groupsInitiallyCollapsed: true
     headerStyle: boxed
@@ -330,7 +329,7 @@ data:
             icon: si-grafana
     - Automation:
         - n8n:
-            href: https://n8n.helixaibot.com
+            href: https://n8n.sinlessgames.com
             description: Workflow automation
             icon: n8n.png
         - Mailu:

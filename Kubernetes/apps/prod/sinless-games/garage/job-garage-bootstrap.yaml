@@ -19,6 +19,13 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: garage-bootstrap
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -33,16 +40,34 @@ spec:
               set -eu
 
               garage() {
-                kubectl -n sinless-games exec garage-0 -- /garage "$@"
+                kubectl -n sinless-games exec garage-0 -c garage -- /garage "$@"
               }
 
-              until garage status >/dev/null 2>&1; do
+              until status="$(garage status 2>&1)"; do
                 echo "waiting for garage admin api..."
+                echo "$status"
                 sleep 5
               done
 
+              if echo "$status" | grep -q "NO ROLE ASSIGNED"; then
+                node_id="$(echo "$status" | awk '/NO ROLE ASSIGNED/ {print $1; exit}')"
+                echo "assigning garage layout role to ${node_id}"
+                garage layout assign -z prod -c 20G "$node_id"
+
+                layout_version="$(garage layout show | awk '/Current cluster layout version:/ {print $5; exit}')"
+                next_layout_version="$((layout_version + 1))"
+                echo "applying garage layout version ${next_layout_version}"
+                garage layout apply --version "$next_layout_version"
+
+                until garage status >/dev/null 2>&1; do
+                  echo "waiting for garage layout to become active..."
+                  sleep 5
+                done
+              fi
+
               ensure_bucket() {
                 bucket="$1"
+                echo "ensuring bucket ${bucket}"
                 if ! garage bucket info "$bucket" >/dev/null 2>&1; then
                   garage bucket create "$bucket"
                 fi
@@ -52,6 +77,7 @@ spec:
                 name="$1"
                 key_id="$2"
                 secret_key="$3"
+                echo "ensuring key ${name}"
                 if ! garage key info "$key_id" >/dev/null 2>&1; then
                   garage key import --yes -n "$name" "$key_id" "$secret_key"
                 fi
@@ -60,6 +86,7 @@ spec:
               grant_bucket() {
                 bucket="$1"
                 key_ref="$2"
+                echo "granting ${key_ref} access to ${bucket}"
                 garage bucket allow "$bucket" --key "$key_ref" --read --write --owner >/dev/null
               }
 
@@ -221,6 +248,6 @@ spec:
               drop:
                 - ALL
             privileged: false
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false
             runAsNonRoot: true
             runAsUser: 1001

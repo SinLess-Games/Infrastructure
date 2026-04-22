@@ -1,6 +1,14 @@
 credentials:
   useSecret: true
   existingSecret: velero-s3-credentials
+upgradeCRDs: false
+initContainers:
+  - name: velero-plugin-for-aws
+    image: velero/velero-plugin-for-aws:v1.11.0
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
 configuration:
   backupStorageLocation:
     - name: default

@@ -6,3 +6,4 @@ resources:
   - authorizationpolicy-ingress-allow.yaml
   - destinationrule-default.yaml
   - gateway-shared.yaml
+  - service-cloudflared-origin-compat.yaml

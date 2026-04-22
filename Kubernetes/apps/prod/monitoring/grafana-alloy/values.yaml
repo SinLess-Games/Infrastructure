@@ -15,7 +15,7 @@ alloy:
       }
       prometheus.scrape "cadvisor" {
         targets = [{
-          __address__ = "cadvisor.kube-system.svc.cluster.local:8080",
+          __address__ = "cadvisor.monitoring.svc.cluster.local:8080",
           job = "cadvisor",
         }]
         forward_to = [prometheus.remote_write.mimir.receiver]

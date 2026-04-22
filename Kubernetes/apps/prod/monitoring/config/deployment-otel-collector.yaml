@@ -77,7 +77,7 @@ data:
               scrape_interval: 30s
               static_configs:
                 - targets:
-                    - cadvisor.kube-system.svc.cluster.local:8080
+                    - cadvisor.monitoring.svc.cluster.local:8080
     processors:
       memory_limiter:
         check_interval: 1s

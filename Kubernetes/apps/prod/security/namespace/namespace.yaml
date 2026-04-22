@@ -5,6 +5,6 @@ metadata:
   labels:
     kubernetes.io/metadata.name: security
     istio-injection: disabled
-    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/audit: restricted
     topology.kubernetes.io/environment: prod

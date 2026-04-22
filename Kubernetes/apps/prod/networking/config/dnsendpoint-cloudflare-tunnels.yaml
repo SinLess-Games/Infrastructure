@@ -23,6 +23,16 @@ spec:
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
+    - dnsName: argocd.sinlessgames.com
+      recordTTL: 60
+      recordType: CNAME
+      targets:
+        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
+    - dnsName: n8n.sinlessgames.com
+      recordTTL: 60
+      recordType: CNAME
+      targets:
+        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
     - dnsName: external.sinlessgames.com
       recordTTL: 60
       recordType: CNAME

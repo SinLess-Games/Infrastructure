@@ -153,6 +153,14 @@ vault_user_policies:
       capabilities = ["read", "list"]
     }
 
+    path "secrets/data/cloudflare/tunnel/*" {
+      capabilities = ["read"]
+    }
+
+    path "secrets/metadata/cloudflare/tunnel/*" {
+      capabilities = ["read", "list"]
+    }
+
   # Cloudflare secrets policy
   cloudflare: |
     path "secrets/data/cloudflare/*" {

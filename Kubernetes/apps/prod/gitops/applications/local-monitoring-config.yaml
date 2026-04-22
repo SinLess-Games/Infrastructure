@@ -4,7 +4,7 @@ metadata:
   name: monitoring-config
   namespace: gitops
   annotations:
-    argocd.argoproj.io/sync-wave: "8"
+    argocd.argoproj.io/sync-wave: "13"
 spec:
   project: platform
   source:

@@ -6,7 +6,6 @@ resources:
   - deployment-otel-collector.yaml
   - destinationrule-observability.yaml
   - service-cadvisor.yaml
-  - configmap-grafana-dashboard-observability.yaml
   - configmap-grafana-nsswitch.yaml
   - service-otel-collector.yaml
   - prometheus-kube-prometheus-stack.yaml
@@ -19,3 +18,4 @@ resources:
   - externalsecret-pyroscope-s3.yaml
   - serviceentry-vault.yaml
   - virtualservice-observability.yaml
+  - dashboards

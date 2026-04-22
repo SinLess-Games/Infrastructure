@@ -50,6 +50,30 @@ vault_auth_methods:
   - type: "kubernetes"
     path: "kubernetes"
 
+vault_kubernetes_auth_configs:
+  - mount_path: "kubernetes"
+    kubeconfig_path: "{{ vault_repo_root }}/.outputs/kubernetes/prod/kubeconfig-prod"
+    disable_iss_validation: true
+
+vault_kubernetes_secret_engine_configs:
+  - mount_path: "kubernetes-dev"
+    kubeconfig_path: "{{ vault_repo_root }}/.outputs/kubernetes/dev/kubeconfig-dev"
+  - mount_path: "kubernetes-staging"
+    kubeconfig_path: "{{ vault_repo_root }}/.outputs/kubernetes/staging/kubeconfig-staging"
+  - mount_path: "kubernetes-prod"
+    kubeconfig_path: "{{ vault_repo_root }}/.outputs/kubernetes/prod/kubeconfig-prod"
+
+vault_kubernetes_auth_roles:
+  - name: "eso-production"
+    mount_path: "kubernetes"
+    bound_service_account_names:
+      - "external-secrets"
+    bound_service_account_namespaces:
+      - "security"
+    policies:
+      - "eso-production"
+    token_ttl: "1h"
+
 # Vault Cluster Configuration
 vault_cluster_name: "sinless-vault"
 vault_cluster_nodes: []  # Override in environment-specific files

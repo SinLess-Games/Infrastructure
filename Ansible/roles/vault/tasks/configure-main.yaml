@@ -800,6 +800,118 @@
   when: (item.key ~ '/') not in (vault_mount_list.json.data | default({}) | dict2items | map(attribute='key') | list)
   no_log: true
 
+- name: Query configured Vault Kubernetes auth backend configs
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/auth/{{ item.mount_path | default('kubernetes') }}/config"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code:
+      - 200
+      - 404
+    return_content: true
+  loop: "{{ vault_kubernetes_auth_configs | default([]) }}"
+  loop_control:
+    label: "{{ item.mount_path | default('kubernetes') }}"
+  register: vault_kubernetes_auth_config_status
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Write configured Vault Kubernetes auth backend configs
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/auth/{{ item.item.mount_path | default('kubernetes') }}/config"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      kubernetes_host: "{{ vault_kubernetes_auth_cluster.server }}"
+      kubernetes_ca_cert: "{{ vault_kubernetes_auth_cluster['certificate-authority-data'] | b64decode }}"
+      disable_iss_validation: "{{ item.item.disable_iss_validation | default(true) | bool }}"
+    status_code:
+      - 200
+      - 204
+  loop: "{{ vault_kubernetes_auth_config_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.mount_path | default('kubernetes') }}"
+  vars:
+    vault_kubernetes_auth_kubeconfig: "{{ lookup('ansible.builtin.file', item.item.kubeconfig_path) | from_yaml }}"
+    vault_kubernetes_auth_cluster: "{{ vault_kubernetes_auth_kubeconfig.clusters[0].cluster }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - item.status == 404
+      or (item.json.data.kubernetes_host | default('')) != vault_kubernetes_auth_cluster.server
+      or (item.json.data.disable_iss_validation | default(false) | bool) != (item.item.disable_iss_validation | default(true) | bool)
+  no_log: true
+
+- name: Stat configured Vault Kubernetes secrets engine kubeconfigs
+  ansible.builtin.stat:
+    path: "{{ item.kubeconfig_path }}"
+  loop: "{{ vault_kubernetes_secret_engine_configs | default([]) }}"
+  loop_control:
+    label: "{{ item.mount_path }}"
+  register: vault_kubernetes_secret_engine_kubeconfig_stats
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Query configured Vault Kubernetes secrets engine configs
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/{{ item.item.mount_path }}/config"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code:
+      - 200
+      - 404
+    return_content: true
+  loop: "{{ vault_kubernetes_secret_engine_kubeconfig_stats.results | default([]) | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item.mount_path }}"
+  register: vault_kubernetes_secret_engine_config_status
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Write configured Vault Kubernetes secrets engine configs
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/{{ item.item.item.mount_path }}/config"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      kubernetes_host: "{{ vault_kubernetes_secret_engine_cluster.server }}"
+      kubernetes_ca_cert: "{{ vault_kubernetes_secret_engine_cluster['certificate-authority-data'] | b64decode }}"
+      disable_local_ca_jwt: true
+    status_code:
+      - 200
+      - 204
+  loop: "{{ vault_kubernetes_secret_engine_config_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.mount_path }}"
+  vars:
+    vault_kubernetes_secret_engine_kubeconfig: "{{ lookup('ansible.builtin.file', item.item.item.kubeconfig_path) | from_yaml }}"
+    vault_kubernetes_secret_engine_cluster: "{{ vault_kubernetes_secret_engine_kubeconfig.clusters[0].cluster }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - item.status == 404
+      or (item.json.data.kubernetes_host | default('')) != vault_kubernetes_secret_engine_cluster.server
+      or (item.json.data.kubernetes_ca_cert | default('')) != (vault_kubernetes_secret_engine_cluster['certificate-authority-data'] | b64decode)
+      or not (item.json.data.disable_local_ca_jwt | default(false) | bool)
+  no_log: true
+
 - name: Query existing transit keys
   ansible.builtin.uri:
     url: "{{ vault_bootstrap_addr }}/v1/{{ item.0.key }}/keys/{{ key_item.name }}"
@@ -884,6 +996,57 @@
   run_once: true
   when:
     - item.status == 404 or (item.json.data.policy | default('')) != item.item.value
+  no_log: true
+
+- name: Query configured Vault Kubernetes auth roles
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/auth/{{ item.mount_path | default('kubernetes') }}/role/{{ item.name }}"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    status_code:
+      - 200
+      - 404
+    return_content: true
+  loop: "{{ vault_kubernetes_auth_roles | default([]) }}"
+  loop_control:
+    label: "{{ item.mount_path | default('kubernetes') }}/{{ item.name }}"
+  register: vault_kubernetes_auth_role_status
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Write configured Vault Kubernetes auth roles
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/auth/{{ item.item.mount_path | default('kubernetes') }}/role/{{ item.item.name }}"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+    ca_path: "{{ vault_tls_local_dir }}/ca.crt"
+    body_format: json
+    body:
+      bound_service_account_names: "{{ item.item.bound_service_account_names }}"
+      bound_service_account_namespaces: "{{ item.item.bound_service_account_namespaces }}"
+      token_policies: "{{ item.item.policies | default([]) }}"
+      token_ttl: "{{ item.item.token_ttl | default('1h') }}"
+    status_code:
+      - 200
+      - 204
+  loop: "{{ vault_kubernetes_auth_role_status.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.mount_path | default('kubernetes') }}/{{ item.item.name }}"
+  vars:
+    vault_kubernetes_role_data: "{{ item.json.data | default({}) }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - item.status == 404
+      or ((vault_kubernetes_role_data.bound_service_account_names | default([])) | sort) != ((item.item.bound_service_account_names | default([])) | sort)
+      or ((vault_kubernetes_role_data.bound_service_account_namespaces | default([])) | sort) != ((item.item.bound_service_account_namespaces | default([])) | sort)
+      or ((vault_kubernetes_role_data.token_policies | default([])) | sort) != ((item.item.policies | default([])) | sort)
   no_log: true
 
 - name: Build Vault user credential map

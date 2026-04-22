@@ -17,6 +17,15 @@ spec:
             enabled: true
             create: false
             name: controller-manager
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
           controllerManager:
             metrics:
               serviceMonitor:

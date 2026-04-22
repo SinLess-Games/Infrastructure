@@ -1,5 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - destinationrule-argocd-ui.yaml
   - externalsecret-actions-runner-controller.yaml
   - ingress-argocd-ui.yaml
+  - virtualservice-argocd-ui.yaml

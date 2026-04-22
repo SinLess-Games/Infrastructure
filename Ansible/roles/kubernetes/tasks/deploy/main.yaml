@@ -222,35 +222,148 @@
     TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
     TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
 
-- name: Configure GPU passthrough on dedicated worker VM
+- name: Read dedicated GPU worker VM config from Proxmox
   ansible.builtin.command:
     argv:
-      - ssh
-      - -o
-      - ConnectTimeout=5
-      - -o
-      - BatchMode=yes
-      - -o
-      - StrictHostKeyChecking=no
-      - -o
-      - UserKnownHostsFile=/dev/null
-      - -o
-      - LogLevel=ERROR
-      - root@{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] }}
       - qm
-      - set
+      - config
       - "{{ kubernetes_proxmox_gpu.vmid | string }}"
-      - --hostpci0
-      - "mapping={{ kubernetes_proxmox_gpu.devices[0] }},pcie=1"
-      - --hostpci1
-      - "mapping={{ kubernetes_proxmox_gpu.devices[1] }},pcie=1"
-  delegate_to: localhost
+  become: true
+  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
   run_once: true
   changed_when: false
-  failed_when: false
-  async: 60
-  poll: 5
+  register: kubernetes_gpu_vm_config
   when:
     - kubernetes_proxmox_gpu.enabled | bool
     - not kubernetes_operation.plan_only | bool
     - not kubernetes_operation.destroy | bool
+
+- name: Determine whether dedicated GPU worker passthrough mappings need update
+  ansible.builtin.set_fact:
+    kubernetes_gpu_passthrough_needs_update: >-
+      {{
+        ('hostpci0: mapping=' ~ kubernetes_proxmox_gpu.devices[0] ~ ',pcie=1') not in (kubernetes_gpu_vm_config.stdout | default(''))
+        or ('hostpci1: mapping=' ~ kubernetes_proxmox_gpu.devices[1] ~ ',pcie=1') not in (kubernetes_gpu_vm_config.stdout | default(''))
+        or 'machine: q35' not in (kubernetes_gpu_vm_config.stdout | default(''))
+      }}
+  delegate_to: localhost
+  run_once: true
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+
+- name: Configure GPU passthrough on dedicated worker VM
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
+      - --machine
+      - q35
+      - --hostpci0
+      - "mapping={{ kubernetes_proxmox_gpu.devices[0] }},pcie=1"
+      - --hostpci1
+      - "mapping={{ kubernetes_proxmox_gpu.devices[1] }},pcie=1"
+  become: true
+  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  run_once: true
+  changed_when: true
+  register: kubernetes_gpu_passthrough_config
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+    - kubernetes_gpu_passthrough_needs_update | default(false)
+
+- name: Read dedicated GPU worker VM power state from Proxmox
+  ansible.builtin.command:
+    argv:
+      - qm
+      - status
+      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
+  become: true
+  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  run_once: true
+  changed_when: false
+  register: kubernetes_gpu_vm_status
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+    - kubernetes_gpu_passthrough_needs_update | default(false)
+
+- name: Stop dedicated GPU worker VM after passthrough update
+  ansible.builtin.command:
+    argv:
+      - qm
+      - stop
+      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
+  become: true
+  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  run_once: true
+  changed_when: true
+  failed_when: false
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+    - kubernetes_gpu_passthrough_needs_update | default(false)
+    - kubernetes_gpu_vm_status.stdout is defined
+    - "'status: running' in kubernetes_gpu_vm_status.stdout"
+
+- name: Wait for dedicated GPU worker VM to stop after passthrough update
+  ansible.builtin.command:
+    argv:
+      - qm
+      - status
+      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
+  become: true
+  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  run_once: true
+  changed_when: false
+  register: kubernetes_gpu_vm_stopped
+  retries: 24
+  delay: 5
+  until: "'status: stopped' in kubernetes_gpu_vm_stopped.stdout"
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+    - kubernetes_gpu_passthrough_needs_update | default(false)
+
+- name: Start dedicated GPU worker VM after passthrough update
+  ansible.builtin.command:
+    argv:
+      - qm
+      - start
+      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
+  become: true
+  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  run_once: true
+  changed_when: true
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+    - kubernetes_gpu_passthrough_needs_update | default(false)
+
+- name: Wait for dedicated GPU worker VM to start after passthrough update
+  ansible.builtin.command:
+    argv:
+      - qm
+      - status
+      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
+  become: true
+  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  run_once: true
+  changed_when: false
+  register: kubernetes_gpu_vm_started
+  retries: 24
+  delay: 5
+  until: "'status: running' in kubernetes_gpu_vm_started.stdout"
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+    - kubernetes_gpu_passthrough_needs_update | default(false)

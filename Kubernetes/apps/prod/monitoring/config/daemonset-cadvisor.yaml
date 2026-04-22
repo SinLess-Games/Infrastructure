@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: cadvisor
-  namespace: kube-system
+  namespace: monitoring
 spec:
   selector:
     matchLabels:
@@ -13,8 +13,6 @@ spec:
         app.kubernetes.io/name: cadvisor
     spec:
       automountServiceAccountToken: false
-      hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
       priorityClassName: system-node-critical
       tolerations:
         - key: node-role.kubernetes.io/control-plane
@@ -31,6 +29,7 @@ spec:
             - --housekeeping_interval=30s
             - --max_housekeeping_interval=35s
             - --store_container_labels=false
+            - --containerd=/var/run/k3s/containerd/containerd.sock
           ports:
             - name: http
               containerPort: 8080

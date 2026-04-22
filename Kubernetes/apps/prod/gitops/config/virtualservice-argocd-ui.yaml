@@ -1,16 +1,16 @@
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
-  name: n8n
-  namespace: sinless-games
+  name: argocd-ui
+  namespace: gitops
 spec:
   gateways:
     - istio-system/shared-edge
   hosts:
-    - n8n.sinlessgames.com
+    - argocd.sinlessgames.com
   http:
     - route:
         - destination:
-            host: n8n.sinless-games.svc.cluster.local
+            host: argo-cd-argocd-server.gitops.svc.cluster.local
             port:
               number: 80

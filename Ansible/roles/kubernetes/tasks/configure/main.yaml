@@ -117,6 +117,25 @@
     - kubernetes_gpu_host_driver_management.enabled | bool
     - inventory_hostname == kubernetes_rke2_gpu_worker_name
 
+- name: Detect NVIDIA PCI devices on dedicated GPU worker
+  ansible.builtin.shell: |
+    set -euo pipefail
+    count=0
+    for vendor_path in /sys/bus/pci/devices/*/vendor; do
+      [ -f "${vendor_path}" ] || continue
+      if grep -qi '^0x10de$' "${vendor_path}"; then
+        count=$((count + 1))
+      fi
+    done
+    printf '%s\n' "${count}"
+  args:
+    executable: /bin/bash
+  register: kubernetes_gpu_nvidia_pci_count
+  changed_when: false
+  when:
+    - kubernetes_gpu_host_driver_management.enabled | bool
+    - inventory_hostname == kubernetes_rke2_gpu_worker_name
+
 - name: Reboot dedicated GPU worker after NVIDIA driver installation
   ansible.builtin.reboot:
     reboot_timeout: "{{ kubernetes_gpu_host_driver_management.reboot_timeout }}"
@@ -124,12 +143,18 @@
   when:
     - kubernetes_gpu_host_driver_management.enabled | bool
     - inventory_hostname == kubernetes_rke2_gpu_worker_name
-    - kubernetes_gpu_sources is changed or kubernetes_gpu_driver_packages is changed
+    - >
+      kubernetes_gpu_sources is changed
+      or kubernetes_gpu_driver_packages is changed
+      or (kubernetes_gpu_nvidia_pci_count.stdout | default('0') | int) == 0
 
 - name: Verify nvidia-smi on dedicated GPU worker
   ansible.builtin.command: nvidia-smi
   register: kubernetes_gpu_nvidia_smi
   changed_when: false
+  retries: 6
+  delay: 10
+  until: kubernetes_gpu_nvidia_smi.rc == 0
   when:
     - kubernetes_gpu_host_driver_management.enabled | bool
     - inventory_hostname == kubernetes_rke2_gpu_worker_name
@@ -214,6 +239,21 @@
       - --ignore-not-found=true
   changed_when: false
   failed_when: false
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_kube_vip.enabled | bool
+    - kubernetes_role_kube_vip_manifest is defined
+    - kubernetes_role_kube_vip_manifest.changed | bool
+
+- name: Apply kube-vip manifest after pod recreation
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - apply
+      - -f
+      - /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
+  changed_when: false
   when:
     - inventory_hostname == kubernetes_control_plane_first_host
     - kubernetes_kube_vip.enabled | bool

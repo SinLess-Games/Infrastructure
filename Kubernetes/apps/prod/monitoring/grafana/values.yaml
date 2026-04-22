@@ -6,21 +6,10 @@ plugins:
   - blackcowmoo-googleanalytics-datasource
   - grafana-googlesheets-datasource
   - marcusolsson-calendar-panel
-  - chaosmeshorg-chaos-mesh-grafana
-  - grafana-gcp-status-datasource
-  - grafana-github-datasource
-  - grafana-advisor-app
-  - grafana-assistant-app
-  - grafana-metricsdrilldown-app
-  - grafana-pyroscope-app
-  - grafana-exploretraces-app
-  - grafana-llm-app
-  - geeks-r-us-mqtt-panel
-  - grafana-sentry-datasource
+deploymentStrategy:
+  type: Recreate
 persistence:
-  enabled: true
-  storageClassName: longhorn
-  size: 20Gi
+  enabled: false
 datasources:
   datasources.yaml:
     apiVersion: 1
@@ -95,6 +84,16 @@ datasources:
           handleGrafanaManagedAlerts: true
 env:
   GF_SERVER_ROOT_URL: https://grafana.sinlessgames.com
+  GF_DATABASE_TYPE: postgres
+  GF_DATABASE_HOST: 10.10.40.50:5432
+  GF_DATABASE_NAME: grafana
+  GF_DATABASE_USER: grafana
+  GF_DATABASE_SSL_MODE: disable
+envValueFrom:
+  GF_DATABASE_PASSWORD:
+    secretKeyRef:
+      name: grafana-admin
+      key: postgres_grafana_password
 extraConfigmapMounts:
   - name: grafana-nsswitch
     configMap: grafana-nsswitch

@@ -5,6 +5,8 @@ resources:
   - resourcequota.yaml
   - limitrange.yaml
   - networkpolicy-default-deny.yaml
+  - networkpolicy-homepage.yaml
+  - networkpolicy-n8n.yaml
   - authorizationpolicy-default.yaml
   - peerauthentication-default.yaml
   - n8n-deployment.yaml
