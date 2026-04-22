@@ -351,6 +351,11 @@ data:
           memory: true
           showLabel: true
           label: production
+        nodes:
+          show: false
+          cpu: false
+          memory: false
+          showLabel: false
     - longhorn:
         url: https://longhorn.sinlessgames.com
   custom.css: ""

@@ -21,6 +21,13 @@ spec:
               value: "wazuh.local.sinlessgames.com"
             - name: WAZUH_AGENT_GROUP
               value: "kubernetes-prod"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
           securityContext:
             privileged: true
           volumeMounts:

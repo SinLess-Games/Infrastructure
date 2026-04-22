@@ -1,4 +1,11 @@
 alloy:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
   configMap:
     content: |
       logging {

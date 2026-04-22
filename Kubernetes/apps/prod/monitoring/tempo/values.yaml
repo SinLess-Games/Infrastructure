@@ -16,6 +16,13 @@ traces:
 metricsGenerator:
   enabled: true
   remoteWriteUrl: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/write
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   extraEnvFrom:
     - secretRef:
         name: tempo-s3-credentials
@@ -23,6 +30,13 @@ metricsGenerator:
     - -config.expand-env=true
 
 compactor:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   extraEnvFrom:
     - secretRef:
         name: tempo-s3-credentials
@@ -30,6 +44,13 @@ compactor:
     - -config.expand-env=true
 
 distributor:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   extraEnvFrom:
     - secretRef:
         name: tempo-s3-credentials
@@ -37,6 +58,13 @@ distributor:
     - -config.expand-env=true
 
 ingester:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
   extraEnvFrom:
     - secretRef:
         name: tempo-s3-credentials
@@ -44,6 +72,13 @@ ingester:
     - -config.expand-env=true
 
 querier:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   extraEnvFrom:
     - secretRef:
         name: tempo-s3-credentials
@@ -51,6 +86,13 @@ querier:
     - -config.expand-env=true
 
 queryFrontend:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   extraEnvFrom:
     - secretRef:
         name: tempo-s3-credentials
