@@ -5,8 +5,9 @@ metadata:
   labels:
     kubernetes.io/metadata.name: sinless-games
     istio-injection: disabled
-    pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
     topology.kubernetes.io/environment: prod
   annotations:
     scheduler.alpha.kubernetes.io/defaultTolerations: "[]"

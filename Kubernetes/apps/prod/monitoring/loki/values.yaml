@@ -25,7 +25,7 @@ loki:
 singleBinary:
   replicas: 0
 write:
-  replicas: 3
+  replicas: 2
   resources:
     requests:
       cpu: 250m
@@ -79,3 +79,7 @@ gateway:
 monitoring:
   serviceMonitor:
     enabled: true
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false

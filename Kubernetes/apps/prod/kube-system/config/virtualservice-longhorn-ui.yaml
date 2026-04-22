@@ -1,0 +1,20 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: longhorn-ui
+  namespace: kube-system
+spec:
+  gateways:
+    - istio-system/shared-edge
+  hosts:
+    - longhorn.sinlessgames.com
+  http:
+    - name: longhorn
+      match:
+        - authority:
+            exact: longhorn.sinlessgames.com
+      route:
+        - destination:
+            host: longhorn-frontend.kube-system.svc.cluster.local
+            port:
+              number: 80

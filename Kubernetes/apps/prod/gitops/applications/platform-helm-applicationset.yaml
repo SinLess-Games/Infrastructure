@@ -458,7 +458,7 @@ spec:
             namespace: sinless-games
             chartRepo: https://releases.rancher.com/server-charts/stable
             chart: rancher
-            targetRevision: 2.11.8
+            targetRevision: 2.11.3
             valuesPath: Kubernetes/apps/prod/sinless-games/rancher/values.yaml
             inlineValues: ""
             syncWave: "18"
@@ -466,7 +466,7 @@ spec:
             namespace: sinless-games
             chartRepo: https://opencost.github.io/opencost-helm-chart
             chart: opencost
-            targetRevision: 1.0.0
+            targetRevision: 2.5.14
             valuesPath: Kubernetes/apps/prod/sinless-games/open-cost/values.yaml
             inlineValues: ""
             syncWave: "18"
@@ -474,7 +474,7 @@ spec:
             namespace: sinless-games
             chartRepo: https://mailu.github.io/helm-charts
             chart: mailu
-            targetRevision: 2.6.1
+            targetRevision: 2.6.3
             valuesPath: Kubernetes/apps/prod/sinless-games/mailu/values.yaml
             inlineValues: ""
             syncWave: "19"

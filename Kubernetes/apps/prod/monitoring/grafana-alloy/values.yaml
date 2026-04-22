@@ -2,43 +2,71 @@ alloy:
   resources:
     requests:
       cpu: 50m
-      memory: 256Mi
+      memory: 128Mi
     limits:
-      cpu: 500m
-      memory: 768Mi
+      cpu: 300m
+      memory: 512Mi
   configMap:
     content: |
       logging {
         level  = "info"
         format = "logfmt"
       }
+
       discovery.kubernetes "pods" {
         role = "pod"
       }
-      prometheus.remote_write "mimir" {
-        endpoint {
-          url = "http://mimir-nginx.monitoring.svc.cluster.local/api/v1/push"
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          regex         = env("HOSTNAME")
+          action        = "keep"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          regex         = "([^/]+)/([^/]+)/([^/]+)/([^/]+)"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/$1_$2_$3/$4/*.log"
         }
       }
-      prometheus.scrape "cadvisor" {
-        targets = [{
-          __address__ = "cadvisor.monitoring.svc.cluster.local:8080",
-          job = "cadvisor",
-        }]
-        forward_to = [prometheus.remote_write.mimir.receiver]
+
+      loki.source.file "pod_logs" {
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.write.default.receiver]
       }
-      prometheus.scrape "otel_collector" {
-        targets = [{
-          __address__ = "otel-collector.monitoring.svc.cluster.local:8888",
-          job = "otel-collector",
-        }]
-        forward_to = [prometheus.remote_write.mimir.receiver]
-      }
+
       loki.write "default" {
         endpoint {
           url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
         }
       }
+  mounts:
+    varlog: true
 controller:
   type: daemonset
 serviceMonitor:

@@ -2,7 +2,7 @@ grafana:
   enabled: false
 alertmanager:
   alertmanagerSpec:
-    replicas: 3
+    replicas: 1
     resources:
       requests:
         cpu: 100m
@@ -20,15 +20,15 @@ alertmanager:
               storage: 10Gi
 prometheus:
   prometheusSpec:
-    replicas: 2
+    replicas: 1
     retention: 15d
     resources:
       requests:
-        cpu: "1"
-        memory: 4Gi
+        cpu: 200m
+        memory: 1Gi
       limits:
-        cpu: "4"
-        memory: 8Gi
+        cpu: "2"
+        memory: 4Gi
     storageSpec:
       volumeClaimTemplate:
         spec:
@@ -39,6 +39,8 @@ prometheus:
               storage: 100Gi
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
+    remoteWrite:
+      - url: http://mimir-nginx.monitoring.svc.cluster.local/api/v1/push
     externalLabels:
       cluster: rke2-prod
 defaultRules:

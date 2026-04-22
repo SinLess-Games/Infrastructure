@@ -5,6 +5,8 @@ resources:
   - destinationrule-default.yaml
   - destinationrule-garage-ui.yaml
   - destinationrule-garage-s3.yaml
+  - destinationrule-platform-uis.yaml
   - ingress-opencost.yaml
   - ingress-rancher.yaml
   - virtualservice-n8n.yaml
+  - virtualservice-platform-uis.yaml

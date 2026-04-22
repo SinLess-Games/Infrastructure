@@ -1,0 +1,32 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: rancher-plain-http
+  namespace: sinless-games
+spec:
+  host: rancher.sinless-games.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: opencost-plain-http
+  namespace: sinless-games
+spec:
+  host: opencost.sinless-games.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: mailu-front-plain-http
+  namespace: sinless-games
+spec:
+  host: mailu-front.sinless-games.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE

@@ -63,11 +63,11 @@ gateway:
       cpu: 500m
       memory: 512Mi
 ingester:
-  replicas: 3
+  replicas: 2
   resources:
     requests:
-      cpu: 500m
-      memory: 1Gi
+      cpu: 250m
+      memory: 768Mi
     limits:
       cpu: "2"
       memory: 2Gi
@@ -96,7 +96,7 @@ query_frontend:
       cpu: 500m
       memory: 512Mi
 store_gateway:
-  replicas: 3
+  replicas: 2
   resources:
     requests:
       cpu: 250m

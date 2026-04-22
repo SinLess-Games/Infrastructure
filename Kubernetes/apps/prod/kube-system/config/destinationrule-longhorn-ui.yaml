@@ -1,0 +1,10 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: longhorn-ui-plain-http
+  namespace: kube-system
+spec:
+  host: longhorn-frontend.kube-system.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE

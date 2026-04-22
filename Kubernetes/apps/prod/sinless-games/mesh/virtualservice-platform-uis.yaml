@@ -1,0 +1,40 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: platform-ui-routes
+  namespace: sinless-games
+spec:
+  gateways:
+    - istio-system/shared-edge
+  hosts:
+    - rancher.sinlessgames.com
+    - opencost.sinlessgames.com
+    - mail.sinlessgames.com
+  http:
+    - name: rancher
+      match:
+        - authority:
+            exact: rancher.sinlessgames.com
+      route:
+        - destination:
+            host: rancher.sinless-games.svc.cluster.local
+            port:
+              number: 80
+    - name: opencost
+      match:
+        - authority:
+            exact: opencost.sinlessgames.com
+      route:
+        - destination:
+            host: opencost.sinless-games.svc.cluster.local
+            port:
+              number: 9090
+    - name: mailu
+      match:
+        - authority:
+            exact: mail.sinlessgames.com
+      route:
+        - destination:
+            host: mailu-front.sinless-games.svc.cluster.local
+            port:
+              number: 80
