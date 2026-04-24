@@ -1,0 +1,28 @@
+# Kubernetes/apps/prod/sinless-games/mesh/authorizationpolicy-garage-ui.yaml
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: garage-ui-allow-ingress-gateway
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage
+    app.kubernetes.io/instance: garage
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/part-of: garage
+    app.kubernetes.io/managed-by: gitops
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: garage
+      app.kubernetes.io/instance: garage
+      app.kubernetes.io/component: server
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/istio-system/sa/istio-ingressgateway
+      to:
+        - operation:
+            ports:
+              - "3903"

@@ -1,26 +1,51 @@
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# Kubernetes/apps/prod/sinless-games/homepage/virtualservice-homepage.yaml
+apiVersion: networking.istio.io/v1
+kind: VirtualService
 metadata:
   name: homepage
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: homepage
+    app.kubernetes.io/instance: homepage
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/exposure: public
+    security.sinlessgames.io/ingress: istio
+    security.sinlessgames.io/mtls: istio-strict
   annotations:
-    kubernetes.io/ingress.class: istio
-    gethomepage.dev/enabled: "true"
-    gethomepage.dev/group: Platform
-    gethomepage.dev/name: Homepage
-    gethomepage.dev/icon: homepage.png
-    gethomepage.dev/description: Platform dashboard
-    gethomepage.dev/href: https://homepage.sinlessgames.com
+    security.sinlessgames.io/purpose: "Expose Homepage through the shared Istio edge gateway."
+    security.sinlessgames.io/public-hostname: "homepage.sinlessgames.com"
+    security.sinlessgames.io/tls-termination: "istio-ingressgateway"
+    security.sinlessgames.io/backend-mtls: "true"
 spec:
-  ingressClassName: istio
-  rules:
-    - host: homepage.sinlessgames.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: homepage
-                port:
-                  number: 3000
+  hosts:
+    - homepage.sinlessgames.com
+  gateways:
+    - istio-system/shared-edge
+  http:
+    - name: homepage-http-redirect
+      match:
+        - port: 80
+          uri:
+            prefix: /
+      redirect:
+        scheme: https
+        redirectCode: 301
+
+    - name: homepage-https-route
+      match:
+        - port: 443
+          uri:
+            prefix: /
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: https
+            X-Forwarded-Host: homepage.sinlessgames.com
+      route:
+        - destination:
+            host: homepage.sinless-games.svc.cluster.local
+            port:
+              number: 3000
+      timeout: 15s

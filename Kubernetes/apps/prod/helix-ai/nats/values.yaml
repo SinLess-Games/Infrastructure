@@ -2,21 +2,36 @@ config:
   cluster:
     enabled: true
     replicas: 3
+
   jetstream:
     enabled: true
     fileStore:
       enabled: true
+      dir: /data
       pvc:
         enabled: true
         size: 100Gi
         storageClassName: longhorn
+
+  monitor:
+    enabled: true
+
   mqtt:
     enabled: true
+
   websocket:
     enabled: true
+
 podDisruptionBudget:
   enabled: true
+
+podTemplate:
+  topologySpreadConstraints:
+    kubernetes.io/hostname:
+      maxSkew: 1
+      whenUnsatisfiable: DoNotSchedule
+
 promExporter:
   enabled: true
-serviceMonitor:
-  enabled: true
+  podMonitor:
+    enabled: true

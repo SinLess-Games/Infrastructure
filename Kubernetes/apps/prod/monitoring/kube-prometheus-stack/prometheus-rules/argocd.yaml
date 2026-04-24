@@ -1,32 +1,87 @@
+# Kubernetes/apps/prod/monitoring/kube-prometheus-stack/prometheus-rules/argocd.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: kube-prometheus-stack-argocd
   namespace: monitoring
   labels:
+    app.kubernetes.io/name: argocd-rules
+    app.kubernetes.io/component: prometheus-rules
+    app.kubernetes.io/part-of: monitoring
     release: kube-prometheus-stack
+    security.sinlessgames.io/policy: monitored
 spec:
   groups:
-  
-  - name: EmbeddedExporter
-  
-    
-    rules:
-  
-      - alert: ArgocdServiceNotSynced
-        expr: 'argocd_app_info{sync_status!="Synced"} != 0'
-        for: 15m
-        labels:
-          severity: warning
-        annotations:
-          summary: ArgoCD service not synced (instance {{ $labels.instance }})
-          description: "Service {{ $labels.name }} run by argo is currently not in sync.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: ArgocdServiceUnhealthy
-        expr: 'argocd_app_info{health_status!="Healthy"} != 0'
-        for: 15m
-        labels:
-          severity: warning
-        annotations:
-          summary: ArgoCD service unhealthy (instance {{ $labels.instance }})
-          description: "Service {{ $labels.name }} run by argo is currently not healthy.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+    - name: argocd.application-health
+      rules:
+        - alert: ArgoCDApplicationOutOfSync
+          expr: argocd_app_info{sync_status!="Synced"} == 1
+          for: 15m
+          labels:
+            severity: warning
+            component: argocd
+          annotations:
+            summary: "Argo CD application is out of sync: {{ $labels.name }}"
+            description: |
+              Argo CD application {{ $labels.name }} is not synced.
+
+              Project: {{ $labels.project }}
+              Destination namespace: {{ $labels.dest_namespace }}
+              Sync status: {{ $labels.sync_status }}
+              Health status: {{ $labels.health_status }}
+
+              Value: {{ $value }}
+
+        - alert: ArgoCDApplicationUnhealthy
+          expr: argocd_app_info{health_status!="Healthy"} == 1
+          for: 15m
+          labels:
+            severity: warning
+            component: argocd
+          annotations:
+            summary: "Argo CD application is unhealthy: {{ $labels.name }}"
+            description: |
+              Argo CD application {{ $labels.name }} is not healthy.
+
+              Project: {{ $labels.project }}
+              Destination namespace: {{ $labels.dest_namespace }}
+              Sync status: {{ $labels.sync_status }}
+              Health status: {{ $labels.health_status }}
+
+              Value: {{ $value }}
+
+        - alert: ArgoCDApplicationDegraded
+          expr: argocd_app_info{health_status="Degraded"} == 1
+          for: 10m
+          labels:
+            severity: critical
+            component: argocd
+          annotations:
+            summary: "Argo CD application is degraded: {{ $labels.name }}"
+            description: |
+              Argo CD application {{ $labels.name }} is degraded.
+
+              Project: {{ $labels.project }}
+              Destination namespace: {{ $labels.dest_namespace }}
+              Sync status: {{ $labels.sync_status }}
+              Health status: {{ $labels.health_status }}
+
+              Value: {{ $value }}
+
+        - alert: ArgoCDApplicationOutOfSyncLongRunning
+          expr: argocd_app_info{sync_status!="Synced"} == 1
+          for: 1h
+          labels:
+            severity: critical
+            component: argocd
+          annotations:
+            summary: "Argo CD application has been out of sync for over 1 hour: {{ $labels.name }}"
+            description: |
+              Argo CD application {{ $labels.name }} has been out of sync for more than 1 hour.
+
+              Project: {{ $labels.project }}
+              Destination namespace: {{ $labels.dest_namespace }}
+              Sync status: {{ $labels.sync_status }}
+              Health status: {{ $labels.health_status }}
+
+              Value: {{ $value }}

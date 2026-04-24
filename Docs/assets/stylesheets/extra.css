@@ -1,0 +1,45 @@
+:root {
+  --sg-gradient-start: #0f172a;
+  --sg-gradient-end: #1e293b;
+  --sg-accent: #f59e0b;
+}
+
+.md-header,
+.md-tabs {
+  backdrop-filter: blur(12px);
+}
+
+.md-main__inner {
+  margin-top: 1.2rem;
+}
+
+.md-content__inner {
+  border-radius: 12px;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.md-typeset h2,
+.md-typeset h3 {
+  scroll-margin-top: 5rem;
+}
+
+.md-typeset a {
+  text-decoration-thickness: 0.08em;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.md-search__form {
+  border-radius: 999px;
+}
+
+.md-nav__title,
+.md-sidebar__scrollwrap {
+  scrollbar-width: thin;
+}

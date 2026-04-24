@@ -1,3 +1,30 @@
+# Kubernetes/apps/prod/kube-system/karmada/values.yaml
+global:
+  commonLabels:
+    app.kubernetes.io/part-of: karmada
+    topology.kubernetes.io/environment: prod
+
 etcd:
   local:
     enabled: true
+    replicas: 3
+    persistence:
+      enabled: true
+      storageClass: longhorn
+      size: 20Gi
+    priorityClassName: system-cluster-critical
+
+karmadaAPIServer:
+  replicas: 3
+
+karmadaAggregatedAPIServer:
+  replicas: 2
+
+karmadaControllerManager:
+  replicas: 2
+
+karmadaScheduler:
+  replicas: 2
+
+karmadaWebhook:
+  replicas: 2

@@ -1,10 +1,33 @@
+# Kubernetes/apps/prod/kube-system/keda/values.yaml
+
 watchNamespace: ""
+
+operator:
+  replicaCount: 2
+
+metricsServer:
+  replicaCount: 2
+
+webhooks:
+  replicaCount: 2
+
 prometheus:
   enabled: true
-  prometheusRule:
+  metricServer:
     enabled: true
-
-opentelemetry:
-  uri: ""
+    podMonitor:
+      enabled: true
+      namespace: kube-system
   operator:
     enabled: true
+    podMonitor:
+      enabled: true
+      namespace: kube-system
+    prometheusRules:
+      enabled: true
+
+opentelemetry:
+  operator:
+    enabled: true
+    endpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4318"
+    protocol: "http/protobuf"

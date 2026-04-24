@@ -1,13 +1,32 @@
+# Kubernetes/apps/prod/monitoring/namespace/resourcequota.yaml
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: monitoring-quota
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: monitoring-quota
+    app.kubernetes.io/component: namespace-policy
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/policy: resource-quota
 spec:
   hard:
     requests.cpu: "32"
     requests.memory: 96Gi
+
     limits.cpu: "96"
     limits.memory: 160Gi
-    persistentvolumeclaims: "80"
+
     pods: "300"
+    persistentvolumeclaims: "80"
+
+    services: "100"
+    services.loadbalancers: "0"
+    services.nodeports: "0"
+
+    secrets: "300"
+    configmaps: "300"
+
+    count/servicemonitors.monitoring.coreos.com: "100"
+    count/podmonitors.monitoring.coreos.com: "100"
+    count/prometheusrules.monitoring.coreos.com: "100"

@@ -1,11 +1,59 @@
+# Kubernetes/apps/prod/sinless-games/policies/networkpolicy-allow-egress.yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-egress
+  name: sinless-games-baseline-egress
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: sinless-games-baseline-egress
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: network
+    security.sinlessgames.io/default-deny-egress: "true"
+  annotations:
+    security.sinlessgames.io/purpose: "Deny default egress while allowing only DNS and Istio control-plane traffic required by mesh workloads."
+    security.sinlessgames.io/internet-egress: "false"
 spec:
   podSelector: {}
+
   policyTypes:
     - Egress
+
   egress:
-    - {}
+    # Allow DNS to CoreDNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Optional DNS service IP fallback.
+    # Your cluster appears to use 10.43.0.10 for kube-dns.
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.10/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Allow Istio sidecars to reach istiod for xDS and cert rotation.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+          podSelector:
+            matchLabels:
+              app: istiod
+      ports:
+        - protocol: TCP
+          port: 15012

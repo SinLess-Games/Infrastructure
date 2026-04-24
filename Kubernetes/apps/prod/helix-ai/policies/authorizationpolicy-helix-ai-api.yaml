@@ -1,0 +1,34 @@
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: helix-api-allow
+  namespace: helix-ai
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: helix-api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            serviceAccounts:
+              - helix-ai/helix-api-client
+              - istio-system/istio-ingressgateway-service-account
+      to:
+        - operation:
+            ports: ["8080"]
+            methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+            paths:
+              - /api/*
+              - /healthz
+              - /readyz
+    - from:
+        - source:
+            serviceAccounts:
+              - monitoring/prometheus
+      to:
+        - operation:
+            ports: ["8080"]
+            methods: ["GET"]
+            paths:
+              - /metrics

@@ -1,25 +1,52 @@
+# Kubernetes/apps/prod/security/policies/clusterpolicy-require-probes.yaml
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
   name: require-probes
+  labels:
+    app.kubernetes.io/name: require-probes
+    app.kubernetes.io/component: admission-policy
+    app.kubernetes.io/part-of: kyverno
+    security.sinlessgames.io/policy: workload-health
+  annotations:
+    policies.kyverno.io/title: Require Container Probes
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Requires application containers to define at least one health probe:
+      livenessProbe, readinessProbe, or startupProbe.
 spec:
-  validationFailureAction: Enforce
+  validationFailureAction: Audit
   background: true
   rules:
-    - name: check-probes
+    - name: containers-must-have-health-probe
       match:
         any:
           - resources:
               kinds:
                 - Pod
+
+      preconditions:
+        all:
+          - key: "{{ request.operation || 'BACKGROUND' }}"
+            operator: AnyIn
+            value:
+              - CREATE
+              - UPDATE
+              - BACKGROUND
+
       exclude:
         any:
           - resources:
               namespaces:
+                - kube-system
                 - networking
                 - monitoring
                 - istio-system
                 - security
+                - gitops
+
           - resources:
               kinds:
                 - Pod
@@ -27,6 +54,7 @@ spec:
                 - n8n*
               namespaces:
                 - sinless-games
+
           - resources:
               kinds:
                 - Pod
@@ -35,16 +63,20 @@ spec:
               selector:
                 matchLabels:
                   app.kubernetes.io/name: actions-runner-controller
+
       validate:
-        message: Liveness and readiness probes are required for all containers.
+        message: "Containers must define at least one of livenessProbe, readinessProbe, or startupProbe."
         foreach:
-          - list: "request.object.spec.containers"
+          - list: "request.object.spec.containers[]"
             deny:
               conditions:
-                any:
-                  - key: "{{ element.livenessProbe }}"
-                    operator: Equals
-                    value: null
-                  - key: "{{ element.readinessProbe }}"
-                    operator: Equals
-                    value: null
+                all:
+                  - key: livenessProbe
+                    operator: AllNotIn
+                    value: "{{ element.keys(@)[] }}"
+                  - key: readinessProbe
+                    operator: AllNotIn
+                    value: "{{ element.keys(@)[] }}"
+                  - key: startupProbe
+                    operator: AllNotIn
+                    value: "{{ element.keys(@)[] }}"

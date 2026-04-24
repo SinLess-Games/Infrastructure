@@ -4,12 +4,18 @@ metadata:
   name: argocd-ui
   namespace: gitops
 spec:
+  exportTo:
+    - istio-system
   gateways:
     - istio-system/shared-edge
   hosts:
     - argocd.sinlessgames.com
   http:
-    - route:
+    - name: argocd-ui
+      match:
+        - uri:
+            prefix: /
+      route:
         - destination:
             host: argo-cd-argocd-server.gitops.svc.cluster.local
             port:

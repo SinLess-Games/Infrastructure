@@ -1,20 +1,71 @@
+# Kubernetes/clusters/prod/bootstrap/app-of-apps.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: prod-platform-root
   namespace: gitops
+  labels:
+    app.kubernetes.io/name: prod-platform-root
+    app.kubernetes.io/instance: prod
+    app.kubernetes.io/component: app-of-apps
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: argocd
+    topology.kubernetes.io/environment: prod
+    security.sinlessgames.io/gitops-root: "true"
+  annotations:
+    security.sinlessgames.io/purpose: "Root Argo CD app-of-apps for the production platform."
+    security.sinlessgames.io/repo: "SinLess-Games/Infrastructure"
+    security.sinlessgames.io/branch: "main"
+    security.sinlessgames.io/prune-enabled: "true"
+    security.sinlessgames.io/self-heal-enabled: "true"
+
+  # Keep this if you want deleting the root Application to delete all child apps/resources.
+  # Remove it if you want root app deletion to orphan managed resources instead.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+
 spec:
   project: platform
+
   source:
-    repoURL: https://github.com/Sinless777/Infrastructure.git
+    repoURL: https://github.com/SinLess-Games/Infrastructure.git
     targetRevision: main
     path: Kubernetes/apps/prod/gitops/applications
+
+    directory:
+      recurse: true
+      include: "*.yaml"
+
   destination:
     server: https://kubernetes.default.svc
     namespace: gitops
+
+  revisionHistoryLimit: 5
+
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+      allowEmpty: false
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
     syncOptions:
-      - CreateNamespace=true
+      # Namespaces should be explicit manifests with labels/security controls.
+      - CreateNamespace=false
+
+      # Safer pruning behavior.
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+
+      # Cleaner sync behavior.
+      - ApplyOutOfSyncOnly=true
+      - RespectIgnoreDifferences=true
+
+      # Useful for modern CRDs and larger objects.
+      - ServerSideApply=true

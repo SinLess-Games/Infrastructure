@@ -1,10 +1,27 @@
+# Kubernetes/apps/prod/sinless-games/mesh/destinationrule-garage-s3.yaml
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: garage-s3-plaintext
+  name: garage-s3-mtls
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage
+    app.kubernetes.io/instance: garage
+    app.kubernetes.io/component: s3-api
+    app.kubernetes.io/part-of: garage
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/mtls: istio-strict
+    security.sinlessgames.io/plaintext-allowed: "false"
+  annotations:
+    security.sinlessgames.io/purpose: "Require Istio mutual TLS for clients connecting to the Garage S3 API service."
 spec:
   host: garage-s3.sinless-games.svc.cluster.local
+
+  # Keep this private to the namespace unless another namespace or the edge gateway
+  # needs to route to the Garage S3 service.
+  exportTo:
+    - "."
+
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL

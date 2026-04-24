@@ -1,0 +1,16 @@
+# Kubernetes/apps/prod/sinless-games/docs/destinationrule-docs.yaml
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: docs-mtls
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: docs
+    app.kubernetes.io/component: destination-rule
+    app.kubernetes.io/part-of: sinless-games-platform
+    security.sinlessgames.io/mtls: strict
+spec:
+  host: docs.sinless-games.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL

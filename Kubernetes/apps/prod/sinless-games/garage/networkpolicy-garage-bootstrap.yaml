@@ -1,15 +1,24 @@
+# Kubernetes/apps/prod/sinless-games/garage/networkpolicy-garage-bootstrap.yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: garage-bootstrap-allow-k8s
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage-bootstrap
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: garage
+    security.sinlessgames.io/policy: restricted-egress
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: garage-bootstrap
+
   policyTypes:
     - Egress
+
   egress:
+    # DNS to kube-dns/CoreDNS.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -22,27 +31,19 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    - to:
-        - ipBlock:
-            cidr: 10.43.0.0/16
-      ports:
-        - protocol: TCP
-          port: 443
-        - protocol: TCP
-          port: 6443
+
+    # Kubernetes API VIP.
     - to:
         - ipBlock:
             cidr: 10.10.40.10/32
-        - ipBlock:
-            cidr: 10.10.40.11/32
-        - ipBlock:
-            cidr: 10.10.40.12/32
-        - ipBlock:
-            cidr: 10.10.40.13/32
-        - ipBlock:
-            cidr: 10.10.40.15/32
-        - ipBlock:
-            cidr: 10.10.40.16/32
       ports:
         - protocol: TCP
           port: 6443
+
+    # In-cluster Kubernetes service IP, if the job uses the default kubernetes service.
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.1/32
+      ports:
+        - protocol: TCP
+          port: 443

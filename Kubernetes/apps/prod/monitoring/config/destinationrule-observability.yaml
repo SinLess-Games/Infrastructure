@@ -1,87 +1,128 @@
+# Kubernetes/apps/prod/monitoring/config/destinationrule-observability.yaml
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: observability-plain-http
+  name: grafana-mtls
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana-mtls
+    app.kubernetes.io/component: istio-traffic-policy
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/mtls: strict
 spec:
   host: grafana.monitoring.svc.cluster.local
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL
 ---
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: loki-gateway-plain-http
+  name: loki-gateway-mtls
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: loki-gateway-mtls
+    app.kubernetes.io/component: istio-traffic-policy
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/mtls: strict
 spec:
   host: loki-gateway.monitoring.svc.cluster.local
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL
 ---
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: loki-read-plain-http
+  name: loki-read-mtls
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: loki-read-mtls
+    app.kubernetes.io/component: istio-traffic-policy
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/mtls: strict
 spec:
   host: loki-read.monitoring.svc.cluster.local
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL
 ---
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: tempo-query-frontend-plain-http
+  name: tempo-query-frontend-mtls
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: tempo-query-frontend-mtls
+    app.kubernetes.io/component: istio-traffic-policy
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/mtls: strict
 spec:
   host: tempo-query-frontend.monitoring.svc.cluster.local
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL
 ---
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: mimir-nginx-plain-http
+  name: mimir-nginx-mtls
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: mimir-nginx-mtls
+    app.kubernetes.io/component: istio-traffic-policy
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/mtls: strict
 spec:
   host: mimir-nginx.monitoring.svc.cluster.local
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL
 ---
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: prometheus-plain-http
+  name: prometheus-mtls
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus-mtls
+    app.kubernetes.io/component: istio-traffic-policy
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/mtls: strict
 spec:
   host: kube-prometheus-stack-prometheus.monitoring.svc.cluster.local
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL
 ---
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: alertmanager-plain-http
+  name: alertmanager-mtls
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alertmanager-mtls
+    app.kubernetes.io/component: istio-traffic-policy
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/mtls: strict
 spec:
   host: kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL
 ---
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: kiali-plain-http
+  name: kiali-mtls
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kiali-mtls
+    app.kubernetes.io/component: istio-traffic-policy
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/mtls: strict
 spec:
   host: kiali.monitoring.svc.cluster.local
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL

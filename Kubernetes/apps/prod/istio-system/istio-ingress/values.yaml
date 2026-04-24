@@ -1,7 +1,12 @@
 service:
   type: LoadBalancer
   annotations:
-    metallb.universe.tf/address-pool: prod-services
+    metallb.io/address-pool: prod-services
+  externalTrafficPolicy: Local
+  loadBalancerSourceRanges:
+    # replace with your real trusted source CIDRs
+    - 10.10.0.0/16
+
 resources:
   requests:
     cpu: 200m
@@ -9,7 +14,17 @@ resources:
   limits:
     cpu: "1"
     memory: 1Gi
+
 autoscaling:
   enabled: true
   minReplicas: 2
   maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+
+podDisruptionBudget:
+  minAvailable: 1

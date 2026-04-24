@@ -1,18 +1,59 @@
 configs:
   params:
-    server.insecure: true
+    server.insecure: false
+
+  cm:
+    admin.enabled: true
+
   secret:
+    # Move this to External Secrets / Vault when you wire Argo CD secrets fully.
     argocdServerAdminPassword: '$2b$10$vJGbHySXxfGK96qjNX5aeO8GcoQm3Db.RAJs7yF3QgqoLqG4FuCMK'
+    argocdServerAdminPasswordMtime: "2026-04-23T00:00:00Z"
+
+networkPolicy:
+  create: true
+  defaultDenyIngress: true
+
 server:
   ingress:
     enabled: false
+
 controller:
   replicas: 1
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
 repoServer:
   replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
 applicationSet:
   replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 redis:
   enabled: true
+
 redisSecretInit:
   enabled: false

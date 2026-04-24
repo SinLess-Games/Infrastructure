@@ -20,43 +20,19 @@ shell_brew_packages:
 
 apt_packages:
   production:
-    # Minimal runtime and hardening baseline for production hosts
     - ca-certificates
-    # - software-properties-common  # Not available on Debian 13
-    - apt-transport-https
     - gnupg
     - curl
-    - wget
     - sudo
     - locales
     - ethtool
-    - bridge-utils
-    - vlan
-    - nftables
     - iptables
-    - rsyslog
     - logrotate
     - needrestart
     - unattended-upgrades
-    - parted
-    - lvm2
-    - mdadm
-    - hdparm
-    - cryptsetup
-    - ntfs-3g
-    - xfsprogs
-    - nfs-common
-    - cifs-utils
     - openssh-server
-    - ufw
-    - fail2ban
     - apparmor
     - auditd
-    - clamav
-    - clamav-freshclam
-    - lynis
-    - rkhunter
-    - gpg
     - qemu-guest-agent
 
   development:

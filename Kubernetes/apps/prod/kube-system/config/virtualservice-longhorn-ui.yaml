@@ -1,18 +1,40 @@
+# Kubernetes/apps/prod/kube-system/config/virtualservice-longhorn-ui.yaml
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
   name: longhorn-ui
   namespace: kube-system
+  labels:
+    app.kubernetes.io/name: longhorn-ui
+    app.kubernetes.io/component: virtualservice
+    app.kubernetes.io/part-of: longhorn
+    security.sinlessgames.io/exposure: protected-edge
 spec:
   gateways:
     - istio-system/shared-edge
   hosts:
     - longhorn.sinlessgames.com
   http:
-    - name: longhorn
+    - name: longhorn-ui
       match:
         - authority:
             exact: longhorn.sinlessgames.com
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: "https"
+            X-Forwarded-Host: "longhorn.sinlessgames.com"
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "strict-origin-when-cross-origin"
+            Permissions-Policy: "camera=(), microphone=(), geolocation=()"
+      timeout: 30s
+      retries:
+        attempts: 2
+        perTryTimeout: 10s
+        retryOn: connect-failure,refused-stream,unavailable,gateway-error
       route:
         - destination:
             host: longhorn-frontend.kube-system.svc.cluster.local

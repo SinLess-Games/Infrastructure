@@ -1,8 +1,64 @@
+# Kubernetes/apps/prod/monitoring/kube-prometheus-stack/values.yaml
+
 grafana:
   enabled: false
+
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: true
+    configReloaders: true
+    general: true
+    k8s: true
+    kubeApiserverAvailability: true
+    kubeApiserverBurnrate: true
+    kubeApiserverHistogram: true
+    kubeApiserverSlos: true
+    kubeControllerManager: true
+    kubelet: true
+    kubeProxy: true
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    kubeSchedulerAlerting: true
+    kubeSchedulerRecording: true
+    kubeStateMetrics: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true
+
 alertmanager:
+  enabled: true
+
+  serviceMonitor:
+    selfMonitor: true
+    additionalLabels:
+      release: kube-prometheus-stack
+
   alertmanagerSpec:
-    replicas: 1
+    replicas: 2
+    retention: 120h
+
+    serviceAccountName: kube-prometheus-stack-alertmanager
+
+    nodeSelector:
+      sinlessgames.com/role: worker
+
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 2000
+      fsGroup: 2000
+      seccompProfile:
+        type: RuntimeDefault
+
     resources:
       requests:
         cpu: 100m
@@ -10,42 +66,120 @@ alertmanager:
       limits:
         cpu: 500m
         memory: 512Mi
+
     storage:
       volumeClaimTemplate:
         spec:
           storageClassName: longhorn
-          accessModes: ["ReadWriteOnce"]
+          accessModes:
+            - ReadWriteOnce
           resources:
             requests:
               storage: 10Gi
+
 prometheus:
+  enabled: true
+
+  serviceMonitor:
+    selfMonitor: true
+    additionalLabels:
+      release: kube-prometheus-stack
+
   prometheusSpec:
-    replicas: 1
-    retention: 15d
+    replicas: 2
+
+    retention: 7d
+    retentionSize: 80GB
+
+    serviceAccountName: kube-prometheus-stack-prometheus
+
+    nodeSelector:
+      sinlessgames.com/role: worker
+
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 2000
+      fsGroup: 2000
+      seccompProfile:
+        type: RuntimeDefault
+
     resources:
       requests:
-        cpu: 200m
-        memory: 1Gi
+        cpu: 500m
+        memory: 2Gi
       limits:
         cpu: "2"
-        memory: 4Gi
+        memory: 6Gi
+
+    externalLabels:
+      cluster: rke2-prod
+      environment: prod
+
+    walCompression: true
+
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    serviceMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    serviceMonitorNamespaceSelector:
+      matchLabels:
+        monitoring.sinlessgames.io/scrape: "true"
+
+    podMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    podMonitorNamespaceSelector:
+      matchLabels:
+        monitoring.sinlessgames.io/scrape: "true"
+
+    probeSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    probeNamespaceSelector:
+      matchLabels:
+        monitoring.sinlessgames.io/scrape: "true"
+
+    ruleSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    ruleNamespaceSelector:
+      matchLabels:
+        monitoring.sinlessgames.io/rules: "true"
+
+    remoteWrite:
+      - url: http://mimir-nginx.monitoring.svc.cluster.local/api/v1/push
+        queueConfig:
+          capacity: 10000
+          maxSamplesPerSend: 2000
+          maxShards: 20
+          minShards: 2
+
     storageSpec:
       volumeClaimTemplate:
         spec:
           storageClassName: longhorn
-          accessModes: ["ReadWriteOnce"]
+          accessModes:
+            - ReadWriteOnce
           resources:
             requests:
               storage: 100Gi
-    serviceMonitorSelectorNilUsesHelmValues: false
-    podMonitorSelectorNilUsesHelmValues: false
-    remoteWrite:
-      - url: http://mimir-nginx.monitoring.svc.cluster.local/api/v1/push
-    externalLabels:
-      cluster: rke2-prod
-defaultRules:
-  create: true
+
 prometheusOperator:
+  serviceMonitor:
+    selfMonitor: true
+    additionalLabels:
+      release: kube-prometheus-stack
+
+  admissionWebhooks:
+    enabled: true
+    patch:
+      enabled: true
+
   resources:
     requests:
       cpu: 100m
@@ -53,8 +187,16 @@ prometheusOperator:
     limits:
       cpu: 500m
       memory: 512Mi
+
 prometheus-node-exporter:
   enabled: true
+
+  prometheus:
+    monitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+
   resources:
     requests:
       cpu: 50m
@@ -62,8 +204,16 @@ prometheus-node-exporter:
     limits:
       cpu: 250m
       memory: 256Mi
+
 kube-state-metrics:
   enabled: true
+
+  prometheus:
+    monitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+
   resources:
     requests:
       cpu: 100m

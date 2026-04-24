@@ -1,0 +1,74 @@
+# Kubernetes/apps/prod/security/trivy/values.yaml
+
+operator:
+  replicas: 1
+
+  # Empty means scan all namespaces.
+  targetNamespaces: ""
+
+  # Keep scan jobs out of control-plane nodes.
+  scanJobNodeSelector:
+    sinlessgames.com/role: worker
+
+  scanJobTolerations: []
+
+  # Safer default. Scan jobs do not need Kubernetes API tokens.
+  scanJobAutomountServiceAccountToken: false
+
+  builtInTrivyServer: true
+
+  metricsFindingsEnabled: true
+  metricsVulnIdEnabled: true
+  metricsExposedSecretInfo: true
+  metricsConfigAuditInfo: true
+  metricsRbacAssessmentInfo: true
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack
+
+trivy:
+  ignoreUnfixed: false
+  severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+
+  # Start with image vulnerability scanning.
+  # Add secret/config/RBAC scanning after the operator is stable.
+  scanners:
+    - vuln
+    - config
+    - secret
+    - rbac
+
+  timeout: 10m0s
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+trivyOperator:
+  scanJobTTL: 24h
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

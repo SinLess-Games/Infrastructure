@@ -1,0 +1,75 @@
+# Kubernetes/apps/prod/security/policies/clusterpolicy-require-resources.yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-container-resources
+  labels:
+    app.kubernetes.io/name: require-container-resources
+    app.kubernetes.io/component: admission-policy
+    app.kubernetes.io/part-of: kyverno
+    security.sinlessgames.io/policy: workload-resources
+  annotations:
+    policies.kyverno.io/title: Require Container Requests and Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Requires CPU and memory requests and limits on all regular containers
+      and init containers.
+spec:
+  validationFailureAction: Audit
+  background: true
+
+  rules:
+    - name: containers-must-have-requests-and-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - networking
+                - security
+                - gitops
+
+      validate:
+        message: "CPU and memory requests and limits are required for every container."
+        foreach:
+          - list: "request.object.spec.containers[]"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.resources.requests.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.requests.memory || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.memory || '' }}"
+                    operator: Equals
+                    value: ""
+
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.resources.requests.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.requests.memory || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.memory || '' }}"
+                    operator: Equals
+                    value: ""

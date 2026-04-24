@@ -1,7 +1,13 @@
+# Kubernetes/apps/prod/security/external-secrets/clusterrolebinding-tokenreview.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: external-secrets-tokenreview
+  labels:
+    app.kubernetes.io/name: external-secrets-tokenreview
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/part-of: external-secrets
+    security.sinlessgames.io/rbac-scope: tokenreview
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

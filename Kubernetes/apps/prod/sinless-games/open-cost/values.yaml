@@ -1,20 +1,262 @@
+# Kubernetes/apps/prod/sinless-games/open-cost/values.yaml
+
+fullnameOverride: opencost
+loglevel: info
+
+serviceAccount:
+  create: true
+  name: opencost
+
+  # OpenCost needs Kubernetes API read access for cluster cost allocation.
+  # Keep this enabled unless you intentionally remove OpenCost's Kubernetes visibility.
+  automountServiceAccountToken: true
+  annotations:
+    security.sinlessgames.io/purpose: "ServiceAccount for OpenCost cost allocation."
+    security.sinlessgames.io/least-privilege: "true"
+    security.sinlessgames.io/write-access: "false"
+
+podAutomountServiceAccountToken: true
+
+rbac:
+  enabled: true
+
+podLabels:
+  app.kubernetes.io/name: opencost
+  app.kubernetes.io/instance: opencost
+  app.kubernetes.io/component: cost-observability
+  app.kubernetes.io/part-of: sinless-games-platform
+  app.kubernetes.io/managed-by: gitops
+  security.sinlessgames.io/mtls: istio-strict
+
+podAnnotations:
+  sidecar.istio.io/inject: "true"
+  sidecar.istio.io/rewriteAppHTTPProbers: "true"
+  proxy.istio.io/config: |
+    {
+      "holdApplicationUntilProxyStarts": true
+    }
+  security.sinlessgames.io/purpose: "OpenCost cost observability workload."
+  security.sinlessgames.io/automount-service-account-token: "true"
+  security.sinlessgames.io/reason: "OpenCost requires Kubernetes API read access for cost allocation."
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+service:
+  enabled: true
+  type: ClusterIP
+  labels:
+    app.kubernetes.io/name: opencost
+    app.kubernetes.io/instance: opencost
+    app.kubernetes.io/component: cost-observability
+    app.kubernetes.io/part-of: sinless-games-platform
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/mtls: istio-strict
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: Platform
+    gethomepage.dev/name: OpenCost
+    gethomepage.dev/icon: opencost.png
+    gethomepage.dev/description: Kubernetes cost visibility
+    gethomepage.dev/href: https://opencost.sinlessgames.com
+    security.sinlessgames.io/public-exposure: "false"
+    security.sinlessgames.io/ingress-required: "istio-gateway"
+
+networkPolicies:
+  enabled: true
+  prometheus:
+    namespace: monitoring
+    port: 9090
+    labels:
+      app.kubernetes.io/name: prometheus
+
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+pdb:
+  enabled: true
+  maxUnavailable: 1
+
+extraVolumes:
+  - name: opencost-tmp
+    emptyDir:
+      sizeLimit: 256Mi
+  - name: opencost-ui-cache
+    emptyDir:
+      sizeLimit: 256Mi
+  - name: opencost-ui-run
+    emptyDir:
+      sizeLimit: 64Mi
+
 opencost:
   prometheus:
+    insecureSkipVerify: false
+
     internal:
+      enabled: true
       namespaceName: monitoring
       serviceName: kube-prometheus-stack-prometheus
       port: 9090
+      scheme: http
+
+    external:
+      enabled: false
+
+    thanos:
+      enabled: false
+
+  cloudCost:
+    enabled: false
+
+  carbonCost:
+    enabled: false
+
+  # Disable this unless you explicitly want AI-agent/MCP access to cost data.
+  # The current chart exposes MCP config separately, and disabling it is safer.
+  mcp:
+    enabled: false
+
   exporter:
     defaultClusterId: rke2-prod
+    replicas: 1
+    apiPort: 9003
+
     persistence:
       enabled: true
       storageClass: longhorn
       accessMode: ReadWriteOnce
       size: 10Gi
+      mountPath: /mnt/export
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 750m
+        memory: 1Gi
+
+    startupProbe:
+      enabled: true
+      path: /healthz
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      failureThreshold: 30
+
+    readinessProbe:
+      enabled: true
+      path: /healthz
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      failureThreshold: 6
+
+    livenessProbe:
+      enabled: true
+      path: /healthz
+      initialDelaySeconds: 30
+      periodSeconds: 20
+      failureThreshold: 6
+
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+
+    extraVolumeMounts:
+      - name: opencost-tmp
+        mountPath: /tmp
+
   metrics:
+    kubeStateMetrics:
+      emitPodAnnotations: false
+      emitNamespaceAnnotations: false
+
     serviceMonitor:
       enabled: true
+
+      # Put the ServiceMonitor where kube-prometheus-stack is watching.
+      # The chart still points the ServiceMonitor namespaceSelector back to the Helm release namespace.
+      namespace: monitoring
+
       additionalLabels:
         release: kube-prometheus-stack
+
+      scrapeInterval: 30s
+      scrapeTimeout: 10s
+      honorLabels: true
+      scheme: http
+
   ui:
     enabled: true
+    uiPort: 9090
+    useDefaultFqdn: true
+    useIPv6: false
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+
+    livenessProbe:
+      enabled: true
+      path: /healthz
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 3
+
+    readinessProbe:
+      enabled: true
+      path: /healthz
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 3
+
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+
+    extraVolumeMounts:
+      - name: opencost-tmp
+        mountPath: /tmp
+      - name: opencost-ui-cache
+        mountPath: /var/cache/nginx
+      - name: opencost-ui-run
+        mountPath: /var/run
+
+    ingress:
+      enabled: false
+
+    route:
+      enabled: false
+
+    httpRoute:
+      enabled: false

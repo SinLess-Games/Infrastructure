@@ -1,0 +1,61 @@
+# Kubernetes/apps/prod/sinless-games/namespace/resourcequota.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: sinless-games-resource-quota
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: sinless-games-resource-quota
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/component: namespace-guardrails
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: resource-quota
+    security.sinlessgames.io/environment: prod
+  annotations:
+    security.sinlessgames.io/purpose: "Namespace-level quota guardrails for production workloads."
+    security.sinlessgames.io/reason: "Prevent accidental resource exhaustion, uncontrolled object creation, and public service exposure."
+spec:
+  hard:
+    # Compute guardrails.
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "24"
+    limits.memory: 48Gi
+
+    # Ephemeral storage guardrails.
+    requests.ephemeral-storage: 8Gi
+    limits.ephemeral-storage: 32Gi
+
+    # Pod/object count guardrails.
+    count/pods: "80"
+    count/deployments.apps: "40"
+    count/statefulsets.apps: "20"
+    count/replicasets.apps: "80"
+    count/jobs.batch: "30"
+    count/cronjobs.batch: "20"
+
+    # Config and secret sprawl guardrails.
+    count/configmaps: "80"
+    count/secrets: "80"
+
+    # Service exposure guardrails.
+    count/services: "40"
+    services.nodeports: "0"
+    services.loadbalancers: "0"
+
+    # Ingress should not be the main exposure path.
+    # Prefer Istio Gateway + VirtualService.
+    count/ingresses.networking.k8s.io: "5"
+
+    # Network/security policy object guardrails.
+    count/networkpolicies.networking.k8s.io: "80"
+    count/roles.rbac.authorization.k8s.io: "60"
+    count/rolebindings.rbac.authorization.k8s.io: "60"
+
+    # PVC/storage guardrails.
+    count/persistentvolumeclaims: "30"
+    requests.storage: 750Gi
+
+    # Longhorn-specific quota.
+    longhorn.storageclass.storage.k8s.io/requests.storage: 750Gi
+    longhorn.storageclass.storage.k8s.io/persistentvolumeclaims: "30"

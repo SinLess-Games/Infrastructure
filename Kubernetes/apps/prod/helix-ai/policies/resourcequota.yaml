@@ -9,4 +9,22 @@ spec:
     requests.memory: 64Gi
     limits.cpu: "48"
     limits.memory: 128Gi
+
+    requests.storage: 500Gi
+    longhorn.storageclass.storage.k8s.io/requests.storage: 500Gi
+    longhorn.storageclass.storage.k8s.io/persistentvolumeclaims: "20"
+
     persistentvolumeclaims: "20"
+    pods: "200"
+
+    services: "50"
+    services.loadbalancers: "0"
+    services.nodeports: "0"
+
+    secrets: "200"
+    configmaps: "200"
+
+    count/deployments.apps: "50"
+    count/statefulsets.apps: "25"
+    count/jobs.batch: "100"
+    count/cronjobs.batch: "25"

@@ -1,12 +1,25 @@
+# Kubernetes/apps/prod/kube-system/namespace/namespace.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
   name: kube-system
   labels:
     kubernetes.io/metadata.name: kube-system
+
+    # Never inject sidecars into kube-system.
     istio-injection: disabled
+
+    # Pod Security Admission
     pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/warn-version: latest
+
+    # Environment / ownership
     topology.kubernetes.io/environment: prod
-  annotations:
-    scheduler.alpha.kubernetes.io/defaultTolerations: "[]"
+    app.kubernetes.io/name: kube-system
+    app.kubernetes.io/component: cluster-system
+    app.kubernetes.io/part-of: platform
+    security.sinlessgames.io/zone: cluster-critical

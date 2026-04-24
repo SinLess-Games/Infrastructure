@@ -1,0 +1,108 @@
+# Kubernetes/apps/prod/security/crowdsec/values.yaml
+
+container_runtime: containerd
+
+image:
+  pullPolicy: IfNotPresent
+
+agent:
+  enabled: true
+
+  daemonset:
+    enabled: true
+
+  # CrowdSec needs node log access. Keep this isolated in the security namespace.
+  acquisition:
+    - namespace: kube-system
+      podName: ".*"
+      program: kubernetes
+    - namespace: istio-system
+      podName: ".*"
+      program: kubernetes
+    - namespace: monitoring
+      podName: ".*"
+      program: kubernetes
+    - namespace: networking
+      podName: ".*"
+      program: kubernetes
+
+  env:
+    - name: COLLECTIONS
+      value: "crowdsecurity/linux crowdsecurity/k8s-audit crowdsecurity/nginx crowdsecurity/http-cve crowdsecurity/whitelist-good-actors"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  tolerations:
+    - operator: Exists
+
+lapi:
+  enabled: true
+  replicas: 2
+
+  persistentVolume:
+    enabled: true
+    storageClassName: longhorn
+    size: 10Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+config:
+  config.yaml.local: |
+    api:
+      server:
+        auto_registration:
+          enabled: true
+          token: "${REGISTRATION_TOKEN}"
+          allowed_ranges:
+            - "127.0.0.1/32"
+            - "10.42.0.0/16"
+            - "10.43.0.0/16"
+      client:
+        unregister_on_exit: true
+
+    prometheus:
+      enabled: true
+      level: full
+      listen_addr: 0.0.0.0
+      listen_port: 6060
+
+tls:
+  enabled: false
+
+appsec:
+  enabled: false
+
+service:
+  type: ClusterIP
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
+
+dashboard:
+  enabled: false
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL

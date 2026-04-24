@@ -1,10 +1,25 @@
+# Kubernetes/apps/prod/sinless-games/policies/networkpolicy-default-deny.yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: default-deny
+  name: sinless-games-default-deny
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: sinless-games-default-deny
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: network
+    security.sinlessgames.io/default-deny-ingress: "true"
+    security.sinlessgames.io/default-deny-egress: "true"
+  annotations:
+    security.sinlessgames.io/purpose: "Namespace-wide default deny for all ingress and egress traffic."
+    security.sinlessgames.io/reason: "Require every workload to have explicit NetworkPolicy allow rules."
+    security.sinlessgames.io/internet-egress: "false"
+    security.sinlessgames.io/public-ingress: "false"
 spec:
   podSelector: {}
+
   policyTypes:
     - Ingress
     - Egress

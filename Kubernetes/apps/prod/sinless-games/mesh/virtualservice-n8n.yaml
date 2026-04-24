@@ -1,16 +1,71 @@
+# Kubernetes/apps/prod/sinless-games/mesh/virtualservice-n8n.yaml
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
   name: n8n
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: n8n
+    app.kubernetes.io/instance: n8n
+    app.kubernetes.io/component: automation
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/exposure: public
+    security.sinlessgames.io/ingress: istio
+    security.sinlessgames.io/mtls: istio-strict
+  annotations:
+    security.sinlessgames.io/purpose: "Expose n8n through the shared Istio edge gateway."
+    security.sinlessgames.io/public-hostname: "n8n.sinlessgames.com"
+    security.sinlessgames.io/tls-termination: "istio-ingressgateway"
+    security.sinlessgames.io/backend-mtls: "true"
 spec:
+  exportTo:
+    - "."
+    - "istio-system"
+
   gateways:
     - istio-system/shared-edge
+
   hosts:
     - n8n.sinlessgames.com
+
   http:
-    - route:
+    - name: n8n-http-redirect
+      match:
+        - port: 80
+          authority:
+            exact: n8n.sinlessgames.com
+          uri:
+            prefix: /
+      redirect:
+        scheme: https
+        redirectCode: 301
+
+    - name: n8n-https-route
+      match:
+        - port: 443
+          authority:
+            exact: n8n.sinlessgames.com
+          uri:
+            prefix: /
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: https
+            X-Forwarded-Host: n8n.sinlessgames.com
+        response:
+          set:
+            Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+            X-Content-Type-Options: nosniff
+            Referrer-Policy: strict-origin-when-cross-origin
+            Permissions-Policy: "camera=(), microphone=(), geolocation=()"
+      route:
         - destination:
             host: n8n.sinless-games.svc.cluster.local
             port:
               number: 80
+      timeout: 300s
+      retries:
+        attempts: 2
+        perTryTimeout: 30s
+        retryOn: connect-failure,refused-stream,unavailable,gateway-error

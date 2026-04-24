@@ -1,13 +1,30 @@
+# Kubernetes/apps/prod/networking/namespace/resourcequota.yaml
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: networking-quota
   namespace: networking
+  labels:
+    app.kubernetes.io/name: networking-quota
+    app.kubernetes.io/component: namespace-policy
+    app.kubernetes.io/part-of: networking
+    security.sinlessgames.io/policy: resource-quota
 spec:
   hard:
     requests.cpu: "4"
     requests.memory: 8Gi
+
     limits.cpu: "8"
     limits.memory: 16Gi
-    persistentvolumeclaims: "5"
+
     pods: "100"
+    persistentvolumeclaims: "0"
+
+    services: "50"
+    services.loadbalancers: "0"
+    services.nodeports: "0"
+
+    secrets: "100"
+    configmaps: "100"
+
+    count/dnsendpoints.externaldns.k8s.io: "50"

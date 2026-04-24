@@ -1,0 +1,25 @@
+# Kubernetes/apps/prod/security/wazuh/networkpolicy-wazuh-agent-egress.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: wazuh-agent-egress
+  namespace: security
+  labels:
+    app.kubernetes.io/name: wazuh-agent-egress
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: wazuh
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: wazuh-agent
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.10.10.21/32
+      ports:
+        - protocol: TCP
+          port: 1514
+        - protocol: TCP
+          port: 1515

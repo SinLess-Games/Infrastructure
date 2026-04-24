@@ -1,7 +1,11 @@
+# Kubernetes/apps/prod/security/velero/values.yaml
+
 credentials:
   useSecret: true
   existingSecret: velero-s3-credentials
+
 upgradeCRDs: false
+
 initContainers:
   - name: velero-plugin-for-aws
     image: velero/velero-plugin-for-aws:v1.11.0
@@ -9,22 +13,92 @@ initContainers:
     volumeMounts:
       - mountPath: /target
         name: plugins
+
 configuration:
+  defaultBackupStorageLocation: default
+
   backupStorageLocation:
     - name: default
       provider: aws
       bucket: k8s-prod-velero
+      default: true
       config:
         region: us-east-1
         s3ForcePathStyle: "true"
-        s3Url: http://garage-s3.sinless-games.svc.cluster.local:3900
+        s3Url: https://garage-s3.sinless-games.svc.cluster.local:3900
+        checksumAlgorithm: ""
+
   volumeSnapshotLocation:
     - name: default
       provider: aws
+      config:
+        region: us-east-1
+
+  features: EnableCSI
+
 deployNodeAgent: true
+
+defaultVolumesToFsBackup: true
+
+nodeAgent:
+  tolerations:
+    - operator: Exists
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: kube-prometheus-stack
+
+metrics:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
 schedules:
   daily:
     disabled: false
     schedule: "0 2 * * *"
     template:
       ttl: 168h
+      storageLocation: default
+      snapshotVolumes: false
+      defaultVolumesToFsBackup: true
+      includedNamespaces:
+        - "*"
+      excludedNamespaces:
+        - kube-node-lease
+      excludedResources:
+        - events
+        - events.events.k8s.io
+        - leases.coordination.k8s.io
+        - endpoints
+        - endpointslices.discovery.k8s.io
+        - replicasets.apps
+        - controllerrevisions.apps
+        - podmetrics.metrics.k8s.io
+        - nodemetrics.metrics.k8s.io

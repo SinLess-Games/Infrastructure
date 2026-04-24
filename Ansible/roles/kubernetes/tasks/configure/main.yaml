@@ -226,11 +226,28 @@
     - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
     - kubernetes_kube_vip.enabled | bool
 
+- name: Check if RKE2 server is active on primary control plane
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - rke2-server
+  register: kubernetes_role_rke2_server_active
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_kube_vip.enabled | bool
+    - kubernetes_role_kube_vip_manifest is defined
+    - kubernetes_role_kube_vip_manifest.changed | bool
+
 - name: Recreate kube-vip pod when manifest spec changes
   ansible.builtin.command:
     argv:
-      - /var/lib/rancher/rke2/bin/kubectl
-      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - /usr/local/bin/rke2
+      - kubectl
+      - --kubeconfig
+      - /etc/rancher/rke2/rke2.yaml
       - delete
       - pod
       - kube-vip
@@ -244,12 +261,16 @@
     - kubernetes_kube_vip.enabled | bool
     - kubernetes_role_kube_vip_manifest is defined
     - kubernetes_role_kube_vip_manifest.changed | bool
+    - kubernetes_role_rke2_server_active is defined
+    - kubernetes_role_rke2_server_active.rc == 0
 
 - name: Apply kube-vip manifest after pod recreation
   ansible.builtin.command:
     argv:
-      - /var/lib/rancher/rke2/bin/kubectl
-      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - /usr/local/bin/rke2
+      - kubectl
+      - --kubeconfig
+      - /etc/rancher/rke2/rke2.yaml
       - apply
       - -f
       - /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
@@ -259,6 +280,8 @@
     - kubernetes_kube_vip.enabled | bool
     - kubernetes_role_kube_vip_manifest is defined
     - kubernetes_role_kube_vip_manifest.changed | bool
+    - kubernetes_role_rke2_server_active is defined
+    - kubernetes_role_rke2_server_active.rc == 0
 
 - name: Render RKE2 server configuration
   ansible.builtin.template:

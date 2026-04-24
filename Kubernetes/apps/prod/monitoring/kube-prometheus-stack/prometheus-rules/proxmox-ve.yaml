@@ -1,100 +1,179 @@
+# Kubernetes/apps/prod/monitoring/kube-prometheus-stack/prometheus-rules/proxmox-ve.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: kube-prometheus-stack-proxmox-ve
   namespace: monitoring
   labels:
+    app.kubernetes.io/name: proxmox-ve-rules
+    app.kubernetes.io/component: prometheus-rules
+    app.kubernetes.io/part-of: monitoring
     release: kube-prometheus-stack
+    security.sinlessgames.io/policy: monitored
 spec:
   groups:
-  
-  - name: PrometheusPveExporter
-  
-    
-    rules:
-  
-      - alert: PveNodeDown
-        expr: 'pve_up{id=~"node/.*"} == 0'
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: PVE node down (instance {{ $labels.instance }})
-          description: "Proxmox VE node {{ $labels.id }} is down.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      # This alert triggers for all VMs and containers that are not running.
-      # You may want to filter by specific guests using the `id` label, or exclude
-      # intentionally stopped guests with additional label matchers.
-      - alert: PveVm/ctDown
-        expr: 'pve_up{id=~"(qemu|lxc)/.*"} == 0'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: PVE VM/CT down (instance {{ $labels.instance }})
-          description: "Proxmox VE guest {{ $labels.id }} is not running.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: PveHighCpuUsage
-        expr: 'pve_cpu_usage_ratio * 100 > 90'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: PVE high CPU usage (instance {{ $labels.instance }})
-          description: "Proxmox VE CPU usage is above 90% on {{ $labels.id }}. Current value: {{ $value | printf \"%.2f\" }}%\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: PveHighMemoryUsage
-        expr: 'pve_memory_usage_bytes / pve_memory_size_bytes * 100 > 90 and pve_memory_size_bytes > 0'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: PVE high memory usage (instance {{ $labels.instance }})
-          description: "Proxmox VE memory usage is above 90% on {{ $labels.id }}. Current value: {{ $value | printf \"%.2f\" }}%\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: PveStorageFillingUp
-        expr: 'pve_disk_usage_bytes{id=~"storage/.*"} / pve_disk_size_bytes{id=~"storage/.*"} * 100 > 80 and pve_disk_size_bytes{id=~"storage/.*"} > 0'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: PVE storage filling up (instance {{ $labels.instance }})
-          description: "Proxmox VE storage {{ $labels.id }} is above 80% used. Current value: {{ $value | printf \"%.2f\" }}%\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: PveStorageAlmostFull
-        expr: 'pve_disk_usage_bytes{id=~"storage/.*"} / pve_disk_size_bytes{id=~"storage/.*"} * 100 > 95 and pve_disk_size_bytes{id=~"storage/.*"} > 0'
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: PVE storage almost full (instance {{ $labels.instance }})
-          description: "Proxmox VE storage {{ $labels.id }} is above 95% used. Current value: {{ $value | printf \"%.2f\" }}%\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: PveGuestNotBackedUp
-        expr: 'pve_not_backed_up_total > 0'
-        for: 0m
-        labels:
-          severity: warning
-        annotations:
-          summary: PVE guest not backed up (instance {{ $labels.instance }})
-          description: "{{ $value }} Proxmox VE guest(s) are not covered by any backup job.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: PveReplicationFailed
-        expr: 'pve_replication_failed_syncs > 0'
-        for: 0m
-        labels:
-          severity: warning
-        annotations:
-          summary: PVE replication failed (instance {{ $labels.instance }})
-          description: "Proxmox VE replication for {{ $labels.id }} has {{ $value }} failed sync(s).\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      # Loss of quorum means the cluster cannot make decisions about VM placement
-      # and fencing. This requires immediate attention.
-      - alert: PveClusterNotQuorate
-        expr: 'pve_cluster_info{quorate="0"} == 1'
-        for: 0m
-        labels:
-          severity: critical
-        annotations:
-          summary: PVE cluster not quorate (instance {{ $labels.instance }})
-          description: "Proxmox VE cluster has lost quorum.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+    - name: proxmox.cluster
+      rules:
+        - alert: PveClusterNotQuorate
+          expr: pve_cluster_info{quorate="0"} == 1
+          for: 1m
+          labels:
+            severity: critical
+            component: proxmox
+          annotations:
+            summary: "Proxmox VE cluster has lost quorum"
+            description: |
+              Proxmox VE cluster is not quorate.
+
+              This requires immediate attention because the cluster may be unable to make safe placement, HA, or fencing decisions.
+
+              Instance: {{ $labels.instance }}
+              Value: {{ $value }}
+
+        - alert: PveNodeDown
+          expr: pve_up{id=~"node/.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: proxmox
+          annotations:
+            summary: "Proxmox VE node is down: {{ $labels.id }}"
+            description: |
+              Proxmox VE node {{ $labels.id }} is down or unreachable by the exporter.
+
+              Instance: {{ $labels.instance }}
+              Value: {{ $value }}
+
+    - name: proxmox.guests
+      rules:
+        - alert: PveGuestDown
+          expr: pve_up{id=~"(qemu|lxc)/.*"} == 0
+          for: 10m
+          labels:
+            severity: warning
+            component: proxmox
+          annotations:
+            summary: "Proxmox VE guest is not running: {{ $labels.id }}"
+            description: |
+              Proxmox VE guest {{ $labels.id }} is not running.
+
+              This can be expected for intentionally stopped guests. Add filtering or relabeling if some guests should be ignored.
+
+              Instance: {{ $labels.instance }}
+              Value: {{ $value }}
+
+        - alert: PveGuestNotBackedUp
+          expr: pve_not_backed_up_total > 0
+          for: 30m
+          labels:
+            severity: warning
+            component: proxmox
+          annotations:
+            summary: "Proxmox VE guests are missing backup coverage"
+            description: |
+              One or more Proxmox VE guests are not covered by any backup job.
+
+              Missing backup count: {{ $value }}
+              Instance: {{ $labels.instance }}
+
+    - name: proxmox.resources
+      rules:
+        - alert: PveHighCpuUsage
+          expr: pve_cpu_usage_ratio * 100 > 90
+          for: 10m
+          labels:
+            severity: warning
+            component: proxmox
+          annotations:
+            summary: "Proxmox VE CPU usage is high: {{ $labels.id }}"
+            description: |
+              Proxmox VE CPU usage is above 90%.
+
+              Resource: {{ $labels.id }}
+              Instance: {{ $labels.instance }}
+              CPU percentage: {{ $value | printf "%.2f" }}
+
+        - alert: PveHighMemoryUsage
+          expr: |
+            (
+              pve_memory_usage_bytes
+              /
+              pve_memory_size_bytes
+            ) * 100 > 90
+            and
+            pve_memory_size_bytes > 0
+          for: 10m
+          labels:
+            severity: warning
+            component: proxmox
+          annotations:
+            summary: "Proxmox VE memory usage is high: {{ $labels.id }}"
+            description: |
+              Proxmox VE memory usage is above 90%.
+
+              Resource: {{ $labels.id }}
+              Instance: {{ $labels.instance }}
+              Memory percentage: {{ $value | printf "%.2f" }}
+
+    - name: proxmox.storage
+      rules:
+        - alert: PveStorageFillingUp
+          expr: |
+            (
+              pve_disk_usage_bytes{id=~"storage/.*"}
+              /
+              pve_disk_size_bytes{id=~"storage/.*"}
+            ) * 100 > 80
+            and
+            pve_disk_size_bytes{id=~"storage/.*"} > 0
+          for: 15m
+          labels:
+            severity: warning
+            component: proxmox
+          annotations:
+            summary: "Proxmox VE storage is filling up: {{ $labels.id }}"
+            description: |
+              Proxmox VE storage is above 80% used.
+
+              Storage: {{ $labels.id }}
+              Instance: {{ $labels.instance }}
+              Used percentage: {{ $value | printf "%.2f" }}
+
+        - alert: PveStorageAlmostFull
+          expr: |
+            (
+              pve_disk_usage_bytes{id=~"storage/.*"}
+              /
+              pve_disk_size_bytes{id=~"storage/.*"}
+            ) * 100 > 95
+            and
+            pve_disk_size_bytes{id=~"storage/.*"} > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: proxmox
+          annotations:
+            summary: "Proxmox VE storage is almost full: {{ $labels.id }}"
+            description: |
+              Proxmox VE storage is above 95% used.
+
+              Storage: {{ $labels.id }}
+              Instance: {{ $labels.instance }}
+              Used percentage: {{ $value | printf "%.2f" }}
+
+    - name: proxmox.replication
+      rules:
+        - alert: PveReplicationFailed
+          expr: pve_replication_failed_syncs > 0
+          for: 10m
+          labels:
+            severity: warning
+            component: proxmox
+          annotations:
+            summary: "Proxmox VE replication failed: {{ $labels.id }}"
+            description: |
+              Proxmox VE replication has failed syncs.
+
+              Replication target: {{ $labels.id }}
+              Instance: {{ $labels.instance }}
+              Failed syncs: {{ $value }}

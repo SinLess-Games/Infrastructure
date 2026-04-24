@@ -1,5 +1,19 @@
+# Kubernetes/apps/prod/kube-system/config/runtimeclass-nvidia.yaml
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
   name: nvidia
+  labels:
+    app.kubernetes.io/name: nvidia-runtimeclass
+    app.kubernetes.io/component: gpu-runtime
+    app.kubernetes.io/part-of: nvidia
+    hardware.sinlessgames.io/gpu: "true"
 handler: nvidia
+scheduling:
+  nodeSelector:
+    hardware.sinlessgames.io/gpu: "true"
+  tolerations:
+    - key: hardware.sinlessgames.io/gpu
+      operator: Equal
+      value: "true"
+      effect: NoSchedule

@@ -1,0 +1,57 @@
+# Kubernetes/apps/prod/istio-system/mesh-policies/disallow-insecure-gateway-tls.yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-insecure-istio-gateway-tls
+  labels:
+    app.kubernetes.io/name: disallow-insecure-istio-gateway-tls
+    app.kubernetes.io/component: admission-policy
+    app.kubernetes.io/part-of: istio
+    security.sinlessgames.io/policy: gateway-tls
+  annotations:
+    policies.kyverno.io/title: Disallow Insecure Istio Gateway TLS
+    policies.kyverno.io/category: Istio Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Gateway
+    policies.kyverno.io/description: >-
+      Requires Istio HTTPS Gateway servers to terminate TLS using SIMPLE or MUTUAL mode
+      and to reference a TLS credential.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: https-gateway-tls-mode-must-be-simple-or-mutual
+      match:
+        any:
+          - resources:
+              kinds:
+                - Gateway.networking.istio.io
+      validate:
+        message: "Istio Gateway HTTPS servers must set tls.mode to SIMPLE or MUTUAL."
+        foreach:
+          - list: "request.object.spec.servers[?port.protocol == 'HTTPS']"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ element.tls.mode || '' }}"
+                    operator: AnyNotIn
+                    value:
+                      - SIMPLE
+                      - MUTUAL
+
+    - name: https-gateway-must-have-credential-name
+      match:
+        any:
+          - resources:
+              kinds:
+                - Gateway.networking.istio.io
+      validate:
+        message: "Istio Gateway HTTPS servers must set tls.credentialName."
+        foreach:
+          - list: "request.object.spec.servers[?port.protocol == 'HTTPS']"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.tls.credentialName || '' }}"
+                    operator: Equals
+                    value: ""

@@ -1,34 +1,91 @@
+# Kubernetes/apps/prod/sinless-games/garage/virtualservice-garage.yaml
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
   name: garage-s3
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage
+    app.kubernetes.io/component: virtualservice
+    app.kubernetes.io/part-of: garage
+    security.sinlessgames.io/exposure: public-edge
+  annotations:
+    security.sinlessgames.io/required-protection: >-
+      Garage WebUI routes must be protected by Cloudflare Access or equivalent
+      identity-aware access control.
 spec:
   gateways:
     - istio-system/shared-edge
+
   hosts:
     - s3.sinlessgames.com
     - external.sinlessgames.com
+
   http:
-    - match:
-        - uri:
+    # Garage WebUI root redirect on s3.sinlessgames.com only.
+    - name: garage-ui-root-redirect
+      match:
+        - authority:
+            exact: s3.sinlessgames.com
+          uri:
             exact: /
-      rewrite:
+      redirect:
         uri: /ui/
+
+    # Garage WebUI on s3.sinlessgames.com/ui only.
+    - name: garage-ui
+      match:
+        - authority:
+            exact: s3.sinlessgames.com
+          uri:
+            prefix: /ui/
+        - authority:
+            exact: s3.sinlessgames.com
+          uri:
+            exact: /ui
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: "https"
+            X-Forwarded-Host: "s3.sinlessgames.com"
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "strict-origin-when-cross-origin"
+            Permissions-Policy: "camera=(), microphone=(), geolocation=()"
+      timeout: 30s
+      retries:
+        attempts: 2
+        perTryTimeout: 10s
+        retryOn: connect-failure,refused-stream,unavailable,gateway-error
       route:
         - destination:
             host: garage-ui.sinless-games.svc.cluster.local
             port:
               number: 3909
-    - match:
-        - uri:
-            prefix: /ui
+
+    # S3 API traffic.
+    - name: garage-s3-api
+      match:
+        - authority:
+            exact: s3.sinlessgames.com
+        - authority:
+            exact: external.sinlessgames.com
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: "https"
+        response:
+          set:
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "no-referrer"
+      timeout: 300s
+      retries:
+        attempts: 2
+        perTryTimeout: 30s
+        retryOn: connect-failure,refused-stream,unavailable,gateway-error
       route:
-        - destination:
-            host: garage-ui.sinless-games.svc.cluster.local
-            port:
-              number: 3909
-    - route:
         - destination:
             host: garage-s3.sinless-games.svc.cluster.local
             port:

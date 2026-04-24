@@ -1,10 +1,28 @@
+# Kubernetes/apps/prod/networking/namespace/namespace.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
   name: networking
   labels:
     kubernetes.io/metadata.name: networking
+
+    # Do not inject sidecars into edge/DNS controllers by default.
     istio-injection: disabled
+
+    # Pod Security Admission
     pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+
+    # Allow hardened Prometheus selectors to scrape ServiceMonitors here.
+    monitoring.sinlessgames.io/scrape: "true"
+
+    # Environment / ownership
     topology.kubernetes.io/environment: prod
+    app.kubernetes.io/name: networking
+    app.kubernetes.io/component: network-edge
+    app.kubernetes.io/part-of: platform
+    security.sinlessgames.io/zone: edge-networking

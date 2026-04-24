@@ -1,14 +1,26 @@
+# Kubernetes/apps/prod/istio-system/namespace/limitrange.yaml
 apiVersion: v1
 kind: LimitRange
 metadata:
   name: default-limits
   namespace: istio-system
+  labels:
+    app.kubernetes.io/name: istio-system-limits
+    app.kubernetes.io/component: namespace-policy
+    app.kubernetes.io/part-of: istio
+    security.sinlessgames.io/policy: resource-limits
 spec:
   limits:
     - type: Container
       defaultRequest:
-        cpu: 50m
-        memory: 64Mi
+        cpu: 100m
+        memory: 128Mi
       default:
-        cpu: 500m
-        memory: 512Mi
+        cpu: 1000m
+        memory: 1Gi
+      min:
+        cpu: 10m
+        memory: 32Mi
+      max:
+        cpu: "4"
+        memory: 4Gi

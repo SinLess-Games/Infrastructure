@@ -70,4 +70,13 @@ provider "proxmox" {
   pm_api_token_id     = var.proxmox_api_token_id
   pm_api_token_secret = var.proxmox_api_token_secret
   pm_tls_insecure     = var.proxmox_tls_insecure
+
+  # API stability / timeout tuning
+  pm_timeout  = 1800 # 30 minutes to accommodate long-running operations
+  pm_parallel = 3
+
+  # Debugging / provider logs
+  pm_log_enable = false
+  pm_log_file   = "../.logs/terraform-plugin-proxmox.log"
+  pm_debug      = true
 }

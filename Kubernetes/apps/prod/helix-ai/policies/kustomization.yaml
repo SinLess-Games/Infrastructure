@@ -7,3 +7,5 @@ resources:
   - networkpolicy-default-deny.yaml
   - authorizationpolicy-default.yaml
   - peerauthentication-default.yaml
+  - authorizationpolicy-helix-ai-api.yaml
+  - authorizationpolicy-helix-ai-principals.yaml

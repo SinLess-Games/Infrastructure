@@ -1,75 +1,297 @@
+# Kubernetes/apps/prod/monitoring/kube-prometheus-stack/prometheus-rules/keycloak-metrics.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: kube-prometheus-stack-keycloak-metrics
   namespace: monitoring
   labels:
+    app.kubernetes.io/name: keycloak-metrics-rules
+    app.kubernetes.io/component: prometheus-rules
+    app.kubernetes.io/part-of: monitoring
     release: kube-prometheus-stack
+    security.sinlessgames.io/policy: monitored
 spec:
   groups:
-  
-  - name: AerogearKeycloakMetricsSpi
-  
-    
-    rules:
-  
-      # Threshold of 5% is a rough default. Adjust based on your user base and expected error rates.
-      # A spike in failed logins may indicate a brute-force attack or misconfigured client.
-      - alert: KeycloakHighLoginFailureRate
-        expr: '(sum by (realm) (rate(keycloak_failed_login_attempts_total[5m])) / (sum by (realm) (rate(keycloak_logins_total[5m])) + sum by (realm) (rate(keycloak_failed_login_attempts_total[5m])))) * 100 > 5 and (sum by (realm) (rate(keycloak_logins_total[5m])) + sum by (realm) (rate(keycloak_failed_login_attempts_total[5m]))) > 0'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: Keycloak high login failure rate (instance {{ $labels.instance }})
-          description: "More than 5% of login attempts are failing in realm {{ $labels.realm }} (current value: {{ $value | printf \"%.1f\" }}%).\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      # Only fires when login attempts exist but none succeed — may indicate an authentication outage.
-      - alert: KeycloakNoSuccessfulLogins
-        expr: 'sum by (realm) (rate(keycloak_logins_total[15m])) == 0 and (sum by (realm) (rate(keycloak_logins_total[15m])) + sum by (realm) (rate(keycloak_failed_login_attempts_total[15m]))) > 0'
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: Keycloak no successful logins (instance {{ $labels.instance }})
-          description: "No successful logins in realm {{ $labels.realm }} for the last 15 minutes.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      # Threshold of 10% is a rough default. High refresh token errors may indicate expired sessions or token store issues.
-      - alert: KeycloakHighTokenRefreshErrorRate
-        expr: '(sum by (realm) (rate(keycloak_refresh_tokens_errors_total[5m])) / sum by (realm) (rate(keycloak_refresh_tokens_total[5m]))) * 100 > 10 and sum by (realm) (rate(keycloak_refresh_tokens_total[5m])) > 0'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: Keycloak high token refresh error rate (instance {{ $labels.instance }})
-          description: "More than 10% of token refresh attempts are failing in realm {{ $labels.realm }} (current value: {{ $value | printf \"%.1f\" }}%).\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      # Threshold of 10% is a rough default. Code-to-token failures may indicate misconfigured OAuth clients or replay attacks.
-      - alert: KeycloakHighCode-to-tokenExchangeErrorRate
-        expr: '(sum by (realm) (rate(keycloak_code_to_tokens_errors_total[5m])) / sum by (realm) (rate(keycloak_code_to_tokens_total[5m]))) * 100 > 10 and sum by (realm) (rate(keycloak_code_to_tokens_total[5m])) > 0'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: Keycloak high code-to-token exchange error rate (instance {{ $labels.instance }})
-          description: "More than 10% of code-to-token exchanges are failing in realm {{ $labels.realm }} (current value: {{ $value | printf \"%.1f\" }}%).\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      # Threshold of 10% is a rough default.
-      - alert: KeycloakHighRegistrationFailureRate
-        expr: '(sum by (realm) (rate(keycloak_registrations_errors_total[5m])) / sum by (realm) (rate(keycloak_registrations_total[5m]))) * 100 > 10 and sum by (realm) (rate(keycloak_registrations_total[5m])) > 0'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: Keycloak high registration failure rate (instance {{ $labels.instance }})
-          description: "More than 10% of registration attempts are failing in realm {{ $labels.realm }} (current value: {{ $value | printf \"%.1f\" }}%).\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      # keycloak_request_duration is in milliseconds. Threshold of 2000ms (2 seconds) is a rough default.
-      - alert: KeycloakSlowRequestResponseTime
-        expr: 'sum by (method) (rate(keycloak_request_duration_sum[5m])) / sum by (method) (rate(keycloak_request_duration_count[5m])) > 2000 and sum by (method) (rate(keycloak_request_duration_count[5m])) > 0'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: Keycloak slow request response time (instance {{ $labels.instance }})
-          description: "Keycloak {{ $labels.method }} requests are taking more than 2 seconds on average.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+    - name: keycloak.authentication
+      rules:
+        - alert: KeycloakHighLoginFailureCount
+          expr: |
+            sum by (realm) (
+              increase(keycloak_failed_login_attempts_total[10m])
+            ) > 25
+          for: 5m
+          labels:
+            severity: warning
+            component: keycloak
+            security: authentication
+          annotations:
+            summary: "Keycloak login failures are high for realm {{ $labels.realm }}"
+            description: |
+              Keycloak has seen more than 25 failed login attempts in 10 minutes.
+
+              Realm: {{ $labels.realm }}
+              Failed login count: {{ $value }}
+
+              This may indicate a brute-force attack, broken client credentials, or user-facing auth problems.
+
+        - alert: KeycloakCriticalLoginFailureCount
+          expr: |
+            sum by (realm) (
+              increase(keycloak_failed_login_attempts_total[10m])
+            ) > 100
+          for: 5m
+          labels:
+            severity: critical
+            component: keycloak
+            security: authentication
+          annotations:
+            summary: "Keycloak login failures are critically high for realm {{ $labels.realm }}"
+            description: |
+              Keycloak has seen more than 100 failed login attempts in 10 minutes.
+
+              Realm: {{ $labels.realm }}
+              Failed login count: {{ $value }}
+
+              This is likely brute-force activity, a misconfigured client, or a major authentication outage.
+
+        - alert: KeycloakHighLoginFailureRate
+          expr: |
+            (
+              sum by (realm) (
+                rate(keycloak_failed_login_attempts_total[5m])
+              )
+              /
+              (
+                sum by (realm) (
+                  rate(keycloak_logins_total[5m])
+                )
+                +
+                sum by (realm) (
+                  rate(keycloak_failed_login_attempts_total[5m])
+                )
+              )
+            ) * 100 > 20
+            and
+            (
+              sum by (realm) (
+                rate(keycloak_logins_total[5m])
+              )
+              +
+              sum by (realm) (
+                rate(keycloak_failed_login_attempts_total[5m])
+              )
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: keycloak
+            security: authentication
+          annotations:
+            summary: "Keycloak login failure rate is high for realm {{ $labels.realm }}"
+            description: |
+              More than 20% of login attempts are failing.
+
+              Realm: {{ $labels.realm }}
+              Failure percentage: {{ $value | printf "%.1f" }}
+
+        - alert: KeycloakNoSuccessfulLogins
+          expr: |
+            sum by (realm) (
+              rate(keycloak_logins_total[15m])
+            ) == 0
+            and
+            (
+              sum by (realm) (
+                rate(keycloak_logins_total[15m])
+              )
+              +
+              sum by (realm) (
+                rate(keycloak_failed_login_attempts_total[15m])
+              )
+            ) > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: keycloak
+            security: authentication
+          annotations:
+            summary: "Keycloak has no successful logins for realm {{ $labels.realm }}"
+            description: |
+              Login attempts are occurring, but none have succeeded for 15 minutes.
+
+              Realm: {{ $labels.realm }}
+
+              This may indicate an authentication outage, identity provider issue, broken realm config, or client misconfiguration.
+
+    - name: keycloak.tokens
+      rules:
+        - alert: KeycloakHighTokenRefreshErrorRate
+          expr: |
+            (
+              sum by (realm) (
+                rate(keycloak_refresh_tokens_errors_total[5m])
+              )
+              /
+              sum by (realm) (
+                rate(keycloak_refresh_tokens_total[5m])
+              )
+            ) * 100 > 10
+            and
+            sum by (realm) (
+              rate(keycloak_refresh_tokens_total[5m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: keycloak
+            security: tokens
+          annotations:
+            summary: "Keycloak token refresh error rate is high for realm {{ $labels.realm }}"
+            description: |
+              More than 10% of token refresh attempts are failing.
+
+              Realm: {{ $labels.realm }}
+              Error percentage: {{ $value | printf "%.1f" }}
+
+        - alert: KeycloakHighTokenRefreshErrorCount
+          expr: |
+            sum by (realm) (
+              increase(keycloak_refresh_tokens_errors_total[10m])
+            ) > 50
+          for: 5m
+          labels:
+            severity: warning
+            component: keycloak
+            security: tokens
+          annotations:
+            summary: "Keycloak token refresh errors are high for realm {{ $labels.realm }}"
+            description: |
+              Keycloak has seen more than 50 token refresh errors in 10 minutes.
+
+              Realm: {{ $labels.realm }}
+              Error count: {{ $value }}
+
+        - alert: KeycloakHighCodeToTokenExchangeErrorRate
+          expr: |
+            (
+              sum by (realm) (
+                rate(keycloak_code_to_tokens_errors_total[5m])
+              )
+              /
+              sum by (realm) (
+                rate(keycloak_code_to_tokens_total[5m])
+              )
+            ) * 100 > 10
+            and
+            sum by (realm) (
+              rate(keycloak_code_to_tokens_total[5m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: keycloak
+            security: tokens
+          annotations:
+            summary: "Keycloak code-to-token exchange error rate is high for realm {{ $labels.realm }}"
+            description: |
+              More than 10% of code-to-token exchanges are failing.
+
+              Realm: {{ $labels.realm }}
+              Error percentage: {{ $value | printf "%.1f" }}
+
+              This may indicate misconfigured OAuth clients, redirect URI problems, expired authorization codes, or replay attempts.
+
+        - alert: KeycloakHighCodeToTokenExchangeErrorCount
+          expr: |
+            sum by (realm) (
+              increase(keycloak_code_to_tokens_errors_total[10m])
+            ) > 25
+          for: 5m
+          labels:
+            severity: warning
+            component: keycloak
+            security: tokens
+          annotations:
+            summary: "Keycloak code-to-token exchange errors are high for realm {{ $labels.realm }}"
+            description: |
+              Keycloak has seen more than 25 code-to-token exchange errors in 10 minutes.
+
+              Realm: {{ $labels.realm }}
+              Error count: {{ $value }}
+
+    - name: keycloak.registration
+      rules:
+        - alert: KeycloakHighRegistrationFailureRate
+          expr: |
+            (
+              sum by (realm) (
+                rate(keycloak_registrations_errors_total[5m])
+              )
+              /
+              sum by (realm) (
+                rate(keycloak_registrations_total[5m])
+              )
+            ) * 100 > 10
+            and
+            sum by (realm) (
+              rate(keycloak_registrations_total[5m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: keycloak
+            security: registration
+          annotations:
+            summary: "Keycloak registration failure rate is high for realm {{ $labels.realm }}"
+            description: |
+              More than 10% of registration attempts are failing.
+
+              Realm: {{ $labels.realm }}
+              Error percentage: {{ $value | printf "%.1f" }}
+
+        - alert: KeycloakHighRegistrationFailureCount
+          expr: |
+            sum by (realm) (
+              increase(keycloak_registrations_errors_total[15m])
+            ) > 25
+          for: 5m
+          labels:
+            severity: warning
+            component: keycloak
+            security: registration
+          annotations:
+            summary: "Keycloak registration failures are high for realm {{ $labels.realm }}"
+            description: |
+              Keycloak has seen more than 25 registration failures in 15 minutes.
+
+              Realm: {{ $labels.realm }}
+              Error count: {{ $value }}
+
+    - name: keycloak.performance
+      rules:
+        - alert: KeycloakSlowRequestResponseTime
+          expr: |
+            (
+              sum by (method) (
+                rate(keycloak_request_duration_sum[5m])
+              )
+              /
+              sum by (method) (
+                rate(keycloak_request_duration_count[5m])
+              )
+            ) > 2000
+            and
+            sum by (method) (
+              rate(keycloak_request_duration_count[5m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: keycloak
+          annotations:
+            summary: "Keycloak request latency is high for {{ $labels.method }}"
+            description: |
+              Keycloak {{ $labels.method }} requests are taking more than 2 seconds on average.
+
+              Method: {{ $labels.method }}
+              Average latency ms: {{ $value }}

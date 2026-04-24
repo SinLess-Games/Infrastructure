@@ -1,0 +1,94 @@
+name: docs-site
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs-site.yml"
+      - "Kubernetes/apps/prod/sinless-games/docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-publish:
+    if: ${{ github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message || '', '[skip docs deploy]') }}
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/infrastructure-docs
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install docs dependencies
+        run: pip install -r Docs/requirements.txt
+
+      - name: Build MkDocs site
+        run: mkdocs build --clean --strict
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=main
+            type=sha,format=short,prefix=sha-
+
+      - name: Build and push docs image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Docs/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Update deployment image tag
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: sha-${{ github.sha }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("Kubernetes/apps/prod/sinless-games/docs/deployment-docs.yaml")
+          text = path.read_text()
+          marker = "image: "
+          start = text.index(marker) + len(marker)
+          end = text.index("\n", start)
+          text = text[:start] + f"{__import__('os').environ['IMAGE_NAME']}:{__import__('os').environ['IMAGE_TAG']}" + text[end:]
+          path.write_text(text)
+          PY
+
+      - name: Commit deployment manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Kubernetes/apps/prod/sinless-games/docs/deployment-docs.yaml; then
+            exit 0
+          fi
+          git add Kubernetes/apps/prod/sinless-games/docs/deployment-docs.yaml
+          git commit -m "docs: publish site image [skip docs deploy]"
+          git push

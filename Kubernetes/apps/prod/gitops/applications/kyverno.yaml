@@ -8,8 +8,8 @@ metadata:
 spec:
   project: platform
   destination:
-    namespace: security
     server: https://kubernetes.default.svc
+    namespace: security
   sources:
     - repoURL: https://kyverno.github.io/kyverno
       chart: kyverno
@@ -17,18 +17,18 @@ spec:
       helm:
         valueFiles:
           - $values/Kubernetes/apps/prod/security/kyverno/values.yaml
-    - repoURL: https://github.com/Sinless777/Infrastructure.git
+    - repoURL: https://github.com/SinLess-Games/Infrastructure.git
       targetRevision: main
       ref: values
   ignoreDifferences:
     - group: admissionregistration.k8s.io
       kind: MutatingWebhookConfiguration
       jqPathExpressions:
-        - '.webhooks[]?.clientConfig.caBundle'
+        - .webhooks[]?.clientConfig.caBundle
     - group: admissionregistration.k8s.io
       kind: ValidatingWebhookConfiguration
       jqPathExpressions:
-        - '.webhooks[]?.clientConfig.caBundle'
+        - .webhooks[]?.clientConfig.caBundle
   syncPolicy:
     automated:
       prune: true

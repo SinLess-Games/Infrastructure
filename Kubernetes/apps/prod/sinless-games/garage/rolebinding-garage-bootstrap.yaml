@@ -1,8 +1,20 @@
+# Kubernetes/apps/prod/sinless-games/garage/rolebinding-garage-bootstrap.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: garage-bootstrap
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage-bootstrap
+    app.kubernetes.io/instance: garage
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/part-of: garage
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/rbac-scope: garage-bootstrap
+  annotations:
+    security.sinlessgames.io/purpose: "Bind the garage-bootstrap ServiceAccount to the namespace-scoped garage-bootstrap Role only."
+    security.sinlessgames.io/least-privilege: "true"
+    security.sinlessgames.io/cluster-wide-access: "false"
 subjects:
   - kind: ServiceAccount
     name: garage-bootstrap
@@ -11,4 +23,3 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: garage-bootstrap
-

@@ -1,20 +1,44 @@
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+# Kubernetes/apps/prod/sinless-games/homepage/rbac-homepage.yaml
+apiVersion: v1
+kind: ServiceAccount
 metadata:
   name: homepage
+  namespace: sinless-games
   labels:
     app.kubernetes.io/name: homepage
+    app.kubernetes.io/instance: homepage
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+  annotations:
+    security.sinlessgames.io/automount-service-account-token: "false"
+    security.sinlessgames.io/token-projection-required: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: homepage
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: homepage
+    app.kubernetes.io/instance: homepage
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/rbac-scope: namespace
+  annotations:
+    security.sinlessgames.io/purpose: "Allow Homepage to read dashboard-visible resources in the sinless-games namespace only."
+    security.sinlessgames.io/least-privilege: "true"
 rules:
   - apiGroups:
       - ""
     resources:
-      - namespaces
       - pods
-      - nodes
       - services
     verbs:
       - get
       - list
+
   - apiGroups:
       - networking.k8s.io
     resources:
@@ -22,6 +46,7 @@ rules:
     verbs:
       - get
       - list
+
   - apiGroups:
       - gateway.networking.k8s.io
     resources:
@@ -30,26 +55,35 @@ rules:
     verbs:
       - get
       - list
+
   - apiGroups:
       - metrics.k8s.io
     resources:
-      - nodes
       - pods
     verbs:
       - get
       - list
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: homepage
+  namespace: sinless-games
   labels:
     app.kubernetes.io/name: homepage
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: homepage
+    app.kubernetes.io/instance: homepage
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/rbac-scope: namespace
+  annotations:
+    security.sinlessgames.io/purpose: "Bind Homepage to namespace-scoped read-only permissions."
+    security.sinlessgames.io/cluster-wide-access: "false"
 subjects:
   - kind: ServiceAccount
     name: homepage
     namespace: sinless-games
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: homepage

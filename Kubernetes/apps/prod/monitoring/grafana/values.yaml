@@ -1,7 +1,9 @@
+# Kubernetes/apps/prod/monitoring/grafana/values.yaml
+
 admin:
   existingSecret: grafana-admin
   userKey: admin-user
-  passwordKey: grafana_admin_password
+  passwordKey: admin-password
 
 plugins:
   - blackcowmoo-googleanalytics-datasource
@@ -9,7 +11,9 @@ plugins:
   - marcusolsson-calendar-panel
 
 deploymentStrategy:
-  type: Recreate
+  type: RollingUpdate
+
+replicas: 2
 
 persistence:
   enabled: false
@@ -17,6 +21,19 @@ persistence:
 datasources:
   datasources.yaml:
     apiVersion: 1
+    deleteDatasources:
+      - name: Prometheus
+        orgId: 1
+      - name: Loki
+        orgId: 1
+      - name: Tempo
+        orgId: 1
+      - name: Pyroscope
+        orgId: 1
+      - name: Mimir
+        orgId: 1
+      - name: Alertmanager
+        orgId: 1
     datasources:
       - name: Prometheus
         uid: prometheus
@@ -24,16 +41,20 @@ datasources:
         url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
         access: proxy
         isDefault: true
+        editable: false
         jsonData:
           httpMethod: POST
           manageAlerts: true
+          timeInterval: 30s
 
       - name: Loki
         uid: loki
         type: loki
         url: http://loki-read.monitoring.svc.cluster.local:3100
         access: proxy
+        editable: false
         jsonData:
+          maxLines: 1000
           derivedFields:
             - name: TraceID
               matcherRegex: '"traceid":"([a-fA-F0-9]+)"'
@@ -45,6 +66,7 @@ datasources:
         type: tempo
         url: http://tempo-query-frontend.monitoring.svc.cluster.local:3100
         access: proxy
+        editable: false
         jsonData:
           serviceMap:
             datasourceUid: mimir
@@ -70,15 +92,18 @@ datasources:
         type: grafana-pyroscope-datasource
         url: http://pyroscope.monitoring.svc.cluster.local:4040
         access: proxy
+        editable: false
 
       - name: Mimir
         uid: mimir
         type: prometheus
         url: http://mimir-nginx.monitoring.svc.cluster.local/prometheus
         access: proxy
+        editable: false
         jsonData:
           httpMethod: POST
           manageAlerts: false
+          timeInterval: 30s
           exemplarTraceIdDestinations:
             - datasourceUid: tempo
               name: trace_id
@@ -88,18 +113,39 @@ datasources:
         type: alertmanager
         url: http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
         access: proxy
+        editable: false
         jsonData:
           implementation: prometheus
           handleGrafanaManagedAlerts: true
 
 env:
-  # Postgres Database Configuration
   GF_SERVER_ROOT_URL: https://grafana.sinlessgames.com
+  GF_SERVER_DOMAIN: grafana.sinlessgames.com
+  GF_SERVER_SERVE_FROM_SUB_PATH: "false"
+
   GF_DATABASE_TYPE: postgres
   GF_DATABASE_HOST: 10.10.40.50:5432
   GF_DATABASE_NAME: grafana
   GF_DATABASE_USER: grafana
-  GF_DATABASE_SSL_MODE: disable
+  GF_DATABASE_SSL_MODE: require
+
+  GF_ANALYTICS_REPORTING_ENABLED: "false"
+  GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+  GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+
+  GF_SECURITY_COOKIE_SECURE: "true"
+  GF_SECURITY_COOKIE_SAMESITE: strict
+  GF_SECURITY_STRICT_TRANSPORT_SECURITY: "true"
+  GF_SECURITY_STRICT_TRANSPORT_SECURITY_MAX_AGE_SECONDS: "31536000"
+  GF_SECURITY_CONTENT_TYPE_PROTECTION: "true"
+  GF_SECURITY_X_CONTENT_TYPE_OPTIONS: nosniff
+  GF_SECURITY_X_XSS_PROTECTION: "true"
+
+  GF_USERS_VIEWERS_CAN_EDIT: "false"
+  GF_USERS_ALLOW_SIGN_UP: "false"
+  GF_AUTH_ANONYMOUS_ENABLED: "false"
+
+  GF_PANELS_DISABLE_SANITIZE_HTML: "false"
 
 envValueFrom:
   GF_DATABASE_PASSWORD:
@@ -117,6 +163,7 @@ extraConfigmapMounts:
     mountPath: /etc/nsswitch.conf
     subPath: nsswitch.conf
     readOnly: true
+
   - name: grafana-alerting
     configMap: grafana-alerting
     mountPath: /etc/grafana/provisioning/alerting
@@ -125,8 +172,22 @@ extraConfigmapMounts:
 grafana.ini:
   users:
     viewers_can_edit: false
+    allow_sign_up: false
+
+  auth.anonymous:
+    enabled: false
+
   panels:
-    disable_sanitize_html: true
+    disable_sanitize_html: false
+
+  security:
+    cookie_secure: true
+    cookie_samesite: strict
+    strict_transport_security: true
+    strict_transport_security_max_age_seconds: 31536000
+    content_type_protection: true
+    x_content_type_options: nosniff
+    x_xss_protection: true
 
 dashboardProviders:
   dashboardproviders.yaml:
@@ -146,7 +207,7 @@ dashboardProviders:
 sidecar:
   dashboards:
     enabled: true
-    searchNamespace: ALL
+    searchNamespace: monitoring
     label: grafana_dashboard
     labelValue: "1"
     folder: /dashboards
@@ -161,10 +222,36 @@ sidecar:
 
 serviceMonitor:
   enabled: true
+  labels:
+    release: kube-prometheus-stack
 
 serviceAccount:
   create: true
   name: grafana
+  automountServiceAccountToken: false
+
+automountServiceAccountToken: false
+
+podLabels:
+  app.kubernetes.io/name: grafana
+  app.kubernetes.io/component: dashboard
+  app.kubernetes.io/part-of: monitoring
+  security.sinlessgames.io/zone: monitoring
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 472
+  runAsGroup: 472
+  fsGroup: 472
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
 
 resources:
   requests:

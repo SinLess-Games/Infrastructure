@@ -1,13 +1,35 @@
+# Kubernetes/apps/prod/security/namespace/resourcequota.yaml
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: security-quota
   namespace: security
+  labels:
+    app.kubernetes.io/name: security-quota
+    app.kubernetes.io/component: namespace-policy
+    app.kubernetes.io/part-of: security
+    security.sinlessgames.io/policy: resource-quota
 spec:
   hard:
     requests.cpu: "12"
     requests.memory: 24Gi
+
     limits.cpu: "24"
     limits.memory: 48Gi
-    persistentvolumeclaims: "20"
+
     pods: "250"
+    persistentvolumeclaims: "20"
+
+    services: "75"
+    services.loadbalancers: "0"
+    services.nodeports: "0"
+
+    secrets: "250"
+    configmaps: "250"
+
+    count/externalsecrets.external-secrets.io: "150"
+    count/clustersecretstores.external-secrets.io: "10"
+    count/clusterpolicies.kyverno.io: "150"
+    count/policies.kyverno.io: "150"
+    count/servicemonitors.monitoring.coreos.com: "75"
+    count/prometheusrules.monitoring.coreos.com: "75"

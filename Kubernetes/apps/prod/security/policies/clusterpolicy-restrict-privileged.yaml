@@ -1,17 +1,32 @@
+# Kubernetes/apps/prod/security/policies/clusterpolicy-restrict-privileged.yaml
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
   name: restrict-privileged
+  labels:
+    app.kubernetes.io/name: restrict-privileged
+    app.kubernetes.io/component: admission-policy
+    app.kubernetes.io/part-of: kyverno
+    security.sinlessgames.io/policy: pod-security
+  annotations:
+    policies.kyverno.io/title: Restrict Privileged Containers
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Blocks privileged containers outside approved infrastructure namespaces.
 spec:
   validationFailureAction: Enforce
   background: true
+
   rules:
-    - name: block-privileged
+    - name: block-privileged-containers
       match:
         any:
           - resources:
               kinds:
                 - Pod
+
       exclude:
         any:
           - resources:
@@ -20,10 +35,30 @@ spec:
                 - security
                 - monitoring
                 - gitops
+
       validate:
-        message: Privileged containers are not allowed outside approved namespaces.
-        pattern:
-          spec:
-            containers:
-              - =(securityContext):
-                  =(privileged): false
+        message: "Privileged containers are not allowed outside approved namespaces."
+        foreach:
+          - list: "request.object.spec.containers[]"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.privileged || false }}"
+                    operator: Equals
+                    value: true
+
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.privileged || false }}"
+                    operator: Equals
+                    value: true
+
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.privileged || false }}"
+                    operator: Equals
+                    value: true

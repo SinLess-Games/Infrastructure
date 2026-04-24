@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-events-config
+  namespace: gitops
+  annotations:
+    argocd.argoproj.io/sync-wave: "15"
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/SinLess-Games/Infrastructure.git
+    targetRevision: main
+    path: Kubernetes/apps/prod/gitops/argo-events-config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

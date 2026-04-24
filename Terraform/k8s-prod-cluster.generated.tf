@@ -131,7 +131,7 @@ module "kubernetes_prod_workers" {
     },
     {
       name        = "rke2-prod-wk-05"
-      vmid        = 414
+      vmid        = 416
       target_node = "pve-05"
       storage     = "vm_disks_05"
       clone_template = "debian-13-template-pve-05"

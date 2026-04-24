@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount-docs.yaml
+  - deployment-docs.yaml
+  - service-docs.yaml
+  - ingress-docs.yaml
+  - virtualservice-docs.yaml
+  - destinationrule-docs.yaml
+  - networkpolicy-docs.yaml

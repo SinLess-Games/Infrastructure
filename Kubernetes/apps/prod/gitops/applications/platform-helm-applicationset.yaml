@@ -192,6 +192,8 @@ spec:
             inlineValues: |
               mimir:
                 structuredConfig:
+                  limits:
+                    max_global_series_per_user: 500000
                   common:
                     storage:
                       backend: s3
@@ -245,9 +247,23 @@ spec:
               gateway:
                 enabled: true
               ingester:
-                replicas: 3
+                replicas: 2
+                resources:
+                  requests:
+                    cpu: 150m
+                    memory: 512Mi
+                  limits:
+                    cpu: 750m
+                    memory: 1536Mi
               store_gateway:
-                replicas: 3
+                replicas: 2
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 256Mi
+                  limits:
+                    cpu: 500m
+                    memory: 768Mi
               ruler:
                 enabled: true
               metaMonitoring:
@@ -422,6 +438,30 @@ spec:
             valuesPath: Kubernetes/apps/prod/gitops/argo-rollouts/values.yaml
             inlineValues: ""
             syncWave: "14"
+          - name: argo-events
+            namespace: gitops
+            chartRepo: https://argoproj.github.io/argo-helm
+            chart: argo-events
+            targetRevision: 2.4.21
+            valuesPath: Kubernetes/apps/prod/gitops/argo-events/values.yaml
+            inlineValues: ""
+            syncWave: "14"
+          - name: argocd-image-updater
+            namespace: gitops
+            chartRepo: https://argoproj.github.io/argo-helm
+            chart: argocd-image-updater
+            targetRevision: 1.1.5
+            valuesPath: Kubernetes/apps/prod/gitops/argo-image-updater/values.yaml
+            inlineValues: ""
+            syncWave: "14"
+          - name: argo-workflows
+            namespace: gitops
+            chartRepo: https://argoproj.github.io/argo-helm
+            chart: argo-workflows
+            targetRevision: 1.0.10
+            valuesPath: Kubernetes/apps/prod/gitops/argo-workflows/values.yaml
+            inlineValues: ""
+            syncWave: "14"
           - name: cockroachdb
             namespace: helix-ai
             chartRepo: https://charts.cockroachdb.com/
@@ -522,7 +562,7 @@ spec:
               - "$values/{{valuesPath}}"
             values: |
               {{inlineValues}}
-        - repoURL: https://github.com/Sinless777/Infrastructure.git
+        - repoURL: https://github.com/SinLess-Games/Infrastructure.git
           targetRevision: main
           ref: values
       destination:

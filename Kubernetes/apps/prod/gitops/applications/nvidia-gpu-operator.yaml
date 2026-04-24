@@ -15,47 +15,15 @@ spec:
       chart: gpu-operator
       targetRevision: 24.9.2
       helm:
-        values: |
-          driver:
-            enabled: false
-          toolkit:
-            enabled: true
-            env:
-              - name: CONTAINERD_CONFIG
-                value: /var/lib/rancher/rke2/agent/etc/containerd/config.toml
-              - name: CONTAINERD_SOCKET
-                value: /run/k3s/containerd/containerd.sock
-              - name: RUNTIME_CONFIG
-                value: /var/lib/rancher/rke2/agent/etc/containerd/config.toml
-              - name: RUNTIME_SOCKET
-                value: /run/k3s/containerd/containerd.sock
-              - name: CONTAINERD_RUNTIME_CLASS
-                value: nvidia
-          dcgmExporter:
-            serviceMonitor:
-              enabled: true
-          nfd:
-            enabled: true
-          node-feature-discovery:
-            enableNodeFeatureApi: true
-          gfd:
-            enabled: true
-          operator:
-            defaultRuntime: containerd
-          devicePlugin:
-            config:
-              create: false
-          migManager:
-            enabled: false
-          sandboxDevicePlugin:
-            enabled: false
-          vfioManager:
-            enabled: false
-          vgpuDeviceManager:
-            enabled: false
+        valueFiles:
+          - $values/Kubernetes/apps/prod/kube-system/nvidia-gpu-operator/values.yaml
+    - repoURL: https://github.com/SinLess-Games/Infrastructure.git
+      targetRevision: main
+      ref: values
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ServerSideApply=true

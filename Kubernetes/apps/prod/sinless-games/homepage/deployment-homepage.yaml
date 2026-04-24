@@ -1,3 +1,4 @@
+# Kubernetes/apps/prod/sinless-games/homepage/deployment-homepage.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,75 +6,143 @@ metadata:
   namespace: sinless-games
   labels:
     app.kubernetes.io/name: homepage
+    app.kubernetes.io/instance: homepage
+    app.kubernetes.io/component: dashboard
     app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    app.kubernetes.io/version: "1.5.0"
+    security.sinlessgames.io/mtls: istio-strict
 spec:
   replicas: 1
-  revisionHistoryLimit: 1
+  revisionHistoryLimit: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: homepage
+      app.kubernetes.io/instance: homepage
+      app.kubernetes.io/component: dashboard
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   template:
     metadata:
       labels:
         app.kubernetes.io/name: homepage
+        app.kubernetes.io/instance: homepage
+        app.kubernetes.io/component: dashboard
         app.kubernetes.io/part-of: sinless-games-platform
+        app.kubernetes.io/managed-by: gitops
+        app.kubernetes.io/version: "1.5.0"
+      annotations:
+        sidecar.istio.io/inject: "true"
+        sidecar.istio.io/rewriteAppHTTPProbers: "true"
+        proxy.istio.io/config: |
+          {
+            "holdApplicationUntilProxyStarts": true
+          }
+        security.sinlessgames.io/automount-service-account-token: "false"
+        security.sinlessgames.io/projected-service-account-token: "true"
+        security.sinlessgames.io/read-only-root-filesystem: "true"
     spec:
       serviceAccountName: homepage
-      automountServiceAccountToken: true
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       dnsPolicy: ClusterFirst
       dnsConfig:
-        searches:
-          - sinless-games.svc.cluster.local
-          - svc.cluster.local
-          - cluster.local
         options:
           - name: ndots
             value: "1"
+
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
+        appArmorProfile:
+          type: RuntimeDefault
+
+      terminationGracePeriodSeconds: 30
+
       containers:
         - name: homepage
           image: ghcr.io/gethomepage/homepage:v1.5.0
           imagePullPolicy: IfNotPresent
+
           env:
-            - name: MY_POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
             - name: HOMEPAGE_ALLOWED_HOSTS
-              value: "$(MY_POD_IP):3000,homepage.sinlessgames.com,homepage.sinless-games.svc,homepage.sinless-games.svc.cluster.local,homepage.sinless-games,localhost:3000,127.0.0.1:3000,0.0.0.0:3000,0.0.0.0:3001,10.10.10.10"
+              value: "homepage.sinlessgames.com,homepage.sinless-games.svc,homepage.sinless-games.svc.cluster.local"
+
+            # Explicit in-cluster Kubernetes API discovery.
+            # This avoids enableServiceLinks=true while still allowing Homepage Kubernetes widgets.
             - name: KUBERNETES_SERVICE_HOST
-              value: 10.10.40.10
+              value: kubernetes.default.svc
             - name: KUBERNETES_SERVICE_PORT
-              value: "6443"
+              value: "443"
             - name: KUBERNETES_SERVICE_PORT_HTTPS
-              value: "6443"
+              value: "443"
+
+            # Useful when the root filesystem is read-only.
+            - name: HOME
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/.cache
+
           ports:
             - name: http
               containerPort: 3000
+              protocol: TCP
+
+          startupProbe:
+            httpGet:
+              path: /api/healthcheck
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: homepage.sinless-games.svc.cluster.local
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+
           readinessProbe:
             httpGet:
               path: /api/healthcheck
               port: http
-            initialDelaySeconds: 10
+              httpHeaders:
+                - name: Host
+                  value: homepage.sinless-games.svc.cluster.local
+            initialDelaySeconds: 5
             periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+
           livenessProbe:
             httpGet:
               path: /api/healthcheck
               port: http
+              httpHeaders:
+                - name: Host
+                  value: homepage.sinless-games.svc.cluster.local
             initialDelaySeconds: 20
             periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
           securityContext:
             allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
             capabilities:
               drop:
                 - ALL
-            privileged: false
-            runAsGroup: 1000
-            runAsNonRoot: true
-            runAsUser: 1000
+
           resources:
             requests:
               cpu: 100m
@@ -81,39 +150,83 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+
           volumeMounts:
             - name: homepage-config
               mountPath: /app/config/bookmarks.yaml
               subPath: bookmarks.yaml
+              readOnly: true
             - name: homepage-config
               mountPath: /app/config/custom.css
               subPath: custom.css
+              readOnly: true
             - name: homepage-config
               mountPath: /app/config/custom.js
               subPath: custom.js
+              readOnly: true
             - name: homepage-config
               mountPath: /app/config/docker.yaml
               subPath: docker.yaml
+              readOnly: true
             - name: homepage-config
               mountPath: /app/config/kubernetes.yaml
               subPath: kubernetes.yaml
+              readOnly: true
             - name: homepage-config
               mountPath: /app/config/proxmox.yaml
               subPath: proxmox.yaml
+              readOnly: true
             - name: homepage-config
               mountPath: /app/config/services.yaml
               subPath: services.yaml
+              readOnly: true
             - name: homepage-config
               mountPath: /app/config/settings.yaml
               subPath: settings.yaml
+              readOnly: true
             - name: homepage-config
               mountPath: /app/config/widgets.yaml
               subPath: widgets.yaml
+              readOnly: true
+
             - name: homepage-logs
               mountPath: /app/config/logs
+
+            - name: homepage-tmp
+              mountPath: /tmp
+
+            - name: homepage-kube-api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+
       volumes:
         - name: homepage-config
           configMap:
             name: homepage-config
+            defaultMode: 0444
+
         - name: homepage-logs
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 128Mi
+
+        - name: homepage-tmp
+          emptyDir:
+            sizeLimit: 128Mi
+
+        - name: homepage-kube-api-access
+          projected:
+            defaultMode: 0444
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace

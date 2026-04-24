@@ -1,13 +1,30 @@
+autoscaleEnabled: true
 autoscaleMin: 3
 autoscaleMax: 5
 replicaCount: 3
+
 global:
   proxy:
     autoInject: enabled
+
 meshConfig:
   accessLogFile: /dev/stdout
   enablePrometheusMerge: true
-pilot:
-  autoscaleEnabled: true
-  env:
-    EXTERNAL_ISTIOD: "false"
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+seccompProfile:
+  type: RuntimeDefault
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+
+env: {}

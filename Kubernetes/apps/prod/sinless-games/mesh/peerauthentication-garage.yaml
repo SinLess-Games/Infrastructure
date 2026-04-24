@@ -1,0 +1,20 @@
+# Kubernetes/apps/prod/sinless-games/mesh/peerauthentication-garage.yaml
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: garage-strict-mtls
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage
+    app.kubernetes.io/instance: garage
+    app.kubernetes.io/component: mtls
+    app.kubernetes.io/part-of: garage
+    app.kubernetes.io/managed-by: gitops
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: garage
+      app.kubernetes.io/instance: garage
+      app.kubernetes.io/component: server
+  mtls:
+    mode: STRICT

@@ -1,0 +1,26 @@
+# Kubernetes/apps/prod/networking/cloudflared/servicemonitor-cloudflared-helix.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cloudflared-helix
+  namespace: networking
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/instance: helix
+    app.kubernetes.io/component: tunnel
+    app.kubernetes.io/part-of: edge-access
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+      app.kubernetes.io/instance: helix
+  namespaceSelector:
+    matchNames:
+      - networking
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: false

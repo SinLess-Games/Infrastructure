@@ -1,35 +1,57 @@
+# Kubernetes/apps/prod/monitoring/config/daemonset-cadvisor.yaml
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: cadvisor
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: cadvisor
+    app.kubernetes.io/component: node-metrics
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/policy: hardened
 spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: cadvisor
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
   template:
     metadata:
       labels:
         app.kubernetes.io/name: cadvisor
+        app.kubernetes.io/component: node-metrics
+        app.kubernetes.io/part-of: monitoring
+        security.sinlessgames.io/zone: node-observability
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
     spec:
       automountServiceAccountToken: false
       priorityClassName: system-node-critical
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      dnsPolicy: ClusterFirst
+
       tolerations:
-        - key: node-role.kubernetes.io/control-plane
-          operator: Exists
-          effect: NoSchedule
-        - key: node-role.kubernetes.io/master
-          operator: Exists
-          effect: NoSchedule
+        - operator: Exists
+
       containers:
         - name: cadvisor
-          image: gcr.io/cadvisor/cadvisor:v0.49.1
+          image: gcr.io/cadvisor/cadvisor:v0.52.1
           imagePullPolicy: IfNotPresent
           args:
             - --housekeeping_interval=30s
             - --max_housekeeping_interval=35s
+            - --event_storage_event_limit=default=0
+            - --event_storage_age_limit=default=0
             - --store_container_labels=false
-            - --containerd=/var/run/k3s/containerd/containerd.sock
+            - --docker_only=false
+            - --containerd=/run/k3s/containerd/containerd.sock
+            - --allow_dynamic_housekeeping=true
           ports:
             - name: http
               containerPort: 8080
@@ -42,26 +64,28 @@ spec:
               cpu: 500m
               memory: 512Mi
           securityContext:
+            privileged: false
+            runAsNonRoot: false
+            runAsUser: 0
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
             capabilities:
               drop:
                 - ALL
-            readOnlyRootFilesystem: true
           volumeMounts:
             - name: rootfs
               mountPath: /rootfs
               readOnly: true
-            - name: var-run
-              mountPath: /var/run
+            - name: run
+              mountPath: /run
               readOnly: true
             - name: sys
               mountPath: /sys
               readOnly: true
-            - name: docker
-              mountPath: /var/lib/docker
-              readOnly: true
             - name: containerd
-              mountPath: /var/lib/containerd
+              mountPath: /var/lib/rancher/rke2/agent/containerd
               readOnly: true
             - name: disk
               mountPath: /dev/disk
@@ -69,25 +93,29 @@ spec:
             - name: cgroup
               mountPath: /sys/fs/cgroup
               readOnly: true
+
       volumes:
         - name: rootfs
           hostPath:
             path: /
-        - name: var-run
+            type: Directory
+        - name: run
           hostPath:
-            path: /var/run
+            path: /run
+            type: Directory
         - name: sys
           hostPath:
             path: /sys
-        - name: docker
-          hostPath:
-            path: /var/lib/docker
+            type: Directory
         - name: containerd
           hostPath:
-            path: /var/lib/containerd
+            path: /var/lib/rancher/rke2/agent/containerd
+            type: DirectoryOrCreate
         - name: disk
           hostPath:
             path: /dev/disk
+            type: Directory
         - name: cgroup
           hostPath:
             path: /sys/fs/cgroup
+            type: Directory

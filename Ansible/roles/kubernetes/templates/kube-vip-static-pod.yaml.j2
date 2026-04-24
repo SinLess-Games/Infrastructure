@@ -60,6 +60,12 @@ spec:
               value: "{{ kubernetes_kube_vip.services | ternary('true', 'false') }}"
             - name: vip_leaderelection
               value: "{{ kubernetes_kube_vip.leader_election | ternary('true', 'false') }}"
+            - name: vip_leaseduration
+              value: "{{ kubernetes_kube_vip.lease_duration | default(15) }}"
+            - name: vip_renewdeadline
+              value: "{{ kubernetes_kube_vip.renew_deadline | default(10) }}"
+            - name: vip_retryperiod
+              value: "{{ kubernetes_kube_vip.retry_period | default(2) }}"
             - name: KUBECONFIG
               value: /etc/kubernetes/admin.conf
             # Static control-plane pods may not resolve the in-cluster `kubernetes` DNS name.
@@ -74,6 +80,13 @@ spec:
                 - NET_ADMIN
                 - NET_RAW
                 - SYS_TIME
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
           volumeMounts:
             - mountPath: /etc/kubernetes/admin.conf
               name: kubeconfig

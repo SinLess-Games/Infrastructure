@@ -6,7 +6,11 @@ resources:
   - destinationrule-garage-ui.yaml
   - destinationrule-garage-s3.yaml
   - destinationrule-platform-uis.yaml
-  - ingress-opencost.yaml
-  - ingress-rancher.yaml
   - virtualservice-n8n.yaml
   - virtualservice-platform-uis.yaml
+  - peerauthentication-default.yaml
+  - peerauthentication-garage.yaml
+  - peerauthentication-n8n.yaml
+  - authorizationpolicy-garage-ui.yaml
+  - authorizationpolicy-n8n-ingress.yaml
+  - destinationrule-mailu-front-exception.yaml

@@ -5,3 +5,7 @@ resources:
   - externalsecret-cloudflared-tunnels.yaml
   - daemonset-cloudflared-sinlessgames.yaml
   - daemonset-cloudflared-helix.yaml
+  - service-cloudflared-sinlessgames.yaml
+  - servicemonitor-cloudflared-sinlessgames.yaml
+  - service-cloudflared-helix.yaml
+  - servicemonitor-cloudflared-helix.yaml

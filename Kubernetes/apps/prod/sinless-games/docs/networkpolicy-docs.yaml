@@ -1,0 +1,74 @@
+# Kubernetes/apps/prod/sinless-games/docs/networkpolicy-docs.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: docs-allow-ingress
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: docs
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: sinless-games-platform
+    security.sinlessgames.io/policy: default-deny-scoped
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: docs
+
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow ingress from the Istio ingress gateway namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+      ports:
+        - protocol: TCP
+          port: 8080
+
+    # Allow same-namespace traffic for sidecar/local mesh behavior and future same-namespace checks.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sinless-games
+      ports:
+        - protocol: TCP
+          port: 8080
+
+  egress:
+    # DNS to kube-dns/CoreDNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # DNS directly to kube-dns service IP.
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.10/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Allow Istio control-plane / xDS / CA traffic.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
+        - protocol: TCP
+          port: 15017

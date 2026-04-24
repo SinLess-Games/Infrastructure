@@ -1,0 +1,93 @@
+# Kubernetes/apps/prod/security/wazuh/values.yaml
+
+image:
+  repository: wazuh/wazuh-agent
+  tag: "4.11.2"
+  pullPolicy: IfNotPresent
+
+daemonset:
+  enabled: true
+
+serviceAccount:
+  create: true
+  name: wazuh-agent
+  automountServiceAccountToken: false
+
+wazuh:
+  manager:
+    host: 10.10.10.21
+    protocol: tcp
+    port: 1514
+    registrationPort: 1515
+  agent:
+    group: rke2-prod
+    namePrefix: rke2-prod
+
+env:
+  - name: WAZUH_MANAGER
+    value: "10.10.10.21"
+  - name: WAZUH_MANAGER_PORT
+    value: "1514"
+  - name: WAZUH_PROTOCOL
+    value: "tcp"
+  - name: WAZUH_REGISTRATION_SERVER
+    value: "10.10.10.21"
+  - name: WAZUH_REGISTRATION_PORT
+    value: "1515"
+  - name: WAZUH_AGENT_GROUP
+    value: "rke2-prod"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 768Mi
+
+securityContext:
+  privileged: false
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  runAsUser: 0
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+tolerations:
+  - operator: Exists
+
+nodeSelector: {}
+
+hostPID: false
+hostNetwork: false
+
+hostPathMounts:
+  enabled: true
+  mounts:
+    - name: host-var-log
+      hostPath: /var/log
+      mountPath: /host/var/log
+      readOnly: true
+    - name: host-etc
+      hostPath: /etc
+      mountPath: /host/etc
+      readOnly: true
+    - name: host-usr-bin
+      hostPath: /usr/bin
+      mountPath: /host/usr/bin
+      readOnly: true
+    - name: host-var-lib-rancher-rke2
+      hostPath: /var/lib/rancher/rke2
+      mountPath: /host/var/lib/rancher/rke2
+      readOnly: true
+
+persistence:
+  enabled: true
+  storageClassName: longhorn
+  size: 1Gi
+
+serviceMonitor:
+  enabled: false

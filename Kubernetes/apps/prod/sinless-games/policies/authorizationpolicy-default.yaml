@@ -1,13 +1,19 @@
+# Kubernetes/apps/prod/sinless-games/policies/authorizationpolicy-default.yaml
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
-  name: sinless-games-default-allow
+  name: sinless-games-default-deny
   namespace: sinless-games
-spec:
-  rules:
-    - from:
-        - source:
-            namespaces:
-              - sinless-games
-              - istio-system
-              - monitoring
+  labels:
+    app.kubernetes.io/name: sinless-games-default-deny
+    app.kubernetes.io/component: mesh-authorization
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: authorization
+    security.sinlessgames.io/default-deny: "true"
+    security.sinlessgames.io/mtls: istio-strict
+  annotations:
+    security.sinlessgames.io/purpose: "Default deny all mesh traffic in the sinless-games namespace. Workload-specific AuthorizationPolicies must explicitly allow required traffic."
+    security.sinlessgames.io/plaintext-allowed: "false"
+    security.sinlessgames.io/namespace-wide-allow: "false"
+spec: {}

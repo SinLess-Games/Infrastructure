@@ -1,8 +1,14 @@
+# Kubernetes/apps/prod/monitoring/config/configmap-grafana-nsswitch.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-nsswitch
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana-nsswitch
+    app.kubernetes.io/component: runtime-config
+    app.kubernetes.io/part-of: grafana
+    security.sinlessgames.io/policy: hardened-runtime
 data:
   nsswitch.conf: |
     passwd:         files

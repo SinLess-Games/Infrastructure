@@ -1,17 +1,28 @@
+# Kubernetes/apps/prod/monitoring/config/servicemonitor-cadvisor.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: cadvisor
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: cadvisor
+    app.kubernetes.io/component: node-metrics
+    app.kubernetes.io/part-of: monitoring
+    release: kube-prometheus-stack
+    security.sinlessgames.io/exposure: cluster-internal
 spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: cadvisor
+
   namespaceSelector:
     matchNames:
       - monitoring
+
   endpoints:
     - port: http
       path: /metrics
       interval: 30s
       scrapeTimeout: 10s
+      honorLabels: false
+      scheme: http

@@ -1,46 +1,43 @@
+# Kubernetes/apps/prod/sinless-games/homepage/networkpolicy-homepage.yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: homepage-allow-ingress
+  name: homepage-allow-required-traffic
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: homepage
+    app.kubernetes.io/instance: homepage
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: network
+    security.sinlessgames.io/default-deny: "true"
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: homepage
+      app.kubernetes.io/instance: homepage
+      app.kubernetes.io/component: dashboard
+
   policyTypes:
     - Ingress
     - Egress
+
   ingress:
+    # Allow only the Istio ingress gateway to reach Homepage.
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: istio-system
+          podSelector:
+            matchLabels:
+              istio: ingress
       ports:
         - protocol: TCP
           port: 3000
+
   egress:
-    - to:
-        - ipBlock:
-            cidr: 10.43.0.1/32
-      ports:
-        - protocol: TCP
-          port: 443
-    - to:
-        - ipBlock:
-            cidr: 10.10.40.0/24
-      ports:
-        - protocol: TCP
-          port: 6443
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              app: longhorn-ui
-      ports:
-        - protocol: TCP
-          port: 8000
+    # Allow DNS to CoreDNS.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -53,6 +50,9 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+
+    # Optional fallback if DNS service-IP based policy is needed by your CNI.
+    # Your current kube-dns service IP appears to be 10.43.0.10.
     - to:
         - ipBlock:
             cidr: 10.43.0.10/32
@@ -61,15 +61,31 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+
+    # Allow Kubernetes API access for Homepage Kubernetes widgets.
+    # Your in-cluster kubernetes.default.svc IP appears to be 10.43.0.1.
     - to:
         - ipBlock:
-            cidr: 0.0.0.0/0
+            cidr: 10.43.0.1/32
       ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
         - protocol: TCP
           port: 443
+
+    # Allow Istio sidecar to talk to istiod for xDS/cert rotation.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+          podSelector:
+            matchLabels:
+              app: istiod
+      ports:
         - protocol: TCP
-          port: 80
+          port: 15012
+    # RKE2 endpoint
+    - to:
+        - ipBlock:
+            cidr: 10.10.40.10/32
+      ports:
+        - protocol: TCP
+          port: 6443

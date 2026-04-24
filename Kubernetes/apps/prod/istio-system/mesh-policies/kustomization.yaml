@@ -1,9 +1,29 @@
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - peer-authentication-default.yaml
-  - authorizationpolicy-default-deny.yaml
-  - authorizationpolicy-ingress-allow.yaml
-  - destinationrule-default.yaml
-  - gateway-shared.yaml
-  - service-cloudflared-origin-compat.yaml
+# Kubernetes/apps/prod/istio-system/mesh-policies/service-cloudflared-origin-compat.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared-origin-compat
+  namespace: istio-system
+  labels:
+    app.kubernetes.io/name: cloudflared-origin-compat
+    app.kubernetes.io/component: ingress-origin
+    app.kubernetes.io/part-of: istio
+    security.sinlessgames.io/exposure: internal-only
+spec:
+  type: ClusterIP
+  clusterIP: 10.43.106.248
+  selector:
+    app: istio-ingress
+    istio: ingress
+  ports:
+    - name: http2
+      port: 80
+      targetPort: 80
+      protocol: TCP
+      appProtocol: http
+
+    - name: https
+      port: 443
+      targetPort: 443
+      protocol: TCP
+      appProtocol: https

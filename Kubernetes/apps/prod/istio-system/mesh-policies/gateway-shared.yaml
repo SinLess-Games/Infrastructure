@@ -1,8 +1,14 @@
+# Kubernetes/apps/prod/istio-system/mesh-policies/gateway-shared.yaml
 apiVersion: networking.istio.io/v1
 kind: Gateway
 metadata:
   name: shared-edge
   namespace: istio-system
+  labels:
+    app.kubernetes.io/name: shared-edge
+    app.kubernetes.io/component: ingress-gateway
+    app.kubernetes.io/part-of: istio
+    security.sinlessgames.io/tls-required: "true"
 spec:
   selector:
     istio: ingress
@@ -11,16 +17,34 @@ spec:
         name: http
         number: 80
         protocol: HTTP
+      tls:
+        httpsRedirect: true
       hosts:
         - "*.sinlessgames.com"
+        - "sinlessgames.com"
         - "*.helixaibot.com"
+        - "helixaibot.com"
+
     - port:
-        name: https
+        name: https-sinlessgames
         number: 443
         protocol: HTTPS
       tls:
         mode: SIMPLE
         credentialName: wildcard-sinlessgames-com
+        minProtocolVersion: TLSV1_2
       hosts:
         - "*.sinlessgames.com"
+        - "sinlessgames.com"
+
+    - port:
+        name: https-helixaibot
+        number: 443
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: wildcard-helixaibot-com
+        minProtocolVersion: TLSV1_2
+      hosts:
         - "*.helixaibot.com"
+        - "helixaibot.com"

@@ -6,11 +6,11 @@ metadata:
 spec:
   selector:
     matchLabels:
-      istio: ingress
+      istio: ingressgateway
   action: ALLOW
   rules:
     - to:
         - operation:
             ports:
-              - "80"
-              - "443"
+              - "8080"
+              - "8443"

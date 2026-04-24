@@ -1,20 +1,150 @@
+# Kubernetes/apps/prod/sinless-games/mailu/values.yaml
+
 domain: sinlessgames.com
+
 hostnames:
   - mail.sinlessgames.com
-secretKey: "Ctkl[jwkymQ]VaJo+{yy1p9z8_%i"
+
+timezone: America/Boise
+clusterDomain: cluster.local
+subnet: 10.42.0.0/16
+
+# Do not put the secret key directly in values.yaml.
+# Secret must contain:
+#   secret-key: <rotated-random-value>
+existingSecret: mailu-secrets
+
 initialAccount:
   enabled: true
   username: tpierce
   domain: sinlessgames.com
-  password: "UIhjc0848zabUFNpzoE*Y$Z%!UBi"
-subnet: 10.42.0.0/16
+
+  # Do not put the password directly in values.yaml.
+  # Secret must contain:
+  #   password: <rotated-random-password>
+  existingSecret: mailu-initial-account
+  existingSecretPasswordKey: password
+
+  # Safer than constantly resetting the account on each Helm sync.
+  mode: ifmissing
+
+postmaster: postmaster
+recipientDelimiter: "+"
+
+credentialRounds: 12
+sessionCookieSecure: true
+sessionTimeout: 3600
+permanentSessionLifetime: 604800
+
+limits:
+  messageSizeLimitInMegabytes: 50
+  authRatelimit:
+    ip: 30/hour
+    ipv4Mask: 24
+    ipv6Mask: 56
+    user: 50/day
+    exemptionLength: 86400
+    exemption: ""
+  messageRatelimit:
+    value: 100/day
+    exemption: ""
+
 persistence:
   single_pvc: true
   size: 50Gi
   storageClass: longhorn
-roundcube:
+  accessModes:
+    - ReadWriteOnce
+
+networkPolicy:
   enabled: true
+  ingressController:
+    namespace: istio-system
+    podSelector: |
+      matchLabels:
+        istio: ingress
+  monitoring:
+    namespace: monitoring
+    podSelector: |
+      matchLabels:
+        app.kubernetes.io/name: prometheus
+
+ingress:
+  enabled: true
+  ingressClassName: istio
+  tls: true
+  selfSigned: false
+
+  # Prefer a real cert-manager/Cloudflare-issued TLS secret.
+  # This should match the cert secret used for mail.sinlessgames.com.
+  existingSecret: wildcard-sinlessgames-com
+
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: Platform
+    gethomepage.dev/name: Mailu
+    gethomepage.dev/icon: mailu.png
+    gethomepage.dev/description: Mail admin"
+    gethomepage.dev/href: https://mail.sinlessgames.com
+
+    security.sinlessgames.io/exposure: public
+    security.sinlessgames.io/ingress: istio
+    security.sinlessgames.io/backend-mtls: istio-strict
+
+  realIpHeader: X-Forwarded-For
+  realIpFrom: ""
+
+roundcube:
+  enabled: false
+
+webmail:
+  enabled: false
+
 front:
+  kind: Deployment
+  replicaCount: 1
+
+  # Front is the public mail edge. Pin it to the node that owns the mail IP.
+  nodeSelector:
+    kubernetes.io/hostname: rke2-prod-wk-02
+
+  updateStrategy:
+    type: Recreate
+
+  hostPort:
+    enabled: true
+
+  externalService:
+    enabled: false
+
+  podLabels:
+    security.sinlessgames.io/exposure: public-mail-edge
+    security.sinlessgames.io/hostport-required: "true"
+
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+    security.sinlessgames.io/istio-sidecar: "disabled-mail-edge"
+    security.sinlessgames.io/reason: "Public SMTP/IMAP/Submission protocols must preserve client IP and are not mesh-mTLS protocols."
+
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: false
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_BIND_SERVICE
+
+  terminationGracePeriodSeconds: 30
+
   resources:
     requests:
       cpu: 100m
@@ -22,7 +152,60 @@ front:
     limits:
       cpu: 500m
       memory: 768Mi
+
 admin:
+  nodeSelector:
+    kubernetes.io/hostname: rke2-prod-wk-02
+
+  updateStrategy:
+    type: Recreate
+
+  podAnnotations:
+    sidecar.istio.io/inject: "true"
+    sidecar.istio.io/rewriteAppHTTPProbers: "true"
+    security.sinlessgames.io/mtls: istio-strict
+
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: false
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_BIND_SERVICE
+
+  startupProbe:
+    enabled: true
+    failureThreshold: 30
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 5
+
+  livenessProbe:
+    enabled: true
+    failureThreshold: 6
+    initialDelaySeconds: 90
+    periodSeconds: 20
+    successThreshold: 1
+    timeoutSeconds: 5
+
+  readinessProbe:
+    enabled: true
+    failureThreshold: 12
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 5
+
   resources:
     requests:
       cpu: 50m
@@ -30,7 +213,35 @@ admin:
     limits:
       cpu: 300m
       memory: 512Mi
+
 postfix:
+  nodeSelector:
+    kubernetes.io/hostname: rke2-prod-wk-02
+
+  updateStrategy:
+    type: Recreate
+
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+    security.sinlessgames.io/istio-sidecar: "disabled-mail-internal"
+
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: false
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_BIND_SERVICE
+
   resources:
     requests:
       cpu: 50m
@@ -38,7 +249,35 @@ postfix:
     limits:
       cpu: 300m
       memory: 512Mi
+
 dovecot:
+  nodeSelector:
+    kubernetes.io/hostname: rke2-prod-wk-02
+
+  updateStrategy:
+    type: Recreate
+
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+    security.sinlessgames.io/istio-sidecar: "disabled-mail-internal"
+
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: false
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_BIND_SERVICE
+
   resources:
     requests:
       cpu: 50m
@@ -46,7 +285,33 @@ dovecot:
     limits:
       cpu: 300m
       memory: 512Mi
+
 rspamd:
+  nodeSelector:
+    kubernetes.io/hostname: rke2-prod-wk-02
+
+  updateStrategy:
+    type: Recreate
+
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+    security.sinlessgames.io/istio-sidecar: "disabled-mail-internal"
+
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: false
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
   resources:
     requests:
       cpu: 100m
@@ -54,7 +319,23 @@ rspamd:
     limits:
       cpu: "1"
       memory: 1536Mi
+
 clamav:
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: false
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
   resources:
     requests:
       cpu: 100m
@@ -62,14 +343,7 @@ clamav:
     limits:
       cpu: "1"
       memory: 2Gi
-webmail:
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 300m
-      memory: 512Mi
+
 oletools:
   resources:
     requests:
@@ -78,6 +352,7 @@ oletools:
     limits:
       cpu: 300m
       memory: 512Mi
+
 tika:
   resources:
     requests:
@@ -86,8 +361,17 @@ tika:
     limits:
       cpu: "1"
       memory: 1536Mi
+
 redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
   master:
+    persistence:
+      enabled: true
+      storageClass: longhorn
+      size: 8Gi
     resources:
       requests:
         cpu: 50m
@@ -95,16 +379,3 @@ redis:
       limits:
         cpu: 300m
         memory: 512Mi
-ingress:
-  enabled: true
-  ingressClassName: istio
-  tls: true
-  selfSigned: true
-  annotations:
-    kubernetes.io/ingress.class: istio
-    gethomepage.dev/enabled: "true"
-    gethomepage.dev/group: Platform
-    gethomepage.dev/name: Mailu
-    gethomepage.dev/icon: mailu.png
-    gethomepage.dev/description: Mail admin and webmail
-    gethomepage.dev/href: https://mail.sinlessgames.com

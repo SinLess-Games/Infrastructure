@@ -1,0 +1,60 @@
+replicaCount: 1
+
+createClusterRoles: false
+
+rbac:
+  enabled: true
+
+image:
+  pullPolicy: IfNotPresent
+
+config:
+  kube.events: false
+  git.user: SinLess Games Image Updater
+  git.email: noreply@sinlessgames.com
+  git.commit-sign-off: true
+  git.commit-message-template: |
+    chore(images): update {{ .AppName }}
+  log.level: info
+  registries:
+    - name: GitHub Container Registry
+      prefix: ghcr.io
+      api_url: https://ghcr.io
+      ping: yes
+      # credentials: secret:gitops/ghcr-creds#creds
+
+extraArgs:
+  - --interval
+  - 5m
+  - --application-namespace
+  - gitops
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 30s

@@ -1,11 +1,23 @@
+# Kubernetes/apps/prod/kube-system/namespace/limitrange.yaml
 apiVersion: v1
 kind: LimitRange
 metadata:
   name: default-requests
   namespace: kube-system
+  labels:
+    app.kubernetes.io/name: kube-system-default-requests
+    app.kubernetes.io/component: namespace-policy
+    app.kubernetes.io/part-of: platform
+    security.sinlessgames.io/policy: resource-defaults
 spec:
   limits:
     - type: Container
       defaultRequest:
         cpu: 100m
         memory: 128Mi
+      min:
+        cpu: 10m
+        memory: 32Mi
+      max:
+        cpu: "4"
+        memory: 8Gi

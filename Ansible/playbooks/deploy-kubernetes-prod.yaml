@@ -48,13 +48,55 @@
         - preflight
         - vault
 
-    - name: Cache runtime operation flags from CLI overrides
+    - name: Cache runtime operation flags and execution controls from CLI overrides and environment
       ansible.builtin.set_fact:
         kubernetes_runtime_plan_only: "{{ kubernetes_plan_only | default(kubernetes_operation.plan_only) | bool }}"
         kubernetes_runtime_destroy: "{{ kubernetes_destroy | default(kubernetes_operation.destroy) | bool }}"
+        kubernetes_runtime_apply_mode: >-
+          {{
+            not (kubernetes_plan_only | default(kubernetes_operation.plan_only) | bool)
+            and not (kubernetes_destroy | default(kubernetes_operation.destroy) | bool)
+          }}
+        kubernetes_runtime_configure_serial: >-
+          {{
+            (lookup('env', 'KUBERNETES_CONFIGURE_SERIAL') | default('3', true)) | int
+          }}
+        kubernetes_runtime_tf_parallelism: >-
+          {{
+            (
+              lookup('env', 'TF_PARALLELISM')
+              | default(lookup('env', 'KUBERNETES_TERRAFORM_PARALLELISM'), true)
+              | default('3', true)
+            ) | int
+          }}
+        kubernetes_runtime_tf_lock_timeout: "{{ lookup('env', 'KUBERNETES_TERRAFORM_LOCK_TIMEOUT') | default('5m', true) }}"
       tags:
         - preflight
         - deploy
+
+    - name: Build Terraform CLI argument overrides
+      ansible.builtin.set_fact:
+        kubernetes_runtime_tf_cli_args_common: >-
+          -parallelism={{ kubernetes_runtime_tf_parallelism }}
+          -lock-timeout={{ kubernetes_runtime_tf_lock_timeout }}
+      tags:
+        - preflight
+        - deploy
+
+    - name: Display runtime operation mode
+      ansible.builtin.debug:
+        msg:
+          plan_only: "{{ kubernetes_runtime_plan_only }}"
+          destroy: "{{ kubernetes_runtime_destroy }}"
+          apply_mode: "{{ kubernetes_runtime_apply_mode }}"
+          configure_serial: "{{ kubernetes_runtime_configure_serial }}"
+          terraform_parallelism: "{{ kubernetes_runtime_tf_parallelism }}"
+          terraform_lock_timeout: "{{ kubernetes_runtime_tf_lock_timeout }}"
+          terraform_cli_args: "{{ kubernetes_runtime_tf_cli_args_common }}"
+      tags:
+        - preflight
+        - deploy
+        - summary
 
     - name: Build runtime SSH key list from shared access document
       ansible.builtin.set_fact:
@@ -122,10 +164,8 @@
         that:
           - kubernetes_runtime_rke2_server_token is defined
           - kubernetes_runtime_rke2_server_token | length > 0
-          # NOTE: SSH keys validation temporarily disabled pending Vault policy update
-          # to allow ansible token to read kubernetes/* paths.
-          # The policy has been updated in Ansible/group_vars/vault/policies.yaml
-          # but needs to be deployed to the live Vault instance.
+          - kubernetes_runtime_configure_serial | int > 0
+          - kubernetes_runtime_tf_parallelism | int > 0
         fail_msg: "Failed to populate localhost runtime cache from Vault."
       tags:
         - preflight
@@ -149,6 +189,12 @@
           wait_for_node_ready_timeout: 60
           wait_for_node_ready_retries: 15
           wait_for_node_ready_delay: 20
+      environment:
+        TF_IN_AUTOMATION: "1"
+        TF_INPUT: "0"
+        TF_CLI_ARGS_plan: "{{ kubernetes_runtime_tf_cli_args_common }}"
+        TF_CLI_ARGS_apply: "{{ kubernetes_runtime_tf_cli_args_common }}"
+        TF_CLI_ARGS_destroy: "{{ kubernetes_runtime_tf_cli_args_common }}"
       tags:
         - deploy
         - infrastructure
@@ -171,15 +217,20 @@
     - ../group_vars/kubernetes/production/master.yaml
     - ../group_vars/kubernetes/production/worker.yaml
 
+  pre_tasks:
+    - name: Skip node wait for plan or destroy operations
+      ansible.builtin.meta: end_play
+      when: not (hostvars['localhost'].kubernetes_runtime_apply_mode | default(true) | bool)
+      tags:
+        - wait
+        - kubernetes
+
   tasks:
     - name: Announce Kubernetes node SSH wait phase
       ansible.builtin.debug:
         msg: >-
           Terraform has finished; waiting for Kubernetes production nodes to boot
           and accept SSH before configuration begins.
-      when:
-        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
-        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - wait
         - kubernetes
@@ -211,9 +262,6 @@
       changed_when: false
       failed_when: false
       no_log: true
-      when:
-        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
-        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - wait
         - kubernetes
@@ -223,18 +271,6 @@
         delay: 5
         timeout: "{{ kubernetes_wait_for_ssh_timeout | default(900) }}"
         connect_timeout: 5
-      when:
-        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
-        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
-      tags:
-        - wait
-        - kubernetes
-
-    - name: Gather facts after SSH is available
-      ansible.builtin.setup:
-      when:
-        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
-        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - wait
         - kubernetes
@@ -244,9 +280,9 @@
 # =============================================================================
 - name: Configure Kubernetes production nodes
   hosts: kubernetes_prod
-  gather_facts: true
+  gather_facts: false
   any_errors_fatal: true
-  serial: 1
+  serial: "{{ hostvars['localhost'].kubernetes_runtime_configure_serial | default(3) | int }}"
   vars_files:
     - ../group_vars/all/ansible.yaml
     - ../group_vars/all/users.yaml
@@ -259,13 +295,17 @@
     - ../group_vars/kubernetes/production/worker.yaml
 
   pre_tasks:
+    - name: Skip node configuration for plan or destroy operations
+      ansible.builtin.meta: end_play
+      when: not (hostvars['localhost'].kubernetes_runtime_apply_mode | default(true) | bool)
+      tags:
+        - configure
+        - kubernetes
+
     - name: Announce Kubernetes node configuration phase
       ansible.builtin.debug:
         msg: >-
           Kubernetes nodes are reachable; beginning OS and RKE2 configuration.
-      when:
-        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
-        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - configure
         - kubernetes
@@ -285,6 +325,12 @@
         - configure
         - kubernetes
         - validate
+
+    - name: Gather facts for node configuration
+      ansible.builtin.setup:
+      tags:
+        - configure
+        - kubernetes
 
     - name: Read persisted RKE2 bootstrap token from first control plane when available
       ansible.builtin.command: cat /var/lib/rancher/rke2/server/token
@@ -358,6 +404,7 @@
 
           Distribution: {{ kubernetes_configure_distribution | default('rke2') }}
           Version: {{ kubernetes_configure_version | default(kubernetes_rke2_version) }}
+          Serial Batch Size: {{ hostvars['localhost'].kubernetes_runtime_configure_serial | default(3) | int }}
           ========================================================
       tags:
         - configure
@@ -374,9 +421,6 @@
           - 10.10.10.1
           - 1.1.1.1
           - 1.0.0.1
-      when:
-        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
-        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       failed_when: false
       tags:
         - dns
@@ -446,15 +490,20 @@
     - ../group_vars/kubernetes/production/master.yaml
     - ../group_vars/kubernetes/production/worker.yaml
 
+  pre_tasks:
+    - name: Skip kubeconfig save for plan or destroy operations
+      ansible.builtin.meta: end_play
+      when: not (hostvars['localhost'].kubernetes_runtime_apply_mode | default(true) | bool)
+      tags:
+        - kubeconfig
+        - kubernetes
+
   tasks:
     - name: Ensure local kubeconfig output directory exists
       ansible.builtin.file:
         path: "{{ kubernetes_generated_env_dir }}"
         state: directory
         mode: "0755"
-      when:
-        - not (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool)
-        - not (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
       tags:
         - kubeconfig
         - kubernetes
@@ -566,12 +615,11 @@
       }}
 
   tasks:
-    - name: Skip GitOps bootstrap when disabled
+    - name: Skip GitOps bootstrap when disabled or not in apply mode
       ansible.builtin.meta: end_play
       when:
-        - not (kubernetes_gitops.bootstrap_enabled | default(true) | bool) or
-          (hostvars['localhost'].kubernetes_runtime_destroy | default(false) | bool) or
-          (hostvars['localhost'].kubernetes_runtime_plan_only | default(false) | bool)
+        - not (kubernetes_gitops.bootstrap_enabled | default(true) | bool)
+          or not (hostvars['localhost'].kubernetes_runtime_apply_mode | default(true) | bool)
       tags:
         - apps
         - gitops
@@ -679,10 +727,10 @@
           - apply
           - -k
           - "{{ kubernetes_gitops.namespace_kustomization_path }}"
+      register: kubernetes_gitops_namespace_apply
       changed_when: >-
         'configured' in (kubernetes_gitops_namespace_apply.stdout | default(''))
         or 'created' in (kubernetes_gitops_namespace_apply.stdout | default(''))
-      register: kubernetes_gitops_namespace_apply
       tags:
         - apps
         - gitops

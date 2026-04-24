@@ -1,10 +1,31 @@
+# Kubernetes/apps/prod/sinless-games/mesh/destinationrule-default.yaml
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: sinless-games-default
+  name: sinless-games-default-mtls
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: sinless-games-mesh
+    app.kubernetes.io/instance: sinless-games
+    app.kubernetes.io/component: mtls
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/mtls: istio-strict
+    security.sinlessgames.io/scope: namespace
+  annotations:
+    security.sinlessgames.io/purpose: "Default client-side Istio mutual TLS policy for services in the sinless-games namespace."
+    security.sinlessgames.io/plaintext-allowed: "false"
 spec:
   host: "*.sinless-games.svc.cluster.local"
+
+  # Keep this visible only where it is needed.
+  # "." means this namespace.
+  # "istio-system" allows the shared edge gateway to use this DestinationRule
+  # when routing to sinless-games services.
+  exportTo:
+    - "."
+    - "istio-system"
+
   trafficPolicy:
     tls:
       mode: ISTIO_MUTUAL

@@ -1,0 +1,53 @@
+# Kubernetes/apps/prod/sinless-games/docs/virtualservice-docs.yaml
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: docs
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: docs
+    app.kubernetes.io/component: virtualservice
+    app.kubernetes.io/part-of: sinless-games-platform
+    security.sinlessgames.io/exposure: public-edge
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: Platform
+    gethomepage.dev/name: Docs
+    gethomepage.dev/icon: mdi-file-document-multiple-outline
+    gethomepage.dev/description: Infrastructure documentation
+    gethomepage.dev/href: https://docs.sinlessgames.com
+spec:
+  gateways:
+    - istio-system/shared-edge
+
+  hosts:
+    - docs.sinlessgames.com
+
+  http:
+    - name: docs
+      match:
+        - authority:
+            exact: docs.sinlessgames.com
+          uri:
+            prefix: /
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: "https"
+            X-Forwarded-Host: "docs.sinlessgames.com"
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "strict-origin-when-cross-origin"
+            Permissions-Policy: "camera=(), microphone=(), geolocation=()"
+      timeout: 30s
+      retries:
+        attempts: 2
+        perTryTimeout: 10s
+        retryOn: connect-failure,refused-stream,unavailable,gateway-error
+      route:
+        - destination:
+            host: docs.sinless-games.svc.cluster.local
+            port:
+              number: 80

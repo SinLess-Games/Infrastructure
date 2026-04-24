@@ -1,22 +1,41 @@
+# Kubernetes/apps/prod/monitoring/grafana-beyla/values.yaml
+
 config:
   data:
     beyla-config.yml: |
+      log_level: INFO
+
       discovery:
         services:
           - namespace: helix-ai
           - namespace: sinless-games
+
+      attributes:
+        kubernetes:
+          enable: true
+
       otel_metrics_export:
         endpoint: http://otel-collector.monitoring.svc.cluster.local:4318
+
       otel_traces_export:
         endpoint: http://otel-collector.monitoring.svc.cluster.local:4318
+
 daemonset:
   enabled: true
-resources:
-  requests:
-    cpu: 50m
-    memory: 128Mi
-  limits:
-    cpu: 500m
-    memory: 512Mi
+
+serviceAccount:
+  create: true
+  name: grafana-beyla
+
 serviceMonitor:
   enabled: true
+  additionalLabels:
+    release: kube-prometheus-stack
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi

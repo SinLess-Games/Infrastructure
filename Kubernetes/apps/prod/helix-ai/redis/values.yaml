@@ -1,30 +1,96 @@
+image:
+  # Pin this to an immutable Redis 8.x tag you have tested in your cluster.
+  # The Bitnami chart explicitly recommends immutable tags in production.
+  tag: "8.0.x"
+
 architecture: replication
+
 auth:
   enabled: true
-  existingSecret: platform-integrations
+  sentinel: true
+  # Your earlier ExternalSecret creates this Secret name.
+  existingSecret: helix-ai-workload-secrets
   existingSecretPasswordKey: redis_password
+  usePasswordFiles: true
+  usePasswordFileFromSecret: true
+
+# Redis 8 gives you vectors/search/json, but in this Bitnami chart
+# you should still load the packaged modules through commonConfiguration.
+commonConfiguration: |-
+  appendonly yes
+  save ""
+  loadmodule /opt/bitnami/redis/lib/redis/modules/redisbloom.so
+  loadmodule /opt/bitnami/redis/lib/redis/modules/redisearch.so
+  loadmodule /opt/bitnami/redis/lib/redis/modules/rejson.so
+  loadmodule /opt/bitnami/redis/lib/redis/modules/redistimeseries.so
+
 master:
+  count: 1
   persistence:
     enabled: true
     storageClass: longhorn
     size: 20Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 8Gi
+  pdb:
+    create: true
+    minAvailable: 1
+
 replica:
   replicaCount: 3
   persistence:
     enabled: true
     storageClass: longhorn
     size: 20Gi
-autoscaling:
-  enabled: true
-  minReplicas: 3
-  maxReplicas: 10
-  targetCPUUtilizationPercentage: 80
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 8Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPU: 80
+    targetMemory: 80
+  pdb:
+    create: true
+    minAvailable: 1
+
 sentinel:
   enabled: true
+  quorum: 2
+  getMasterTimeout: 90
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 metrics:
   enabled: true
   serviceMonitor:
     enabled: true
+    namespace: monitoring
+    interval: 30s
+    additionalEndpoints:
+      - port: redis
+        path: /scrape
+      - port: redis
+        path: /metrics
+
+# Only keep this on if you actually run external-dns and want per-pod FQDNs.
+# Otherwise set enabled: false.
 useExternalDNS:
-  enabled: true
-      
+  enabled: false
+  suffix: ""
+  additionalAnnotations: {}

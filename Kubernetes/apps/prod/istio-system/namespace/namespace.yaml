@@ -1,10 +1,22 @@
+# Kubernetes/apps/prod/istio-system/namespace/namespace.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
   name: istio-system
   labels:
     kubernetes.io/metadata.name: istio-system
-    istio.io/rev: default
+
+    # Pod Security Admission
     pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+
+    # Environment / ownership
     topology.kubernetes.io/environment: prod
+    app.kubernetes.io/name: istio-system
+    app.kubernetes.io/component: service-mesh
+    app.kubernetes.io/part-of: platform
+    security.sinlessgames.io/zone: mesh-control-plane

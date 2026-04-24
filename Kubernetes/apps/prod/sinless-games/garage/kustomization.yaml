@@ -18,3 +18,4 @@ resources:
   - deployment-garage-webui.yaml
   - ingress-garage-ui.yaml
   - virtualservice-garage.yaml
+  - externalsecret-garage-bootstrap.yaml

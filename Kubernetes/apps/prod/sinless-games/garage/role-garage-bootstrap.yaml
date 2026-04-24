@@ -1,21 +1,29 @@
+# Kubernetes/apps/prod/sinless-games/garage/role-garage-bootstrap.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: garage-bootstrap
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage-bootstrap
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/part-of: garage
+    security.sinlessgames.io/rbac-scope: garage-bootstrap
 rules:
   - apiGroups:
       - ""
     resources:
       - pods
+    resourceNames:
+      - garage-0
     verbs:
       - get
-      - list
+
   - apiGroups:
       - ""
     resources:
       - pods/exec
-      - pods/attach
+    resourceNames:
+      - garage-0
     verbs:
-      - get
       - create

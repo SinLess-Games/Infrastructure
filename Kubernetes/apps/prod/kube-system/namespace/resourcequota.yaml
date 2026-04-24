@@ -1,11 +1,25 @@
+# Kubernetes/apps/prod/kube-system/namespace/resourcequota.yaml
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: kube-system-quota
   namespace: kube-system
+  labels:
+    app.kubernetes.io/name: kube-system-quota
+    app.kubernetes.io/component: namespace-policy
+    app.kubernetes.io/part-of: platform
+    security.sinlessgames.io/policy: resource-quota
 spec:
   hard:
     requests.cpu: "64"
     requests.memory: 160Gi
-    persistentvolumeclaims: "100"
+
     pods: "600"
+    persistentvolumeclaims: "100"
+
+    services: "100"
+    services.loadbalancers: "10"
+    services.nodeports: "20"
+
+    secrets: "500"
+    configmaps: "500"

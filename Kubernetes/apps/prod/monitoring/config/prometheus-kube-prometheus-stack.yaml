@@ -1,3 +1,4 @@
+# Kubernetes/apps/prod/monitoring/config/prometheus-kube-prometheus-stack.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: Prometheus
 metadata:
@@ -10,28 +11,85 @@ metadata:
     app.kubernetes.io/name: prometheus
     app.kubernetes.io/part-of: kube-prometheus-stack
     release: kube-prometheus-stack
+    security.sinlessgames.io/policy: hardened
 spec:
   replicas: 2
-  retention: 15d
+
+  retention: 7d
+  retentionSize: 40GB
+
   serviceAccountName: kube-prometheus-stack-prometheus
+
   nodeSelector:
     sinlessgames.com/role: worker
-  serviceMonitorSelector: {}
-  serviceMonitorNamespaceSelector: {}
-  podMonitorSelector: {}
-  podMonitorNamespaceSelector: {}
-  probeSelector: {}
-  probeNamespaceSelector: {}
+
+  podMetadata:
+    labels:
+      app.kubernetes.io/name: prometheus
+      app.kubernetes.io/component: metrics-store
+      app.kubernetes.io/part-of: kube-prometheus-stack
+      security.sinlessgames.io/zone: monitoring
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 2000
+    fsGroup: 2000
+    seccompProfile:
+      type: RuntimeDefault
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: "2"
+      memory: 6Gi
+
+  externalLabels:
+    cluster: rke2-prod
+    environment: prod
+
+  serviceMonitorSelector:
+    matchLabels:
+      release: kube-prometheus-stack
+  serviceMonitorNamespaceSelector:
+    matchLabels:
+      monitoring.sinlessgames.io/scrape: "true"
+
+  podMonitorSelector:
+    matchLabels:
+      release: kube-prometheus-stack
+  podMonitorNamespaceSelector:
+    matchLabels:
+      monitoring.sinlessgames.io/scrape: "true"
+
+  probeSelector:
+    matchLabels:
+      release: kube-prometheus-stack
+  probeNamespaceSelector:
+    matchLabels:
+      monitoring.sinlessgames.io/scrape: "true"
+
   ruleSelector:
     matchLabels:
       release: kube-prometheus-stack
-  ruleNamespaceSelector: {}
-  externalLabels:
-    cluster: rke2-prod
+  ruleNamespaceSelector:
+    matchLabels:
+      monitoring.sinlessgames.io/rules: "true"
+
   alerting:
     alertmanagers:
       - namespace: monitoring
         name: kube-prometheus-stack-alertmanager
         port: http-web
+
   storage:
-    emptyDir: {}
+    volumeClaimTemplate:
+      spec:
+        storageClassName: longhorn
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 50Gi

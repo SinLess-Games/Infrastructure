@@ -1,6 +1,11 @@
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
-  name: default-deny
+  name: ingressgateway-default-deny
   namespace: istio-system
-spec: {}
+  annotations:
+    "istio.io/dry-run": "true"
+spec:
+  selector:
+    matchLabels:
+      istio: ingressgateway

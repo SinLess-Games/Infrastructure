@@ -10,3 +10,4 @@ resources:
   - virtualservice-homepage.yaml
   - destinationrule-homepage.yaml
   - networkpolicy-homepage.yaml
+  - peerauthentication-homepage.yaml

@@ -1,12 +1,21 @@
+# Kubernetes/apps/prod/sinless-games/garage/service-s3.yaml
 apiVersion: v1
 kind: Service
 metadata:
   name: garage-s3
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage
+    app.kubernetes.io/component: s3-api
+    app.kubernetes.io/part-of: garage
+    security.sinlessgames.io/exposure: cluster-internal
 spec:
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: garage
   ports:
     - name: http-s3
       port: 3900
       targetPort: 3900
+      protocol: TCP
+      appProtocol: http

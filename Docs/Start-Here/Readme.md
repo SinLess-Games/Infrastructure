@@ -29,7 +29,6 @@ The code in this repository is organized into the following directories:
     ├── Terraform/ # Terraform code for managing cloud resources (if any)
     ├── scripts/ # Miscellaneous scripts for managing the infrastructure
     ├── Kubernetes/ # Kubernetes manifests and configuration (if any)
-    ├── Policies/ # Security and compliance policies for the infrastructure
 ```
 
 ## Taskfiles

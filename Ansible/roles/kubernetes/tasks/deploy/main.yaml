@@ -156,6 +156,72 @@
   register: stale_lock_cleanup_result
   when: not kubernetes_operation.plan_only | bool
 
+- name: Clear orphaned Proxmox cloud-init volumes before Terraform apply
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - ConnectTimeout=5
+      - -o
+      - BatchMode=yes
+      - -o
+      - StrictHostKeyChecking=no
+      - -o
+      - UserKnownHostsFile=/dev/null
+      - root@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] }}
+      - /bin/bash
+      - -c
+      - |
+        set -eu
+        set -o pipefail
+        vmid="{{ item.vmid }}"
+        storage="{{ item.storage | default(kubernetes_proxmox.storage_by_node[item.target_node] | default(kubernetes_proxmox.storage)) }}"
+        volume="vm-${vmid}-cloudinit"
+
+        # Remove stale cloud-init volume references from the configured storage ID.
+        timeout 10 /usr/sbin/pvesm free "${storage}:${volume}" >/dev/null 2>&1 || true
+
+        # Fallback for stale LVs that are no longer visible through pvesm metadata.
+        for vg in $(/usr/sbin/vgs --noheadings -o vg_name 2>/dev/null | awk '{print $1}'); do
+          if timeout 5 /usr/sbin/lvs --noheadings -o lv_name "${vg}" 2>/dev/null | awk '{print $1}' | grep -Fxq "${volume}"; then
+            timeout 10 /usr/sbin/lvremove -fy "${vg}/${volume}" >/dev/null 2>&1 || true
+          fi
+        done
+  loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  throttle: 2
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  failed_when: false
+  register: orphan_cloudinit_cleanup_result
+  when: not kubernetes_operation.plan_only | bool
+
+- name: Clear orphaned Proxmox cloud-init volumes via API before Terraform apply
+  ansible.builtin.uri:
+    url: >-
+      {{ kubernetes_proxmox.api_url | regex_replace('/+$', '') }}/nodes/{{ item.target_node }}/storage/{{ item.storage | default(kubernetes_proxmox.storage_by_node[item.target_node] | default(kubernetes_proxmox.storage)) }}/content/vm-{{ item.vmid }}-cloudinit
+    method: DELETE
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ kubernetes_terraform_proxmox_api_token_id }}={{ kubernetes_terraform_proxmox_api_token_secret }}
+    validate_certs: "{{ not (kubernetes_deploy_proxmox_tls_insecure | bool) }}"
+    status_code:
+      - 200
+      - 404
+      - 500
+  loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  failed_when: false
+  no_log: true
+  register: orphan_cloudinit_cleanup_api_result
+  when: not kubernetes_operation.plan_only | bool
+
 - name: Initialize Terraform working directory
   ansible.builtin.command:
     argv:
@@ -229,7 +295,7 @@
       - config
       - "{{ kubernetes_proxmox_gpu.vmid | string }}"
   become: true
-  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
   run_once: true
   changed_when: false
   register: kubernetes_gpu_vm_config
@@ -266,7 +332,7 @@
       - --hostpci1
       - "mapping={{ kubernetes_proxmox_gpu.devices[1] }},pcie=1"
   become: true
-  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
   run_once: true
   changed_when: true
   register: kubernetes_gpu_passthrough_config
@@ -283,7 +349,7 @@
       - status
       - "{{ kubernetes_proxmox_gpu.vmid | string }}"
   become: true
-  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
   run_once: true
   changed_when: false
   register: kubernetes_gpu_vm_status
@@ -300,7 +366,7 @@
       - stop
       - "{{ kubernetes_proxmox_gpu.vmid | string }}"
   become: true
-  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
   run_once: true
   changed_when: true
   failed_when: false
@@ -319,7 +385,7 @@
       - status
       - "{{ kubernetes_proxmox_gpu.vmid | string }}"
   become: true
-  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
   run_once: true
   changed_when: false
   register: kubernetes_gpu_vm_stopped
@@ -339,7 +405,7 @@
       - start
       - "{{ kubernetes_proxmox_gpu.vmid | string }}"
   become: true
-  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
   run_once: true
   changed_when: true
   when:
@@ -355,7 +421,7 @@
       - status
       - "{{ kubernetes_proxmox_gpu.vmid | string }}"
   become: true
-  delegate_to: "{{ kubernetes_proxmox_gpu.host }}"
+  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
   run_once: true
   changed_when: false
   register: kubernetes_gpu_vm_started

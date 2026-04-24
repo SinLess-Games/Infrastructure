@@ -1,60 +1,81 @@
+# Kubernetes/apps/prod/monitoring/mimir/values.yaml
+
+global:
+  extraEnvFrom:
+    - secretRef:
+        name: mimir-s3-credentials
+
+minio:
+  enabled: false
+
 mimir:
   structuredConfig:
+    multitenancy_enabled: false
+
+    limits:
+      max_global_series_per_user: 500000
+      ingestion_rate: 100000
+      ingestion_burst_size: 200000
+
     common:
       storage:
         backend: s3
         s3:
-          endpoint: garage-s3.sinless-games.svc.cluster.local:3900
-          region: us-east-1
+          endpoint: ${S3_ENDPOINT}
+          region: ${S3_REGION}
           bucket_name: k8s-prod-mimir
           access_key_id: ${S3_ACCESS_KEY_ID}
           secret_access_key: ${S3_SECRET_ACCESS_KEY}
-          insecure: true
+          insecure: false
+          s3forcepathstyle: true
+
     blocks_storage:
       backend: s3
       storage_prefix: blocks
       bucket_store:
         sync_dir: /data/tsdb-sync
       s3:
-        endpoint: garage-s3.sinless-games.svc.cluster.local:3900
-        region: us-east-1
+        endpoint: ${S3_ENDPOINT}
+        region: ${S3_REGION}
         bucket_name: k8s-prod-mimir
         access_key_id: ${S3_ACCESS_KEY_ID}
         secret_access_key: ${S3_SECRET_ACCESS_KEY}
-        insecure: true
+        insecure: false
+        s3forcepathstyle: true
       tsdb:
         dir: /data/tsdb
+
     alertmanager_storage:
       backend: s3
       storage_prefix: alertmanager
       s3:
-        endpoint: garage-s3.sinless-games.svc.cluster.local:3900
-        region: us-east-1
+        endpoint: ${S3_ENDPOINT}
+        region: ${S3_REGION}
         bucket_name: k8s-prod-mimir
         access_key_id: ${S3_ACCESS_KEY_ID}
         secret_access_key: ${S3_SECRET_ACCESS_KEY}
-        insecure: true
+        insecure: false
+        s3forcepathstyle: true
+
     ruler_storage:
       backend: s3
       storage_prefix: ruler
       s3:
-        endpoint: garage-s3.sinless-games.svc.cluster.local:3900
-        region: us-east-1
+        endpoint: ${S3_ENDPOINT}
+        region: ${S3_REGION}
         bucket_name: k8s-prod-mimir
         access_key_id: ${S3_ACCESS_KEY_ID}
         secret_access_key: ${S3_SECRET_ACCESS_KEY}
-        insecure: true
-global:
-  extraEnvFrom:
-    - secretRef:
-        name: mimir-s3-credentials
-minio:
-  enabled: false
+        insecure: false
+        s3forcepathstyle: true
+
 nginx:
   nginxConfig:
     resolver: 10.43.0.10
+
 gateway:
   enabled: true
+  replicas: 2
   resources:
     requests:
       cpu: 50m
@@ -62,16 +83,25 @@ gateway:
     limits:
       cpu: 500m
       memory: 512Mi
+
 ingester:
-  replicas: 2
+  replicas: 3
+  zoneAwareReplication:
+    enabled: false
+  persistentVolume:
+    enabled: true
+    storageClass: longhorn
+    size: 20Gi
   resources:
     requests:
       cpu: 250m
-      memory: 768Mi
+      memory: 1Gi
     limits:
-      cpu: "2"
+      cpu: "1"
       memory: 2Gi
+
 distributor:
+  replicas: 2
   resources:
     requests:
       cpu: 250m
@@ -79,15 +109,19 @@ distributor:
     limits:
       cpu: "1"
       memory: 1Gi
+
 querier:
+  replicas: 2
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
+      cpu: 100m
+      memory: 256Mi
     limits:
-      cpu: "1"
-      memory: 1Gi
+      cpu: 500m
+      memory: 768Mi
+
 query_frontend:
+  replicas: 2
   resources:
     requests:
       cpu: 100m
@@ -95,25 +129,40 @@ query_frontend:
     limits:
       cpu: 500m
       memory: 512Mi
+
 store_gateway:
-  replicas: 2
+  replicas: 3
+  zoneAwareReplication:
+    enabled: false
+  persistentVolume:
+    enabled: true
+    storageClass: longhorn
+    size: 10Gi
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
+      cpu: 100m
+      memory: 256Mi
     limits:
-      cpu: "1"
-      memory: 1Gi
+      cpu: 500m
+      memory: 768Mi
+
 compactor:
+  replicas: 1
+  persistentVolume:
+    enabled: true
+    storageClass: longhorn
+    size: 20Gi
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
+      cpu: 100m
+      memory: 256Mi
     limits:
-      cpu: "1"
-      memory: 1Gi
+      cpu: 500m
+      memory: 768Mi
+
 ruler:
   enabled: true
+  replicas: 2
   resources:
     requests:
       cpu: 100m
@@ -121,6 +170,12 @@ ruler:
     limits:
       cpu: 500m
       memory: 512Mi
+
+alertmanager:
+  enabled: false
+
 metaMonitoring:
   serviceMonitor:
     enabled: true
+    labels:
+      release: kube-prometheus-stack

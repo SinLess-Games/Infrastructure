@@ -1,0 +1,271 @@
+# Kubernetes/apps/prod/sinless-games/policies/networkpolicy-mailu.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mailu-front-allow-public-mail-ingress
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: mailu
+    app.kubernetes.io/instance: mailu
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: mailu
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: network
+    security.sinlessgames.io/exposure: public-mail-edge
+  annotations:
+    security.sinlessgames.io/purpose: "Allow required public mail protocols only to the Mailu front pod."
+    security.sinlessgames.io/reason: "SMTP/IMAP/submission must accept traffic from external mail servers and mail clients."
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: mailu
+      app.kubernetes.io/component: front
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    # Public SMTP.
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 25
+
+    # Public mail client protocols.
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 465
+        - protocol: TCP
+          port: 587
+        - protocol: TCP
+          port: 993
+        - protocol: TCP
+          port: 995
+
+    # Optional plain IMAP/POP3. Keep only if Mailu front needs to expose STARTTLS/plain ports.
+    # Remove these if you only want encrypted client ports exposed.
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 143
+        - protocol: TCP
+          port: 110
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mailu-front-allow-istio-web-ingress
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: mailu
+    app.kubernetes.io/instance: mailu
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: mailu
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: network
+    security.sinlessgames.io/exposure: istio-web
+  annotations:
+    security.sinlessgames.io/purpose: "Allow the Istio ingress gateway to reach Mailu web/admin HTTP only."
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: mailu
+      app.kubernetes.io/component: front
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+          podSelector:
+            matchLabels:
+              istio: ingress
+      ports:
+        - protocol: TCP
+          port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mailu-allow-same-instance-internal
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: mailu
+    app.kubernetes.io/instance: mailu
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: mailu
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: network
+    security.sinlessgames.io/exposure: internal-mailu-only
+  annotations:
+    security.sinlessgames.io/purpose: "Allow only Mailu pods in the same Helm release to communicate on required internal ports."
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: mailu
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: mailu
+      ports:
+        # HTTP between Mailu front/admin/web components.
+        - protocol: TCP
+          port: 80
+
+        # Redis.
+        - protocol: TCP
+          port: 6379
+
+        # ClamAV.
+        - protocol: TCP
+          port: 3310
+
+        # Rspamd common worker/controller/proxy ports.
+        - protocol: TCP
+          port: 11332
+        - protocol: TCP
+          port: 11333
+        - protocol: TCP
+          port: 11334
+
+        # SMTP/LMTP/auth-related internal mail flow.
+        - protocol: TCP
+          port: 25
+        - protocol: TCP
+          port: 2525
+        - protocol: TCP
+          port: 24
+        - protocol: TCP
+          port: 10025
+        - protocol: TCP
+          port: 10026
+
+        # IMAP/POP3 internal access through front/dovecot if used.
+        - protocol: TCP
+          port: 110
+        - protocol: TCP
+          port: 143
+        - protocol: TCP
+          port: 993
+        - protocol: TCP
+          port: 995
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mailu-allow-required-egress
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: mailu
+    app.kubernetes.io/instance: mailu
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: mailu
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: network
+    security.sinlessgames.io/egress: restricted
+  annotations:
+    security.sinlessgames.io/purpose: "Allow Mailu only the egress needed for DNS, internal Mailu traffic, outbound SMTP, and security updates."
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: mailu
+
+  policyTypes:
+    - Egress
+
+  egress:
+    # DNS to CoreDNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Optional DNS service-IP fallback.
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.10/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Mailu internal pod-to-pod egress.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: mailu
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 3310
+        - protocol: TCP
+          port: 11332
+        - protocol: TCP
+          port: 11333
+        - protocol: TCP
+          port: 11334
+        - protocol: TCP
+          port: 25
+        - protocol: TCP
+          port: 2525
+        - protocol: TCP
+          port: 24
+        - protocol: TCP
+          port: 10025
+        - protocol: TCP
+          port: 10026
+        - protocol: TCP
+          port: 110
+        - protocol: TCP
+          port: 143
+        - protocol: TCP
+          port: 993
+        - protocol: TCP
+          port: 995
+
+    # Outbound SMTP to the internet.
+    # Required for sending mail to remote mail servers.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 25
+
+    # HTTPS/HTTP for ClamAV/Rspamd updates, OCSP, package feeds, etc.
+    # This is intentionally limited to web update traffic.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80

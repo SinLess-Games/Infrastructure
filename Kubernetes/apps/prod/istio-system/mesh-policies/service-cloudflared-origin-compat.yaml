@@ -1,24 +1,28 @@
+# Kubernetes/apps/prod/istio-system/mesh-policies/service-cloudflared-origin-compat.yaml
 apiVersion: v1
 kind: Service
 metadata:
   name: cloudflared-origin-compat
   namespace: istio-system
+  labels:
+    app.kubernetes.io/name: cloudflared-origin-compat
+    app.kubernetes.io/component: ingress-origin
+    app.kubernetes.io/part-of: istio
+    security.sinlessgames.io/exposure: internal-only
 spec:
   type: ClusterIP
-  clusterIP: 10.43.106.248
   selector:
     app: istio-ingress
     istio: ingress
   ports:
-    - name: status-port
-      port: 15021
-      targetPort: 15021
-      protocol: TCP
     - name: http2
       port: 80
       targetPort: 80
       protocol: TCP
+      appProtocol: http
+
     - name: https
       port: 443
       targetPort: 443
       protocol: TCP
+      appProtocol: https

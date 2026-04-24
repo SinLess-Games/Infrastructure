@@ -1,13 +1,25 @@
+# Kubernetes/apps/prod/istio-system/namespace/resourcequota.yaml
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: istio-system-quota
   namespace: istio-system
+  labels:
+    app.kubernetes.io/name: istio-system-quota
+    app.kubernetes.io/component: namespace-policy
+    app.kubernetes.io/part-of: istio
+    security.sinlessgames.io/policy: resource-quota
 spec:
   hard:
     requests.cpu: "8"
     requests.memory: 16Gi
+
     limits.cpu: "16"
     limits.memory: 32Gi
-    persistentvolumeclaims: "5"
+
     pods: "150"
+    services: "25"
+    secrets: "150"
+    configmaps: "150"
+
+    persistentvolumeclaims: "0"

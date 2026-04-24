@@ -3,6 +3,11 @@ kind: ConfigMap
 metadata:
   name: vault-ca
   namespace: security
+  labels:
+    app.kubernetes.io/name: vault-ca
+    app.kubernetes.io/component: trust-bundle
+    app.kubernetes.io/part-of: external-secrets
+    security.sinlessgames.io/provider: vault
 data:
   ca.crt: |
     -----BEGIN CERTIFICATE-----

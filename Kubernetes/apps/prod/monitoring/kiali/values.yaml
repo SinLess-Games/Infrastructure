@@ -1,21 +1,45 @@
+# Kubernetes/apps/prod/monitoring/kiali/values.yaml
+
 auth:
-  strategy: anonymous
+  strategy: token
+
 deployment:
   accessible_namespaces:
-    - "**"
+    - istio-system
+    - monitoring
+    - helix-ai
+    - sinless-games
+  view_only_mode: true
+
 external_services:
   custom_dashboards:
     enabled: true
+
   prometheus:
     url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+
   grafana:
     enabled: true
     in_cluster_url: http://grafana.monitoring.svc.cluster.local
     url: https://grafana.sinlessgames.com
+
   tracing:
     enabled: true
     provider: tempo
     in_cluster_url: http://tempo-query-frontend.monitoring.svc.cluster.local:3100
+
 server:
   web_root: /kiali
 
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: kube-prometheus-stack
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi

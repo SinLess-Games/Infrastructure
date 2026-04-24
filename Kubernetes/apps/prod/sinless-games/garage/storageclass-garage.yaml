@@ -1,15 +1,21 @@
+# Kubernetes/apps/prod/sinless-games/garage/storageclass-garage.yaml
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: longhorn-garage
+  labels:
+    app.kubernetes.io/name: longhorn-garage
+    app.kubernetes.io/component: storage-class
+    app.kubernetes.io/part-of: garage
+    security.sinlessgames.io/data-classification: persistent
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true
-reclaimPolicy: Delete
-volumeBindingMode: Immediate
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
 parameters:
   numberOfReplicas: "1"
   staleReplicaTimeout: "30"
   fsType: ext4
   dataLocality: disabled
-  disableRevisionCounter: "true"
+  disableRevisionCounter: "false"
   dataEngine: v1

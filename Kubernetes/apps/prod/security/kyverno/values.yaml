@@ -1,18 +1,83 @@
+# Kubernetes/apps/prod/security/kyverno/values.yaml
+
 admissionController:
-  replicas: 3
+  replicas: 2
+
+  metricsService:
+    create: true
+    type: ClusterIP
+    port: 8000
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+
 backgroundController:
-  replicas: 2
+  replicas: 1
+
+  metricsService:
+    create: true
+    type: ClusterIP
+    port: 8000
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 384Mi
+
 cleanupController:
-  replicas: 2
+  replicas: 1
+
+  metricsService:
+    create: true
+    type: ClusterIP
+    port: 8000
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 384Mi
+
 reportsController:
-  replicas: 2
+  replicas: 1
+
+  metricsService:
+    create: true
+    type: ClusterIP
+    port: 8000
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 384Mi
+
 grafana:
   enabled: true
+  grafanaDashboard:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+
 certManager:
   enabled: true
+
 serviceMonitor:
   enabled: true
+  additionalLabels:
+    release: kube-prometheus-stack
+
 tracing:
-  enabled: true
-  address: ""
-  port: 
+  enabled: false

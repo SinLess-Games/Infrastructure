@@ -1,0 +1,32 @@
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: internal-admin-hosts-deny-external
+  namespace: istio-system
+  annotations:
+    "istio.io/dry-run": "true"
+spec:
+  selector:
+    matchLabels:
+      app: istio-ingressgateway
+  action: DENY
+  rules:
+    - from:
+        - source:
+            notIpBlocks:
+              - 10.10.0.0/16
+      to:
+        - operation:
+            ports:
+              - "8080"
+              - "8443"
+            hosts:
+              - kiali.sinlessgames.com
+              - prometheus.sinlessgames.com
+              - alert-manager.sinlessgames.com
+              - loki.sinlessgames.com
+              - tempo.sinlessgames.com
+              - mimir.sinlessgames.com
+              - longhorn.sinlessgames.com
+              - opencost.sinlessgames.com
+              - rancher.sinlessgames.com

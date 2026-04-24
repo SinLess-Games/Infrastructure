@@ -3,6 +3,5 @@ kind: Kustomization
 resources:
   - destinationrule-longhorn-ui.yaml
   - externalsecret-longhorn.yaml
-  - ingress-longhorn-ui.yaml
-  - virtualservice-longhorn-ui.yaml
   - runtimeclass-nvidia.yaml
+  - virtualservice-longhorn-ui.yaml

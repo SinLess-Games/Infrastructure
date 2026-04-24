@@ -1,10 +1,80 @@
+replicaCount: 2
+
+enableLeaderElection: true
+logFormat: json
+certManagerEnabled: true
+
 authSecret:
   enabled: true
   create: false
   name: controller-manager
-controllerManager:
-  metrics:
-    serviceMonitor:
-      enable: true
+
+# Least privilege: keep this ARC instance scoped to its own namespace.
+# Set singleNamespace: false only if you intentionally manage runner CRs in multiple namespaces.
+scope:
+  singleNamespace: true
+  watchNamespace: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 443
+  annotations: {}
+
+metrics:
+  serviceAnnotations: {}
+  serviceMonitor:
+    enable: true
+    namespace: ""
+    interval: 30s
+    timeout: 10s
+    serviceMonitorLabels: {}
+  proxy:
+    enabled: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - actions-runner-controller
+
 githubWebhookServer:
+  enabled: false
+
+actionsMetricsServer:
   enabled: false

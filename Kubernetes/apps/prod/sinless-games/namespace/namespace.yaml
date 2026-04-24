@@ -1,13 +1,36 @@
+# Kubernetes/apps/prod/sinless-games/namespace/namespace.yaml
 apiVersion: v1
 kind: Namespace
 metadata:
   name: sinless-games
   labels:
     kubernetes.io/metadata.name: sinless-games
-    istio-injection: disabled
-    pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/warn: privileged
+
+    # Istio sidecar injection for strict internal mTLS.
+    istio-injection: enabled
+
+    # Kubernetes Pod Security Admission baseline.
+    # Strict default for this namespace.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+
+    # Environment / ownership.
     topology.kubernetes.io/environment: prod
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+
+    # Your security metadata.
+    security.sinlessgames.io/istio-injection: enabled
+    security.sinlessgames.io/mtls: strict
+    security.sinlessgames.io/pod-security: restricted
+    security.sinlessgames.io/network-default-deny: required
+    security.sinlessgames.io/kyverno-policy-scope: strict
   annotations:
-    scheduler.alpha.kubernetes.io/defaultTolerations: "[]"
+    security.sinlessgames.io/purpose: "Production namespace for SinLess Games workloads."
+    security.sinlessgames.io/plaintext-allowed: "false"
+    security.sinlessgames.io/default-service-account-token-mount: "false"
+    security.sinlessgames.io/required-controls: "Istio strict mTLS, AuthorizationPolicy, NetworkPolicy, Kyverno restricted pod security policies."

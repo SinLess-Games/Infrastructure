@@ -1,23 +1,69 @@
-provider: cloudflare
+# Kubernetes/apps/prod/networking/external-dns/values.yaml
+
+provider:
+  name: cloudflare
+
 env:
   - name: CF_API_TOKEN
     valueFrom:
       secretKeyRef:
         name: platform-integrations
         key: external_dns_api_token
+
 policy: sync
+
 registry: txt
 txtOwnerId: rke2-prod
+txtPrefix: external-dns-
+
 domainFilters:
   - sinlessgames.com
   - helixaibot.com
+
 sources:
   - crd
   - service
   - istio-gateway
   - istio-virtualservice
+
 extraArgs:
   - --cloudflare-dns-records-per-page=5000
   - --cloudflare-proxied
+  - --events
+  - --log-format=json
+  - --log-level=info
+  - --interval=1m
+  - --txt-wildcard-replacement=wildcard
+
+serviceAccount:
+  create: true
+  name: external-dns
+  automountServiceAccountToken: true
+
 serviceMonitor:
   enabled: true
+  additionalLabels:
+    release: kube-prometheus-stack
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

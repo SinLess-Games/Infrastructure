@@ -224,13 +224,16 @@ kubernetes_rke2_etcd_expose_metrics: true
 kubernetes_kube_vip:
   enabled: true
   interface: "eth0"
-  image: "ghcr.io/kube-vip/kube-vip:v0.8.9"
+  image: "ghcr.io/kube-vip/kube-vip:v0.9.2"
   vip: "{{ kubernetes_api_vip | default('') }}"
   cidr: "{{ (kubernetes_network.subnet | default('0.0.0.0/24')).split('/')[-1] }}"
   controlplane: true
   services: false
   arp: true
   leader_election: true
+  lease_duration: 15
+  renew_deadline: 10
+  retry_period: 2
 kubernetes_proxmox_gpu:
   enabled: true
   host: "pve-01"

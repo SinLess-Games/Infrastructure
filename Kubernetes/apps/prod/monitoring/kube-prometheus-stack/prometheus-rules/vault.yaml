@@ -1,50 +1,142 @@
+# Kubernetes/apps/prod/monitoring/kube-prometheus-stack/prometheus-rules/vault.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: kube-prometheus-stack-vault
   namespace: monitoring
   labels:
+    app.kubernetes.io/name: vault-rules
+    app.kubernetes.io/component: prometheus-rules
+    app.kubernetes.io/part-of: monitoring
     release: kube-prometheus-stack
+    security.sinlessgames.io/policy: monitored
 spec:
   groups:
-  
-  - name: EmbeddedExporter
-  
-    
-    rules:
-  
-      - alert: VaultSealed
-        expr: 'vault_core_unsealed == 0'
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: Vault sealed (instance {{ $labels.instance }})
-          description: "Vault instance is sealed on {{ $labels.instance }}\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: VaultTooManyPendingTokens
-        expr: 'avg(vault_token_create_count - vault_token_store_count) > 0'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: Vault too many pending tokens (instance {{ $labels.instance }})
-          description: "Too many pending tokens on {{ $labels.instance }}: {{ $value }} tokens created but not yet stored.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: VaultTooManyInfinityTokens
-        expr: 'vault_token_count_by_ttl{creation_ttl="+Inf"} > 3'
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: Vault too many infinity tokens (instance {{ $labels.instance }})
-          description: "Too many non-expiring tokens on {{ $labels.instance }}: {{ $value }} tokens with infinite TTL.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: VaultClusterHealth
-        expr: 'sum(vault_core_active) / count(vault_core_active) <= 0.5 and count(vault_core_active) > 0'
-        for: 0m
-        labels:
-          severity: critical
-        annotations:
-          summary: Vault cluster health (instance {{ $labels.instance }})
-          description: "Vault cluster is not healthy: only {{ $value | humanizePercentage }} of nodes are active.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+    - name: vault.availability
+      rules:
+        - alert: VaultDown
+          expr: up{job=~".*vault.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: vault
+          annotations:
+            summary: "Vault target is down: {{ $labels.instance }}"
+            description: |
+              Prometheus cannot scrape the Vault target.
+
+              Instance: {{ $labels.instance }}
+              Job: {{ $labels.job }}
+              Value: {{ $value }}
+
+        - alert: VaultSealed
+          expr: vault_core_unsealed == 0
+          for: 1m
+          labels:
+            severity: critical
+            component: vault
+            security: sealed
+          annotations:
+            summary: "Vault is sealed: {{ $labels.instance }}"
+            description: |
+              Vault instance is sealed.
+
+              Instance: {{ $labels.instance }}
+              Value: {{ $value }}
+
+        - alert: VaultNoActiveNode
+          expr: sum(vault_core_active) < 1
+          for: 2m
+          labels:
+            severity: critical
+            component: vault
+          annotations:
+            summary: "Vault has no active node"
+            description: |
+              No Vault node is reporting itself as active.
+
+              A healthy HA Vault cluster should have exactly one active node.
+
+              Active nodes: {{ $value }}
+
+        - alert: VaultMultipleActiveNodes
+          expr: sum(vault_core_active) > 1
+          for: 1m
+          labels:
+            severity: critical
+            component: vault
+          annotations:
+            summary: "Vault has multiple active nodes"
+            description: |
+              More than one Vault node is reporting itself as active.
+
+              This can indicate split-brain or HA coordination failure.
+
+              Active nodes: {{ $value }}
+
+    - name: vault.tokens
+      rules:
+        - alert: VaultTooManyPendingTokens
+          expr: avg(vault_token_create_count - vault_token_store_count) > 0
+          for: 10m
+          labels:
+            severity: warning
+            component: vault
+            security: token
+          annotations:
+            summary: "Vault pending token count is high"
+            description: |
+              Vault has created tokens that have not yet been stored.
+
+              Pending token delta: {{ $value }}
+
+        - alert: VaultTooManyInfiniteTtlTokens
+          expr: vault_token_count_by_ttl{creation_ttl="+Inf"} > 3
+          for: 10m
+          labels:
+            severity: warning
+            component: vault
+            security: token
+          annotations:
+            summary: "Vault has too many infinite TTL tokens: {{ $labels.instance }}"
+            description: |
+              Vault has more than 3 non-expiring tokens.
+
+              Instance: {{ $labels.instance }}
+              Infinite TTL tokens: {{ $value }}
+
+    - name: vault.audit
+      rules:
+        - alert: VaultAuditLogRequestFailures
+          expr: increase(vault_audit_log_request_failure[5m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: vault
+            security: audit
+          annotations:
+            summary: "Vault audit request logging failures detected"
+            description: |
+              Vault failed to write request audit logs.
+
+              Audit logging failures are security-sensitive and should be investigated immediately.
+
+              Instance: {{ $labels.instance }}
+              Failure count: {{ $value }}
+
+        - alert: VaultAuditLogResponseFailures
+          expr: increase(vault_audit_log_response_failure[5m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: vault
+            security: audit
+          annotations:
+            summary: "Vault audit response logging failures detected"
+            description: |
+              Vault failed to write response audit logs.
+
+              Audit logging failures are security-sensitive and should be investigated immediately.
+
+              Instance: {{ $labels.instance }}
+              Failure count: {{ $value }}

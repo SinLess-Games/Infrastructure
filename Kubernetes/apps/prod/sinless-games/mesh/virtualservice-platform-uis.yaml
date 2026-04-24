@@ -1,40 +1,138 @@
+# Kubernetes/apps/prod/sinless-games/mesh/virtualservice-platform-uis.yaml
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
   name: platform-ui-routes
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: platform-ui-routes
+    app.kubernetes.io/component: ingress-routing
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/exposure: public
+    security.sinlessgames.io/ingress: istio
+  annotations:
+    security.sinlessgames.io/purpose: "Expose selected platform UIs through the shared Istio edge gateway."
+    security.sinlessgames.io/tls-termination: "istio-ingressgateway"
 spec:
+  exportTo:
+    - "."
+    - "istio-system"
+
   gateways:
     - istio-system/shared-edge
+
   hosts:
     - rancher.sinlessgames.com
     - opencost.sinlessgames.com
     - mail.sinlessgames.com
+
   http:
-    - name: rancher
+    - name: rancher-http-redirect
       match:
-        - authority:
+        - port: 80
+          authority:
             exact: rancher.sinlessgames.com
+          uri:
+            prefix: /
+      redirect:
+        scheme: https
+        redirectCode: 301
+
+    - name: opencost-http-redirect
+      match:
+        - port: 80
+          authority:
+            exact: opencost.sinlessgames.com
+          uri:
+            prefix: /
+      redirect:
+        scheme: https
+        redirectCode: 301
+
+    - name: mailu-http-redirect
+      match:
+        - port: 80
+          authority:
+            exact: mail.sinlessgames.com
+          uri:
+            prefix: /
+      redirect:
+        scheme: https
+        redirectCode: 301
+
+    - name: rancher-https-route
+      match:
+        - port: 443
+          authority:
+            exact: rancher.sinlessgames.com
+          uri:
+            prefix: /
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: https
+            X-Forwarded-Host: rancher.sinlessgames.com
+        response:
+          set:
+            Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+            X-Content-Type-Options: nosniff
+            Referrer-Policy: strict-origin-when-cross-origin
+            Permissions-Policy: "camera=(), microphone=(), geolocation=()"
       route:
         - destination:
             host: rancher.sinless-games.svc.cluster.local
             port:
               number: 80
-    - name: opencost
+      timeout: 300s
+
+    - name: opencost-https-route
       match:
-        - authority:
+        - port: 443
+          authority:
             exact: opencost.sinlessgames.com
+          uri:
+            prefix: /
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: https
+            X-Forwarded-Host: opencost.sinlessgames.com
+        response:
+          set:
+            Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+            X-Content-Type-Options: nosniff
+            X-Frame-Options: DENY
+            Referrer-Policy: strict-origin-when-cross-origin
+            Permissions-Policy: "camera=(), microphone=(), geolocation=()"
       route:
         - destination:
             host: opencost.sinless-games.svc.cluster.local
             port:
               number: 9090
-    - name: mailu
+      timeout: 60s
+
+    - name: mailu-https-route
       match:
-        - authority:
+        - port: 443
+          authority:
             exact: mail.sinlessgames.com
+          uri:
+            prefix: /
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: https
+            X-Forwarded-Host: mail.sinlessgames.com
+        response:
+          set:
+            Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+            X-Content-Type-Options: nosniff
+            Referrer-Policy: strict-origin-when-cross-origin
+            Permissions-Policy: "camera=(), microphone=(), geolocation=()"
       route:
         - destination:
             host: mailu-front.sinless-games.svc.cluster.local
             port:
               number: 80
+      timeout: 120s

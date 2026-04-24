@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventBus
+metadata:
+  name: default
+  namespace: gitops
+spec:
+  jetstream:
+    # Pin this to a specific version that exists in argo-events-controller-config.
+    # Example shown here uses the current argo-helm default mapping for "latest".
+    version: "2.10.10"
+
+    replicas: 3
+
+    persistence:
+      storageClassName: longhorn
+      accessMode: ReadWriteOnce
+      volumeSize: 10Gi
+
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: controller
+                  operator: In
+                  values:
+                    - eventbus-controller
+            topologyKey: kubernetes.io/hostname
+
+    streamConfig: |
+      maxAge: 72h
+      maxMsgs: 1000000
+      maxBytes: 1GB
+      replicas: 3
+      duplicates: 300s
+      retention: 0
+      discard: 0
+
+    settings: |
+      max_file_store: 10Gi
+      max_memory_store: 1Gi

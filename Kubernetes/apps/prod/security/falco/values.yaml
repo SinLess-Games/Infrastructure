@@ -1,18 +1,82 @@
+# Kubernetes/apps/prod/security/falco/values.yaml
+
 falco:
+  jsonOutput: true
+
   grpc:
     enabled: true
+
   grpcOutput:
     enabled: true
-  jsonOutput: true
+
+  metrics:
+    enabled: true
+    outputRule: true
+    outputFile: /tmp/falco_stats.json
+
+  priority: notice
+
+driver:
+  kind: modern_ebpf
+
+collectors:
+  kubernetes:
+    enabled: true
+
 serviceMonitor:
   create: true
-falcosidekick:
-  enabled: true
-  config:
-    discord:
-      webhookurl: ${DISCORD_ALERT_WEBHOOK_URL}
+  labels:
+    release: kube-prometheus-stack
+
 metrics:
   enabled: true
+
+falcosidekick:
+  enabled: true
+
+  webui:
+    enabled: false
+
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+
+  config:
+    debug: false
+
+    discord:
+      webhookurl: ""
+      minimumpriority: warning
+
+  env:
+    - name: DISCORD_WEBHOOKURL
+      valueFrom:
+        secretKeyRef:
+          name: falco-discord-webhook
+          key: discord_alert_webhook_url
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 grafana:
   dashboards:
     enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+tolerations:
+  - operator: Exists

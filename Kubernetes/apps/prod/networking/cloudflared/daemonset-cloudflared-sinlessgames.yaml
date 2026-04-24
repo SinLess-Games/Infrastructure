@@ -1,13 +1,25 @@
+# Kubernetes/apps/prod/networking/cloudflared/daemonset-cloudflared-sinlessgames.yaml
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: cloudflared-sinlessgames
   namespace: networking
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/instance: sinlessgames
+    app.kubernetes.io/component: tunnel
+    app.kubernetes.io/part-of: edge-access
 spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: cloudflared
       app.kubernetes.io/instance: sinlessgames
+
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+
   template:
     metadata:
       labels:
@@ -15,8 +27,15 @@ spec:
         app.kubernetes.io/instance: sinlessgames
         app.kubernetes.io/component: tunnel
         app.kubernetes.io/part-of: edge-access
+        security.sinlessgames.io/zone: edge-access
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2000"
+        prometheus.io/path: /metrics
     spec:
       serviceAccountName: cloudflared
+      automountServiceAccountToken: false
+
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -24,24 +43,30 @@ spec:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
-      tolerations:
-        - key: nvidia.com/gpu
-          operator: Equal
-          value: "true"
-          effect: NoSchedule
+
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:2025.2.1
+          imagePullPolicy: IfNotPresent
           args:
             - tunnel
             - --no-autoupdate
+            - --metrics
+            - 0.0.0.0:2000
             - run
+
           env:
             - name: TUNNEL_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: cloudflared-sinlessgames
                   key: tunnel_token
+
+          ports:
+            - name: metrics
+              containerPort: 2000
+              protocol: TCP
+
           resources:
             requests:
               cpu: 50m
@@ -49,33 +74,40 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+
           startupProbe:
-            exec:
-              command:
-                - cloudflared
-                - version
+            httpGet:
+              path: /ready
+              port: metrics
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 18
+
           readinessProbe:
-            exec:
-              command:
-                - cloudflared
-                - version
+            httpGet:
+              path: /ready
+              port: metrics
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
+
           livenessProbe:
-            exec:
-              command:
-                - cloudflared
-                - version
+            httpGet:
+              path: /ready
+              port: metrics
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 6
+
           securityContext:
             allowPrivilegeEscalation: false
             privileged: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault

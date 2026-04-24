@@ -1,0 +1,26 @@
+# Kubernetes/apps/prod/sinless-games/policies/authorizationpolicy-opencost-monitoring.yaml
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: opencost-allow-prometheus
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: opencost
+    app.kubernetes.io/component: mesh-authorization
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opencost
+      app.kubernetes.io/instance: opencost
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/monitoring/sa/kube-prometheus-stack-prometheus
+      to:
+        - operation:
+            ports:
+              - "9003"

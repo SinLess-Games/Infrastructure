@@ -149,7 +149,7 @@ kubernetes_nodes:
       hostname: "rke2-prod-wk-05"
       fqdn: "rke2-prod-wk-05.prod.k8s.sinlessgames.com"
       ip: "10.10.40.24"
-      vmid: 414
+      vmid: 416
       target_node: "pve-05"
       clone_template: "debian-13-template-pve-05"
     - name: "rke2-prod-wk-06"

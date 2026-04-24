@@ -1,9 +1,97 @@
+# Kubernetes/apps/prod/security/external-secrets/values.yaml
+
 installCRDs: true
-serviceMonitor:
-  enabled: true
-webhook:
-  port: 9443
+
+leaderElect: true
+
+log:
+  level: info
+
+serviceAccount:
+  create: true
+  name: external-secrets
+  automount: true
+
+rbac:
+  create: true
+
+# You already have a dedicated ClusterRoleBinding for system:auth-delegator.
+# Keep this false unless you want Helm to manage that binding instead.
+systemAuthDelegator: false
+
 vault:
   enableTokenCache: true
+  tokenCacheSize: 262144
+
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: kube-prometheus-stack
+
+webhook:
+  port: 9443
+  replicaCount: 2
+
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+certController:
+  replicaCount: 2
+
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+securityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
 grafanaDashboard:
   enabled: true
+  sidecarLabel: grafana_dashboard
+  sidecarLabelValue: "1"

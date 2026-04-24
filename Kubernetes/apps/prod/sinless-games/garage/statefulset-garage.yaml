@@ -1,25 +1,42 @@
+# Kubernetes/apps/prod/sinless-games/garage/statefulset-garage.yaml
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: garage
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: sinless-games-platform
+    security.sinlessgames.io/policy: hardened
 spec:
   serviceName: garage-headless
   replicas: 1
+  revisionHistoryLimit: 2
+
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Retain
     whenScaled: Retain
+
   selector:
     matchLabels:
       app.kubernetes.io/name: garage
+
   template:
     metadata:
       labels:
         app.kubernetes.io/name: garage
+        app.kubernetes.io/component: object-storage
         app.kubernetes.io/part-of: sinless-games-platform
+        security.sinlessgames.io/zone: storage
       annotations:
         sidecar.istio.io/inject: "false"
     spec:
+      serviceAccountName: garage
+      automountServiceAccountToken: false
+
+      terminationGracePeriodSeconds: 60
+
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -27,10 +44,16 @@ spec:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
+
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
+
       initContainers:
         - name: render-garage-config
           image: busybox:1.36.1
@@ -60,36 +83,31 @@ spec:
               admin_token = "${GARAGE_ADMIN_TOKEN}"
               metrics_token = "${GARAGE_METRICS_TOKEN}"
               EOF
+
           env:
             - name: POD_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+
             - name: GARAGE_RPC_SECRET
               valueFrom:
                 secretKeyRef:
                   name: garage-secrets
                   key: garage_rpc_secret
+
             - name: GARAGE_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: garage-secrets
                   key: garage_admin_token
+
             - name: GARAGE_METRICS_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: garage-secrets
                   key: garage_metrics_token
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            privileged: false
-            readOnlyRootFilesystem: false
-            runAsGroup: 1000
-            runAsNonRoot: true
-            runAsUser: 1000
+
           resources:
             requests:
               cpu: 10m
@@ -97,9 +115,24 @@ spec:
             limits:
               cpu: 100m
               memory: 128Mi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+
           volumeMounts:
             - name: garage-config
               mountPath: /config
+
       containers:
         - name: garage
           image: dxflrs/garage:v2.2.0
@@ -108,63 +141,46 @@ spec:
             - /garage
           args:
             - server
+
           env:
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: GARAGE_RPC_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: garage-secrets
-                  key: garage_rpc_secret
-            - name: GARAGE_ADMIN_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: garage-secrets
-                  key: garage_admin_token
-            - name: GARAGE_METRICS_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: garage-secrets
-                  key: garage_metrics_token
-            - name: GARAGE_DEFAULT_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: garage-secrets
-                  key: s3_access_key_id
-            - name: GARAGE_DEFAULT_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: garage-secrets
-                  key: s3_secret_access_key
-            - name: GARAGE_DEFAULT_BUCKET
-              value: sinlessgames-platform
             - name: GARAGE_CONFIG_FILE
               value: /config/garage.toml
+
           ports:
             - name: http-s3
               containerPort: 3900
+              protocol: TCP
+
             - name: tcp-rpc
               containerPort: 3901
+              protocol: TCP
+
             - name: http-admin
               containerPort: 3903
-          readinessProbe:
+              protocol: TCP
+
+          startupProbe:
             tcpSocket:
-              port: 3900
+              port: http-s3
+            failureThreshold: 30
             periodSeconds: 10
             timeoutSeconds: 2
+
+          readinessProbe:
+            tcpSocket:
+              port: http-s3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
           livenessProbe:
             tcpSocket:
-              port: 3900
+              port: http-s3
             initialDelaySeconds: 20
             periodSeconds: 20
             timeoutSeconds: 2
-          startupProbe:
-            tcpSocket:
-              port: 3900
-            failureThreshold: 30
-            periodSeconds: 10
+            failureThreshold: 6
+
           resources:
             requests:
               cpu: 100m
@@ -172,28 +188,42 @@ spec:
             limits:
               cpu: 750m
               memory: 1Gi
+
           securityContext:
             allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
             capabilities:
               drop:
                 - ALL
-            privileged: false
-            readOnlyRootFilesystem: false
-            runAsGroup: 1000
-            runAsNonRoot: true
-            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+
           volumeMounts:
             - name: garage-meta
               mountPath: /var/lib/garage/meta
+
             - name: garage-data
               mountPath: /var/lib/garage/data
+
             - name: garage-config
               mountPath: /config
+              readOnly: true
+
       volumes:
         - name: garage-config
+          emptyDir: {}
+
   volumeClaimTemplates:
     - metadata:
         name: garage-meta
+        labels:
+          app.kubernetes.io/name: garage
+          app.kubernetes.io/component: metadata
+          app.kubernetes.io/part-of: garage
       spec:
         accessModes:
           - ReadWriteOnce
@@ -201,8 +231,13 @@ spec:
         resources:
           requests:
             storage: 10Gi
+
     - metadata:
         name: garage-data
+        labels:
+          app.kubernetes.io/name: garage
+          app.kubernetes.io/component: data
+          app.kubernetes.io/part-of: garage
       spec:
         accessModes:
           - ReadWriteOnce

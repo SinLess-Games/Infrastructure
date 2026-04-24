@@ -1,12 +1,21 @@
+# Kubernetes/apps/prod/sinless-games/garage/service-ui.yaml
 apiVersion: v1
 kind: Service
 metadata:
   name: garage-ui
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage-webui
+    app.kubernetes.io/component: admin-ui
+    app.kubernetes.io/part-of: garage
+    security.sinlessgames.io/exposure: cluster-internal
 spec:
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: garage-webui
   ports:
     - name: http
       port: 3909
-      targetPort: 3909
+      targetPort: http
+      protocol: TCP
+      appProtocol: http

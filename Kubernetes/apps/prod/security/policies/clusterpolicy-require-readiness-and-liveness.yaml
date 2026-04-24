@@ -1,0 +1,41 @@
+# Kubernetes/apps/prod/security/policies/clusterpolicy-require-readiness-and-liveness.yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-readiness-and-liveness
+  labels:
+    app.kubernetes.io/name: require-readiness-and-liveness
+    app.kubernetes.io/component: admission-policy
+    app.kubernetes.io/part-of: kyverno
+    security.sinlessgames.io/policy: workload-health
+  annotations:
+    policies.kyverno.io/title: Require Readiness and Liveness Probes
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: containers-must-have-readiness-and-liveness
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - sinless-games
+                - helix-ai
+      validate:
+        message: "Application containers must define both readinessProbe and livenessProbe."
+        foreach:
+          - list: "request.object.spec.containers[]"
+            deny:
+              conditions:
+                any:
+                  - key: readinessProbe
+                    operator: AllNotIn
+                    value: "{{ element.keys(@)[] }}"
+                  - key: livenessProbe
+                    operator: AllNotIn
+                    value: "{{ element.keys(@)[] }}"

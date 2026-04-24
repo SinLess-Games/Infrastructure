@@ -1,3 +1,4 @@
+# Kubernetes/apps/prod/sinless-games/homepage/configmap-homepage.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -5,14 +6,28 @@ metadata:
   namespace: sinless-games
   labels:
     app.kubernetes.io/name: homepage
+    app.kubernetes.io/component: dashboard-config
     app.kubernetes.io/part-of: sinless-games-platform
 data:
   kubernetes.yaml: |
     mode: cluster
     ingress: false
     gateway: false
+
   proxmox.yaml: |
-    []
+    - pve-01:
+        url: https://pve-01.local.sinlessgames.com:8006
+        node: pve-01
+    - pve-03:
+        url: https://pve-03.local.sinlessgames.com:8006
+        node: pve-03
+    - pve-04:
+        url: https://pve-04.local.sinlessgames.com:8006
+        node: pve-04
+    - pve-05:
+        url: https://pve-05.local.sinlessgames.com:8006
+        node: pve-05
+
   settings.yaml: |
     title: SinLess Games
     showStats: true
@@ -22,14 +37,17 @@ data:
     groupsInitiallyCollapsed: true
     headerStyle: boxed
     background:
-        image: https://img.freepik.com/free-photo/anime-moon-landscape_23-2151645903.jpg
-        saturate: 50
-        brightness: 50
-        opacity: 100
+      image: https://img.freepik.com/free-photo/anime-moon-landscape_23-2151645903.jpg
+      saturate: 50
+      brightness: 50
+      opacity: 100
     layout:
       Platform:
         style: row
         columns: 3
+      Infrastructure:
+        style: row
+        columns: 4
       Storage:
         style: row
         columns: 3
@@ -40,16 +58,16 @@ data:
         style: row
         columns: 3
     quicklaunch:
-        searchDescriptions: true
-        hideInternetSearch: true
-        showSearchSuggestions: true
-        hideVisitURL: true
-        provider: [google, duckduckgo, brave]
-
-        hideVersion: true
+      searchDescriptions: true
+      hideInternetSearch: false
+      showSearchSuggestions: true
+      hideVisitURL: false
+      provider: google
+      hideVersion: true
     providers:
       longhorn:
         url: http://longhorn-frontend.kube-system.svc.cluster.local
+
   bookmarks.yaml: |
     - Anime:
         - 9Anime:
@@ -273,11 +291,12 @@ data:
         - Stackoverflow:
             - icon: si-stackoverflow-#F58025
               href: https://stackoverflow.com
+
   services.yaml: |
     - Platform:
         - Homepage:
             href: https://homepage.sinlessgames.com
-            description: Central dashboard for Sinless Games
+            description: Central dashboard for SinLess Games
             icon: homepage.png
         - Argo CD:
             href: https://argocd.sinlessgames.com
@@ -291,6 +310,25 @@ data:
             href: https://opencost.sinlessgames.com
             description: Cluster cost visibility
             icon: opencost.png
+
+    - Infrastructure:
+        - Proxmox pve-01:
+            href: https://pve-01.local.sinlessgames.com:8006
+            description: Proxmox VE node pve-01 - 10.10.10.14
+            icon: proxmox.png
+        - Proxmox pve-03:
+            href: https://pve-03.local.sinlessgames.com:8006
+            description: Proxmox VE node pve-03 - 10.10.10.16
+            icon: proxmox.png
+        - Proxmox pve-04:
+            href: https://pve-04.local.sinlessgames.com:8006
+            description: Proxmox VE node pve-04 - 10.10.10.17
+            icon: proxmox.png
+        - Proxmox pve-05:
+            href: https://pve-05.local.sinlessgames.com:8006
+            description: Proxmox VE node pve-05 - 10.10.10.18
+            icon: proxmox.png
+
     - Storage:
         - Garage:
             href: https://s3.sinlessgames.com/ui/
@@ -300,6 +338,7 @@ data:
             href: https://longhorn.sinlessgames.com
             description: Persistent volume management
             icon: longhorn.png
+
     - Observability:
         - Grafana:
             href: https://grafana.sinlessgames.com
@@ -329,6 +368,7 @@ data:
             href: https://mimir.sinlessgames.com
             description: Long-term metrics backend
             icon: si-grafana
+
     - Automation:
         - n8n:
             href: https://n8n.sinlessgames.com
@@ -338,12 +378,14 @@ data:
             href: https://mail.sinlessgames.com
             description: Mail administration and webmail
             icon: mailu.png
+
   widgets.yaml: |
     - datetime:
         text_size: xl
         format:
-              timeStyle: short
-              hourCycle: h23
+          timeStyle: short
+          hourCycle: h23
+
     - kubernetes:
         cluster:
           show: true
@@ -356,8 +398,12 @@ data:
           cpu: false
           memory: false
           showLabel: false
+
     - longhorn:
         url: https://longhorn.sinlessgames.com
+
   custom.css: ""
+
   custom.js: ""
+
   docker.yaml: ""

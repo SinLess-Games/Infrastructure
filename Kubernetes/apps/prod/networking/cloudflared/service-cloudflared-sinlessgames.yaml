@@ -1,0 +1,23 @@
+# Kubernetes/apps/prod/networking/cloudflared/service-cloudflared-sinlessgames.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared-sinlessgames
+  namespace: networking
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/instance: sinlessgames
+    app.kubernetes.io/component: tunnel
+    app.kubernetes.io/part-of: edge-access
+    security.sinlessgames.io/exposure: cluster-internal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/instance: sinlessgames
+  ports:
+    - name: metrics
+      port: 2000
+      targetPort: metrics
+      protocol: TCP
+      appProtocol: http

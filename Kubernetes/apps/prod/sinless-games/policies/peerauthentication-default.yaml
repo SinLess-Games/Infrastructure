@@ -1,8 +1,20 @@
+# Kubernetes/apps/prod/sinless-games/policies/peerauthentication-default.yaml
 apiVersion: security.istio.io/v1
 kind: PeerAuthentication
 metadata:
   name: default
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: sinless-games-strict-mtls
+    app.kubernetes.io/component: mesh-security
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/policy: peerauthentication
+    security.sinlessgames.io/mtls: strict
+    security.sinlessgames.io/plaintext-allowed: "false"
+  annotations:
+    security.sinlessgames.io/purpose: "Require strict Istio mutual TLS for all meshed workloads in the sinless-games namespace."
+    security.sinlessgames.io/reason: "Reject plaintext workload-to-workload traffic and enforce service identity through Istio mTLS."
 spec:
   mtls:
     mode: STRICT

@@ -1,12 +1,38 @@
+# Kubernetes/apps/prod/monitoring/grafana-alloy/values.yaml
+
+controller:
+  type: daemonset
+
+serviceAccount:
+  create: true
+  name: grafana-alloy
+
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: kube-prometheus-stack
+
 alloy:
   resources:
     requests:
-      cpu: 50m
-      memory: 128Mi
+      cpu: 100m
+      memory: 256Mi
     limits:
-      cpu: 300m
-      memory: 512Mi
+      cpu: 500m
+      memory: 768Mi
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  mounts:
+    varlog: true
+
   configMap:
+    create: true
     content: |
       logging {
         level  = "info"
@@ -23,6 +49,12 @@ alloy:
         rule {
           source_labels = ["__meta_kubernetes_pod_node_name"]
           regex         = env("HOSTNAME")
+          action        = "keep"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          regex         = "kube-system|monitoring|istio-system"
           action        = "keep"
         }
 
@@ -47,6 +79,16 @@ alloy:
         }
 
         rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+          target_label  = "instance"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+          target_label  = "component"
+        }
+
+        rule {
           source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
           separator     = "/"
           regex         = "([^/]+)/([^/]+)/([^/]+)/([^/]+)"
@@ -57,7 +99,30 @@ alloy:
 
       loki.source.file "pod_logs" {
         targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      loki.process "pod_logs" {
         forward_to = [loki.write.default.receiver]
+
+        stage.cri {}
+
+        stage.labels {
+          values = {
+            namespace = "",
+            pod       = "",
+            container = "",
+            app       = "",
+            instance  = "",
+            component = "",
+          }
+        }
+
+        stage.label_drop {
+          values = [
+            "filename",
+          ]
+        }
       }
 
       loki.write "default" {
@@ -65,9 +130,3 @@ alloy:
           url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
         }
       }
-  mounts:
-    varlog: true
-controller:
-  type: daemonset
-serviceMonitor:
-  enabled: true

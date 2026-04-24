@@ -1,32 +1,74 @@
+# Kubernetes/apps/prod/sinless-games/n8n/n8n-deployment.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: n8n
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: n8n
+    app.kubernetes.io/instance: n8n
+    app.kubernetes.io/component: automation
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/automount-service-account-token: "false"
+    security.sinlessgames.io/rbac-scope: none
+  annotations:
+    security.sinlessgames.io/purpose: "ServiceAccount for n8n. No Kubernetes API access required."
+    security.sinlessgames.io/least-privilege: "true"
+    security.sinlessgames.io/write-access: "false"
+automountServiceAccountToken: false
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: n8n
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: n8n
+    app.kubernetes.io/instance: n8n
+    app.kubernetes.io/component: automation
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    app.kubernetes.io/version: "1.123.33"
+    security.sinlessgames.io/mtls: istio-strict
 spec:
   replicas: 1
+  revisionHistoryLimit: 2
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: n8n
+      app.kubernetes.io/name: n8n
+      app.kubernetes.io/instance: n8n
+      app.kubernetes.io/component: automation
   template:
     metadata:
-      annotations:
-        sidecar.istio.io/inject: "false"
       labels:
-        app: n8n
+        app.kubernetes.io/name: n8n
+        app.kubernetes.io/instance: n8n
+        app.kubernetes.io/component: automation
+        app.kubernetes.io/part-of: sinless-games-platform
+        app.kubernetes.io/managed-by: gitops
+        app.kubernetes.io/version: "1.123.33"
+      annotations:
+        sidecar.istio.io/inject: "true"
+        sidecar.istio.io/rewriteAppHTTPProbers: "true"
+        proxy.istio.io/config: |
+          {
+            "holdApplicationUntilProxyStarts": true
+          }
+        security.sinlessgames.io/read-only-root-filesystem: "true"
+        security.sinlessgames.io/automount-service-account-token: "false"
     spec:
+      serviceAccountName: n8n
+      automountServiceAccountToken: false
       enableServiceLinks: false
       dnsPolicy: ClusterFirst
       dnsConfig:
-        searches:
-          - sinless-games.svc.cluster.local
-          - svc.cluster.local
-          - cluster.local
         options:
           - name: ndots
             value: "1"
+
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -34,24 +76,54 @@ spec:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
+
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
-        runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+        appArmorProfile:
+          type: RuntimeDefault
+
+      terminationGracePeriodSeconds: 60
+
       containers:
         - name: n8n
-          image: docker.n8n.io/n8nio/n8n:1.77.3
+          image: docker.n8n.io/n8nio/n8n:1.123.33
+          imagePullPolicy: IfNotPresent
+
           env:
+            - name: NODE_ENV
+              value: production
+
             - name: N8N_HOST
               value: n8n.sinlessgames.com
+            - name: N8N_PORT
+              value: "5678"
             - name: N8N_PROTOCOL
               value: https
             - name: N8N_EDITOR_BASE_URL
               value: https://n8n.sinlessgames.com
             - name: WEBHOOK_URL
               value: https://n8n.sinlessgames.com/
+
+            - name: TZ
+              value: America/Boise
+            - name: GENERIC_TIMEZONE
+              value: America/Boise
+
+            - name: N8N_USER_FOLDER
+              value: /home/node/.n8n
+
+            - name: N8N_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sinless-games-workload-secrets
+                  key: n8n_encryption_key
+
             - name: N8N_BASIC_AUTH_ACTIVE
               value: "true"
             - name: N8N_BASIC_AUTH_USER
@@ -61,66 +133,132 @@ spec:
                 secretKeyRef:
                   name: sinless-games-workload-secrets
                   key: n8n_basic_auth_password
+
+            - name: N8N_SECURE_COOKIE
+              value: "true"
+            - name: N8N_SAMESITE_COOKIE
+              value: lax
+
+            - name: N8N_BLOCK_ENV_ACCESS_IN_NODE
+              value: "true"
+            - name: N8N_BLOCK_FILE_ACCESS_TO_N8N_FILES
+              value: "true"
+            - name: N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS
+              value: "true"
+            - name: N8N_RESTRICT_FILE_ACCESS_TO
+              value: /home/node/.n8n/files;/tmp
+            - name: N8N_GIT_NODE_DISABLE_BARE_REPOS
+              value: "true"
+
+            - name: NODES_EXCLUDE
+              value: '["n8n-nodes-base.executeCommand","n8n-nodes-base.localFileTrigger"]'
+
           ports:
-            - containerPort: 5678
+            - name: http
+              containerPort: 5678
+              protocol: TCP
+
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: n8n.sinlessgames.com
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+
           readinessProbe:
             httpGet:
               path: /healthz
-              port: 5678
-            initialDelaySeconds: 20
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: n8n.sinlessgames.com
+            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
+
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 5678
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: n8n.sinlessgames.com
             initialDelaySeconds: 30
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 6
+
           securityContext:
             allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
             capabilities:
               drop:
                 - ALL
-            privileged: false
-            readOnlyRootFilesystem: false
-            runAsNonRoot: true
-            runAsUser: 1000
+
           resources:
             requests:
               cpu: 100m
               memory: 256Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 750m
+              memory: 768Mi
+
           volumeMounts:
             - name: data
               mountPath: /home/node/.n8n
+            - name: tmp
+              mountPath: /tmp
+
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: n8n-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: n8n-data
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: n8n
+    app.kubernetes.io/instance: n8n
+    app.kubernetes.io/component: automation
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
 spec:
   accessModes:
     - ReadWriteOnce
+  storageClassName: longhorn
   resources:
     requests:
       storage: 20Gi
-  storageClassName: longhorn
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: n8n
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: n8n
+    app.kubernetes.io/instance: n8n
+    app.kubernetes.io/component: automation
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/mtls: istio-strict
   annotations:
     gethomepage.dev/enabled: "true"
     gethomepage.dev/group: Automation
@@ -128,21 +266,39 @@ metadata:
     gethomepage.dev/icon: si-n8n
     gethomepage.dev/description: Workflow automation
     gethomepage.dev/href: https://n8n.sinlessgames.com
+    security.sinlessgames.io/purpose: "Internal ClusterIP Service for n8n."
+    security.sinlessgames.io/public-exposure: "false"
+    security.sinlessgames.io/ingress-required: "istio-gateway"
 spec:
+  type: ClusterIP
   selector:
-    app: n8n
+    app.kubernetes.io/name: n8n
+    app.kubernetes.io/instance: n8n
+    app.kubernetes.io/component: automation
   ports:
     - name: http
       port: 80
-      targetPort: 5678
+      targetPort: http
+      protocol: TCP
+      appProtocol: http
+  sessionAffinity: None
+  internalTrafficPolicy: Cluster
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: n8n
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: n8n
+    app.kubernetes.io/instance: n8n
+    app.kubernetes.io/component: automation
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: gitops
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
-      app: n8n
+      app.kubernetes.io/name: n8n
+      app.kubernetes.io/instance: n8n
+      app.kubernetes.io/component: automation

@@ -1,32 +1,85 @@
+# Kubernetes/apps/prod/monitoring/kube-prometheus-stack/prometheus-rules/cloudflare-exporter.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: kube-prometheus-stack-cloudflare-exporter
   namespace: monitoring
   labels:
+    app.kubernetes.io/name: cloudflare-exporter-rules
+    app.kubernetes.io/component: prometheus-rules
+    app.kubernetes.io/part-of: monitoring
     release: kube-prometheus-stack
+    security.sinlessgames.io/policy: monitored
 spec:
   groups:
-  
-  - name: LablabsCloudflareExporter
-  
-    
-    rules:
-  
-      - alert: CloudflareHttp4xxErrorRate
-        expr: '(sum by(zone) (rate(cloudflare_zone_requests_status{status=~"^4.."}[15m])) / on (zone) sum by (zone) (rate(cloudflare_zone_requests_status[15m]))) * 100 > 5 and sum by (zone) (rate(cloudflare_zone_requests_status[15m])) > 0'
-        for: 0m
-        labels:
-          severity: warning
-        annotations:
-          summary: Cloudflare http 4xx error rate (instance {{ $labels.instance }})
-          description: "Cloudflare high HTTP 4xx error rate (> 5% for domain {{ $labels.zone }})\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
-  
-      - alert: CloudflareHttp5xxErrorRate
-        expr: '(sum by (zone) (rate(cloudflare_zone_requests_status{status=~"^5.."}[5m])) / on (zone) sum by (zone) (rate(cloudflare_zone_requests_status[5m]))) * 100 > 5 and sum by (zone) (rate(cloudflare_zone_requests_status[5m])) > 0'
-        for: 0m
-        labels:
-          severity: critical
-        annotations:
-          summary: Cloudflare http 5xx error rate (instance {{ $labels.instance }})
-          description: "Cloudflare high HTTP 5xx error rate (> 5% for domain {{ $labels.zone }})\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+    - name: cloudflare.edge-errors
+      rules:
+        - alert: CloudflareHttp4xxErrorsHigh
+          expr: |
+            sum by (zone) (
+              increase(cloudflare_zone_requests_status{status=~"4.."}[15m])
+            ) > 100
+          for: 10m
+          labels:
+            severity: warning
+            component: cloudflare
+          annotations:
+            summary: "Cloudflare 4xx errors are high for {{ $labels.zone }}"
+            description: |
+              Cloudflare has seen more than 100 HTTP 4xx responses for zone {{ $labels.zone }} over the last 15 minutes.
+
+              Zone: {{ $labels.zone }}
+              4xx count: {{ $value }}
+
+        - alert: CloudflareHttp5xxErrorsHigh
+          expr: |
+            sum by (zone) (
+              increase(cloudflare_zone_requests_status{status=~"5.."}[5m])
+            ) > 25
+          for: 5m
+          labels:
+            severity: critical
+            component: cloudflare
+          annotations:
+            summary: "Cloudflare 5xx errors are high for {{ $labels.zone }}"
+            description: |
+              Cloudflare has seen more than 25 HTTP 5xx responses for zone {{ $labels.zone }} over the last 5 minutes.
+
+              Zone: {{ $labels.zone }}
+              5xx count: {{ $value }}
+
+        - alert: CloudflareHttp4xxAnd5xxErrorsHigh
+          expr: |
+            sum by (zone) (
+              increase(cloudflare_zone_requests_status{status=~"4..|5.."}[10m])
+            ) > 150
+          for: 10m
+          labels:
+            severity: warning
+            component: cloudflare
+          annotations:
+            summary: "Cloudflare 4xx/5xx errors are high for {{ $labels.zone }}"
+            description: |
+              Cloudflare has seen more than 150 combined HTTP 4xx and 5xx responses for zone {{ $labels.zone }} over the last 10 minutes.
+
+              Zone: {{ $labels.zone }}
+              Combined 4xx/5xx count: {{ $value }}
+
+        - alert: CloudflareHttp5xxErrorsCritical
+          expr: |
+            sum by (zone) (
+              increase(cloudflare_zone_requests_status{status=~"5.."}[15m])
+            ) > 100
+          for: 5m
+          labels:
+            severity: critical
+            component: cloudflare
+          annotations:
+            summary: "Cloudflare 5xx errors are critically high for {{ $labels.zone }}"
+            description: |
+              Cloudflare has seen more than 100 HTTP 5xx responses for zone {{ $labels.zone }} over the last 15 minutes.
+
+              This usually indicates an origin, tunnel, ingress, service, or upstream application failure.
+
+              Zone: {{ $labels.zone }}
+              5xx count: {{ $value }}

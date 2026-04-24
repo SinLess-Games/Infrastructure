@@ -1,0 +1,28 @@
+# Kubernetes/apps/prod/sinless-games/docs/service-docs.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: docs
+  namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: docs
+    app.kubernetes.io/component: documentation
+    app.kubernetes.io/part-of: sinless-games-platform
+    security.sinlessgames.io/exposure: cluster-internal
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/group: Platform
+    gethomepage.dev/name: Docs
+    gethomepage.dev/icon: mdi-file-document-multiple-outline
+    gethomepage.dev/description: Platform documentation
+    gethomepage.dev/href: https://docs.sinlessgames.com
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: docs
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+      appProtocol: http

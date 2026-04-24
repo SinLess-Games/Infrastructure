@@ -1,8 +1,14 @@
+# Kubernetes/apps/prod/networking/config/dnsendpoint-cloudflare-tunnels.yaml
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
 metadata:
   name: sinlessgames-tunnel-records
   namespace: networking
+  labels:
+    app.kubernetes.io/name: sinlessgames-tunnel-records
+    app.kubernetes.io/component: dns-records
+    app.kubernetes.io/part-of: cloudflared
+    security.sinlessgames.io/dns-provider: cloudflare
 spec:
   endpoints:
     - dnsName: s3.sinlessgames.com
@@ -13,92 +19,83 @@ spec:
       providerSpecific:
         - name: cloudflare-proxied
           value: "true"
+
     - dnsName: grafana.sinlessgames.com
       recordTTL: 60
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"
+
     - dnsName: homepage.sinlessgames.com
       recordTTL: 60
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"
+
     - dnsName: argocd.sinlessgames.com
       recordTTL: 60
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"
+
     - dnsName: n8n.sinlessgames.com
       recordTTL: 60
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"
+
     - dnsName: external.sinlessgames.com
       recordTTL: 60
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"
+
     - dnsName: internal.sinlessgames.com
       recordTTL: 60
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: kiali.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: prometheus.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: alert-manager.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: loki.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: tempo.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: mimir.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: longhorn.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: opencost.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
-    - dnsName: rancher.sinlessgames.com
-      recordTTL: 60
-      recordType: CNAME
-      targets:
-        - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"
+
+    # Keep this only if mail.sinlessgames.com is a web service.
+    # Do not use this for actual SMTP/MX mail routing.
     - dnsName: mail.sinlessgames.com
       recordTTL: 60
       recordType: CNAME
       targets:
         - d08dd9e4-51f0-47f1-b834-0a1b5ce89745.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"
+
 ---
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
 metadata:
   name: helix-tunnel-records
   namespace: networking
+  labels:
+    app.kubernetes.io/name: helix-tunnel-records
+    app.kubernetes.io/component: dns-records
+    app.kubernetes.io/part-of: cloudflared
+    security.sinlessgames.io/dns-provider: cloudflare
 spec:
   endpoints:
     - dnsName: external.helixaibot.com
@@ -106,13 +103,24 @@ spec:
       recordType: CNAME
       targets:
         - 0b755d99-43ca-4fd7-ad9d-feda4c371c81.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"
+
     - dnsName: internal.helixaibot.com
       recordTTL: 60
       recordType: CNAME
       targets:
         - 0b755d99-43ca-4fd7-ad9d-feda4c371c81.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"
+
     - dnsName: n8n.helixaibot.com
       recordTTL: 60
       recordType: CNAME
       targets:
         - 0b755d99-43ca-4fd7-ad9d-feda4c371c81.cfargotunnel.com
+      providerSpecific:
+        - name: cloudflare-proxied
+          value: "true"

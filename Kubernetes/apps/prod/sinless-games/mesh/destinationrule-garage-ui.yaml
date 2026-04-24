@@ -1,10 +1,27 @@
+# Kubernetes/apps/prod/sinless-games/mesh/destinationrule-garage-ui.yaml
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: garage-ui-plaintext
+  name: garage-ui-mtls
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage
+    app.kubernetes.io/instance: garage
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/part-of: garage
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/mtls: istio-strict
+    security.sinlessgames.io/plaintext-allowed: "false"
+  annotations:
+    security.sinlessgames.io/purpose: "Require Istio mutual TLS for clients connecting to the Garage UI service."
 spec:
   host: garage-ui.sinless-games.svc.cluster.local
+
+  # Needed if Garage UI is exposed through the shared Istio gateway.
+  exportTo:
+    - "."
+    - "istio-system"
+
   trafficPolicy:
     tls:
-      mode: DISABLE
+      mode: ISTIO_MUTUAL

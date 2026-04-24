@@ -1,18 +1,34 @@
+# Kubernetes/apps/prod/monitoring/config/serviceentry-vault.yaml
 apiVersion: networking.istio.io/v1
 kind: ServiceEntry
 metadata:
   name: vault-vip
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: vault-vip
+    app.kubernetes.io/component: external-service
+    app.kubernetes.io/part-of: vault
+    security.sinlessgames.io/egress: controlled
 spec:
   hosts:
     - vault.platform.local
+
   addresses:
     - 10.10.10.180
+
   location: MESH_EXTERNAL
+  resolution: STATIC
+
+  exportTo:
+    - "."
+
   ports:
-    - name: https
+    - name: https-vault
       number: 8200
       protocol: HTTPS
-  resolution: STATIC
+      targetPort: 8200
+
   endpoints:
     - address: 10.10.10.180
+      ports:
+        https-vault: 8200

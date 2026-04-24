@@ -1,20 +1,32 @@
+# Kubernetes/apps/prod/sinless-games/garage/networkpolicy-garage.yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: garage-allow-required-traffic
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: garage
+    security.sinlessgames.io/policy: restricted-ingress-egress
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: garage
+
   policyTypes:
     - Ingress
     - Egress
+
   ingress:
+    # Garage pod-to-pod traffic.
+    # 3900 = S3 API
+    # 3901 = RPC / cluster traffic
+    # 3903 = admin API
     - from:
-        - namespaceSelector:
+        - podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: sinless-games
+              app.kubernetes.io/name: garage
       ports:
         - protocol: TCP
           port: 3900
@@ -22,6 +34,28 @@ spec:
           port: 3901
         - protocol: TCP
           port: 3903
+
+    # Garage WebUI needs S3 and admin API access.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: garage-webui
+      ports:
+        - protocol: TCP
+          port: 3900
+        - protocol: TCP
+          port: 3903
+
+    # Garage bootstrap job needs admin API access during initialization.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: garage-bootstrap
+      ports:
+        - protocol: TCP
+          port: 3903
+
+    # Public S3 ingress through Istio gateway only.
     - from:
         - namespaceSelector:
             matchLabels:
@@ -29,25 +63,45 @@ spec:
       ports:
         - protocol: TCP
           port: 3900
+
+    # Observability stack writes/reads object storage.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3900
+
+    # Longhorn backup target in kube-system.
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 3900
+
+    # Velero / security tooling backups.
+    - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: security
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3900
+
+    # Application namespace access to S3 only.
+    - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: helix-ai
       ports:
         - protocol: TCP
           port: 3900
-        - protocol: TCP
-          port: 3903
+
   egress:
+    # DNS to kube-dns/CoreDNS.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -60,3 +114,26 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+
+    # DNS directly to kube-dns service IP.
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.10/32
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Garage peer/RPC/API traffic between Garage pods.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: garage
+      ports:
+        - protocol: TCP
+          port: 3900
+        - protocol: TCP
+          port: 3901
+        - protocol: TCP
+          port: 3903

@@ -1,12 +1,27 @@
+# Kubernetes/clusters/prod/bootstrap/project-platform.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
   name: platform
   namespace: gitops
+  labels:
+    app.kubernetes.io/name: platform
+    app.kubernetes.io/component: argocd-project
+    app.kubernetes.io/part-of: sinless-games-platform
+    app.kubernetes.io/managed-by: argocd
+    topology.kubernetes.io/environment: prod
+    security.sinlessgames.io/gitops-project: platform
+  annotations:
+    security.sinlessgames.io/purpose: "Restrict production platform GitOps sources, destinations, and resource kinds."
+    security.sinlessgames.io/cluster-admin-equivalent: "false"
 spec:
   description: Production platform workloads for the RKE2 cluster
+
   sourceRepos:
-    - https://github.com/Sinless777/Infrastructure.git
+    # Main infrastructure repository.
+    - https://github.com/SinLess-Games/Infrastructure.git
+
+    # Helm repositories used by platform child apps.
     - https://helm.cilium.io
     - https://charts.longhorn.io
     - https://helm.ngc.nvidia.com/nvidia
@@ -32,12 +47,227 @@ spec:
     - https://releases.rancher.com/server-charts/stable
     - https://opencost.github.io/opencost-helm-chart
     - https://mailu.github.io/helm-charts
+
   destinations:
-    - namespace: '*'
-      server: https://kubernetes.default.svc
+    # GitOps / Argo CD.
+    - server: https://kubernetes.default.svc
+      namespace: gitops
+
+    # Core platform namespaces.
+    - server: https://kubernetes.default.svc
+      namespace: kube-system
+    - server: https://kubernetes.default.svc
+      namespace: networking
+    - server: https://kubernetes.default.svc
+      namespace: istio-system
+    - server: https://kubernetes.default.svc
+      namespace: cert-manager
+    - server: https://kubernetes.default.svc
+      namespace: external-dns
+    - server: https://kubernetes.default.svc
+      namespace: external-secrets
+    - server: https://kubernetes.default.svc
+      namespace: longhorn-system
+
+    # Observability.
+    - server: https://kubernetes.default.svc
+      namespace: monitoring
+    - server: https://kubernetes.default.svc
+      namespace: kiali
+
+    # Security.
+    - server: https://kubernetes.default.svc
+      namespace: security
+    - server: https://kubernetes.default.svc
+      namespace: kyverno
+    - server: https://kubernetes.default.svc
+      namespace: falco
+
+    # Platform workloads.
+    - server: https://kubernetes.default.svc
+      namespace: sinless-games
+    - server: https://kubernetes.default.svc
+      namespace: cattle-system
+    - server: https://kubernetes.default.svc
+      namespace: actions-runner-system
+    - server: https://kubernetes.default.svc
+      namespace: nvidia-gpu-operator
+
   clusterResourceWhitelist:
-    - group: '*'
-      kind: '*'
+    # Namespaces.
+    - group: ""
+      kind: Namespace
+
+    # CRDs.
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+
+    # Cluster RBAC required by platform controllers.
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+
+    # Admission webhooks.
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+
+    # API aggregation.
+    - group: apiregistration.k8s.io
+      kind: APIService
+
+    # Storage/platform objects.
+    - group: storage.k8s.io
+      kind: StorageClass
+    - group: storage.k8s.io
+      kind: CSIDriver
+    - group: scheduling.k8s.io
+      kind: PriorityClass
+
+    # Cert-manager.
+    - group: cert-manager.io
+      kind: ClusterIssuer
+
+    # External Secrets.
+    - group: external-secrets.io
+      kind: ClusterSecretStore
+
+    # Kyverno.
+    - group: kyverno.io
+      kind: ClusterPolicy
+    - group: kyverno.io
+      kind: PolicyException
+
+    # Cilium cluster-wide policy support.
+    - group: cilium.io
+      kind: CiliumClusterwideNetworkPolicy
+
+    # KEDA cluster auth support.
+    - group: keda.sh
+      kind: ClusterTriggerAuthentication
+
   namespaceResourceWhitelist:
-    - group: '*'
-      kind: '*'
+    # Core namespaced resources.
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: PersistentVolumeClaim
+    - group: ""
+      kind: Pod
+
+    # Workloads.
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: apps
+      kind: DaemonSet
+    - group: apps
+      kind: ReplicaSet
+
+    # Jobs.
+    - group: batch
+      kind: Job
+    - group: batch
+      kind: CronJob
+
+    # Autoscaling.
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: policy
+      kind: PodDisruptionBudget
+
+    # RBAC.
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding
+
+    # Kubernetes networking.
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    - group: networking.k8s.io
+      kind: Ingress
+
+    # Istio.
+    - group: networking.istio.io
+      kind: Gateway
+    - group: networking.istio.io
+      kind: VirtualService
+    - group: networking.istio.io
+      kind: DestinationRule
+    - group: networking.istio.io
+      kind: ServiceEntry
+    - group: networking.istio.io
+      kind: Sidecar
+    - group: security.istio.io
+      kind: PeerAuthentication
+    - group: security.istio.io
+      kind: AuthorizationPolicy
+    - group: telemetry.istio.io
+      kind: Telemetry
+
+    # Cert-manager.
+    - group: cert-manager.io
+      kind: Certificate
+    - group: cert-manager.io
+      kind: Issuer
+
+    # External Secrets.
+    - group: external-secrets.io
+      kind: ExternalSecret
+    - group: external-secrets.io
+      kind: SecretStore
+
+    # Monitoring.
+    - group: monitoring.coreos.com
+      kind: ServiceMonitor
+    - group: monitoring.coreos.com
+      kind: PodMonitor
+    - group: monitoring.coreos.com
+      kind: PrometheusRule
+    - group: monitoring.coreos.com
+      kind: AlertmanagerConfig
+
+    # Kyverno namespaced policy.
+    - group: kyverno.io
+      kind: Policy
+
+    # Gateway API, if used.
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+    - group: gateway.networking.k8s.io
+      kind: TLSRoute
+    - group: gateway.networking.k8s.io
+      kind: TCPRoute
+
+    # Cilium namespaced policies.
+    - group: cilium.io
+      kind: CiliumNetworkPolicy
+
+    # KEDA.
+    - group: keda.sh
+      kind: ScaledObject
+    - group: keda.sh
+      kind: TriggerAuthentication
+
+  namespaceResourceBlacklist:
+    # Prevent Argo apps in this project from managing raw token Secrets directly.
+    # External Secrets should generate sensitive runtime Secrets instead.
+    - group: ""
+      kind: ServiceAccountToken
+
+  orphanedResources:
+    warn: true
+
+  roles: []

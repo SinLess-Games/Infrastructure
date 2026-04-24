@@ -1,0 +1,149 @@
+images:
+  pullPolicy: IfNotPresent
+
+crds:
+  install: true
+  keep: true
+  full: true
+
+# Keep cluster-scoped because you want one controller to manage multiple namespaces.
+singleNamespace: false
+
+# Least privilege: do not extend the built-in admin/edit/view roles automatically.
+createAggregateRoles: false
+
+workflow:
+  serviceAccount:
+    create: true
+    name: argo-workflow
+  rbac:
+    create: true
+
+controller:
+  replicas: 2
+
+  # Do not allow workflow execution in the controller namespace.
+  workflowNamespaces:
+    - sinless-games
+    - helix-ai
+    - monitoring
+
+  logging:
+    format: json
+    level: info
+
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+  # Force users onto reviewed WorkflowTemplates instead of arbitrary inline workflows.
+  workflowRestrictions:
+    templateReferencing: Secure
+
+  # Safer defaults for workflow pods.
+  workflowDefaults:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 8737
+        fsGroup: 8737
+
+  metricsConfig:
+    enabled: true
+    secure: false
+
+  telemetryConfig:
+    enabled: true
+    secure: false
+
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+
+  clusterWorkflowTemplates:
+    enabled: false
+
+  nodeEvents:
+    enabled: false
+
+  workflowEvents:
+    enabled: false
+
+server:
+  enabled: true
+
+  # Do not run plaintext.
+  secure: true
+
+  # Safer than "server" mode. Move to ["sso", "client"] once OIDC/Dex is wired.
+  authModes:
+    - client
+
+  replicas: 2
+  serviceType: ClusterIP
+
+  logging:
+    format: json
+    level: info
+
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+
+  clusterWorkflowTemplates:
+    enabled: false
+
+  ingress:
+    enabled: false

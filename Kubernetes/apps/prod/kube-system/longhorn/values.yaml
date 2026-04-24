@@ -1,24 +1,54 @@
+# Kubernetes/apps/prod/kube-system/longhorn/values.yaml
+
 defaultSettings:
   defaultDataPath: /var/lib/longhorn
   defaultReplicaCount: 3
+
   backupTarget: s3://k8s-prod-longhorn@us-east-1/
   backupTargetCredentialSecret: longhorn-backup-credentials
+  backupstorePollInterval: 300
+
   createDefaultDiskLabeledNodes: false
-  storageOverProvisioningPercentage: 300
-  storageMinimalAvailablePercentage: 15
+
+  storageOverProvisioningPercentage: 200
+  storageMinimalAvailablePercentage: 20
+
   replicaAutoBalance: best-effort
-  taintToleration: nvidia.com/gpu=true:NoSchedule
+  replicaSoftAntiAffinity: false
+  replicaZoneSoftAntiAffinity: true
+  replicaDiskSoftAntiAffinity: true
+
+  autoSalvage: true
+  orphanResourceAutoDeletion: true
+  orphanResourceAutoDeletionGracePeriod: 300
+
+  disableSchedulingOnCordonedNode: true
+  nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
+  nodeDrainPolicy: block-if-contains-last-replica
+
+  allowVolumeCreationWithDegradedAvailability: false
+
+  upgradeChecker: false
+
 preUpgradeChecker:
-  jobEnabled: false
-tolerations:
-  - key: nvidia.com/gpu
-    operator: Exists
-    effect: NoSchedule
+  jobEnabled: true
+
 longhornUI:
   replicas: 2
+
 persistence:
   defaultClass: true
   defaultClassReplicaCount: 3
+  reclaimPolicy: Delete
+  migratable: false
+  recurringJobSelector:
+    enable: true
+    jobList:
+      - name: daily-snapshot
+        isGroup: false
+      - name: daily-backup
+        isGroup: false
+
 metrics:
   serviceMonitor:
     enabled: true

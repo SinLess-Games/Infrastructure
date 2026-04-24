@@ -1,0 +1,46 @@
+# Kubernetes/apps/prod/istio-system/mesh-policies/require-approved-gateway-hosts.yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-approved-istio-gateway-hosts
+  labels:
+    app.kubernetes.io/name: require-approved-istio-gateway-hosts
+    app.kubernetes.io/component: admission-policy
+    app.kubernetes.io/part-of: istio
+    security.sinlessgames.io/policy: gateway-hosts
+  annotations:
+    policies.kyverno.io/title: Require Approved Istio Gateway Hosts
+    policies.kyverno.io/category: Istio Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Gateway
+    policies.kyverno.io/description: >-
+      Restricts Istio Gateway hosts to approved public domains only.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: only-approved-public-domains
+      match:
+        any:
+          - resources:
+              kinds:
+                - Gateway.networking.istio.io
+      validate:
+        message: "Istio Gateway hosts may only use approved sinlessgames.com or helixaibot.com domains."
+        foreach:
+          - list: "request.object.spec.servers[].hosts[]"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ element }}"
+                    operator: NotEquals
+                    value: "sinlessgames.com"
+                  - key: "{{ element }}"
+                    operator: NotEquals
+                    value: "*.sinlessgames.com"
+                  - key: "{{ element }}"
+                    operator: NotEquals
+                    value: "helixaibot.com"
+                  - key: "{{ element }}"
+                    operator: NotEquals
+                    value: "*.helixaibot.com"

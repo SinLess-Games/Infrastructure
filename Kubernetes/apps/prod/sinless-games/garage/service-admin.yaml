@@ -1,12 +1,32 @@
+# Kubernetes/apps/prod/sinless-games/garage/service-admin.yaml
 apiVersion: v1
 kind: Service
 metadata:
   name: garage-admin
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage
+    app.kubernetes.io/instance: garage
+    app.kubernetes.io/component: admin-api
+    app.kubernetes.io/part-of: garage
+    app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/mtls: istio-strict
+  annotations:
+    security.sinlessgames.io/purpose: "Cluster-internal Service for the Garage admin API."
+    security.sinlessgames.io/public-exposure: "false"
+    security.sinlessgames.io/requires-authorization-policy: "true"
 spec:
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: garage
+    app.kubernetes.io/instance: garage
+    app.kubernetes.io/component: server
   ports:
     - name: http-admin
       port: 3903
-      targetPort: 3903
+      targetPort: http-admin
+      protocol: TCP
+      appProtocol: http
+  sessionAffinity: None
+  internalTrafficPolicy: Cluster

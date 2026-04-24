@@ -1,12 +1,95 @@
+# Kubernetes/apps/prod/sinless-games/rancher/values.yaml
+
 hostname: rancher.sinlessgames.com
-replicas: 1
-tls: external
+
+# Keep Rancher behind your own Istio Gateway/VirtualService.
+# Rancher chart docs support disabling chart-managed ingress when deploying your own ingress path.
+networkExposure:
+  type: none
+
 ingress:
   enabled: false
+
+# TLS terminates at Istio Gateway.
+# Gateway -> Rancher backend should still be protected by Istio mTLS.
+tls: external
+
+# Keep this blank unless doing a one-time manual bootstrap.
+# If blank, Rancher generates the bootstrap password.
+bootstrapPassword: ""
+
+# For a true production management plane, use 3.
+# For homelab/non-HA management UI, 1 is acceptable.
+replicas: 1
+
+antiAffinity: preferred
+topologyKey: kubernetes.io/hostname
+
+# Rancher agent certificate validation.
+# Use strict unless you have a specific private CA/system-store reason.
+agentTLSMode: strict
+
+privateCA: false
+additionalTrustedCAs: false
+
+# Rancher needs internal cluster ranges excluded from proxy behavior.
+noProxy: "127.0.0.0/8,10.42.0.0/16,10.43.0.0/16,10.10.0.0/16,.svc,.cluster.local"
+
+image:
+  repository: rancher/rancher
+  pullPolicy: IfNotPresent
+  tag: ""
+
+debug: false
+useBundledSystemChart: false
+hostNetwork: false
+
+auditLog:
+  enabled: true
+  level: 1
+  destination: sidecar
+  maxAge: 7
+  maxBackup: 5
+  maxSize: 100
+  image:
+    repository: rancher/mirrored-bci-micro
+    tag: 15.6.24.2
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
 resources:
   requests:
-    cpu: 100m
-    memory: 256Mi
+    cpu: 250m
+    memory: 512Mi
   limits:
     cpu: "1"
-    memory: 1Gi
+    memory: 2Gi
+
+startupProbe:
+  timeoutSeconds: 5
+  periodSeconds: 10
+  failureThreshold: 18
+
+livenessProbe:
+  timeoutSeconds: 5
+  periodSeconds: 30
+  failureThreshold: 5
+
+readinessProbe:
+  timeoutSeconds: 5
+  periodSeconds: 30
+  failureThreshold: 5
+
+service:
+  type: ClusterIP
+  disableHTTP: false
+  annotations:
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/mtls: istio-strict
+    security.sinlessgames.io/ingress-required: istio-gateway

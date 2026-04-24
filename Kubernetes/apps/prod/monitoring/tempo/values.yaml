@@ -1,21 +1,35 @@
+# Kubernetes/apps/prod/monitoring/tempo/values.yaml
+
 storage:
   trace:
     backend: s3
     s3:
       bucket: k8s-prod-tempo
-      endpoint: garage-s3.sinless-games.svc.cluster.local:3900
+      endpoint: ${S3_ENDPOINT}
+      region: ${S3_REGION}
       access_key: ${S3_ACCESS_KEY_ID}
       secret_key: ${S3_SECRET_ACCESS_KEY}
-      insecure: true
+      insecure: false
+      forcepathstyle: true
+
 traces:
   otlp:
     grpc:
       enabled: true
     http:
       enabled: true
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors:
+        - service-graphs
+        - span-metrics
+        - local-blocks
+
 metricsGenerator:
   enabled: true
-  remoteWriteUrl: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/write
+  remoteWriteUrl: http://mimir-nginx.monitoring.svc.cluster.local/api/v1/push
   resources:
     requests:
       cpu: 100m
@@ -44,6 +58,7 @@ compactor:
     - -config.expand-env=true
 
 distributor:
+  replicas: 2
   resources:
     requests:
       cpu: 100m
@@ -58,6 +73,7 @@ distributor:
     - -config.expand-env=true
 
 ingester:
+  replicas: 3
   resources:
     requests:
       cpu: 250m
@@ -72,6 +88,7 @@ ingester:
     - -config.expand-env=true
 
 querier:
+  replicas: 2
   resources:
     requests:
       cpu: 100m
@@ -86,6 +103,7 @@ querier:
     - -config.expand-env=true
 
 queryFrontend:
+  replicas: 2
   resources:
     requests:
       cpu: 100m
@@ -98,3 +116,8 @@ queryFrontend:
         name: tempo-s3-credentials
   extraArgs:
     - -config.expand-env=true
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack

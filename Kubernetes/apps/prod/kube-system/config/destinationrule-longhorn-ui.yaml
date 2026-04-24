@@ -1,10 +1,23 @@
+# Kubernetes/apps/prod/kube-system/config/destinationrule-longhorn-ui.yaml
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
   name: longhorn-ui-plain-http
   namespace: kube-system
+  labels:
+    app.kubernetes.io/name: longhorn-ui-plain-http
+    app.kubernetes.io/component: istio-traffic-policy
+    app.kubernetes.io/part-of: longhorn
+    security.sinlessgames.io/exception: plain-http-origin
+  annotations:
+    security.sinlessgames.io/reason: >-
+      Longhorn frontend does not terminate Istio mutual TLS directly.
+      Istio ingress/gateway may route to this service over plain HTTP inside the cluster.
 spec:
   host: longhorn-frontend.kube-system.svc.cluster.local
   trafficPolicy:
-    tls:
-      mode: DISABLE
+    portLevelSettings:
+      - port:
+          number: 80
+        tls:
+          mode: ISTIO_MUTUAL

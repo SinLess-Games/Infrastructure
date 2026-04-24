@@ -1,8 +1,14 @@
+# Kubernetes/apps/prod/networking/namespace/limitrange.yaml
 apiVersion: v1
 kind: LimitRange
 metadata:
   name: default-limits
   namespace: networking
+  labels:
+    app.kubernetes.io/name: networking-default-limits
+    app.kubernetes.io/component: namespace-policy
+    app.kubernetes.io/part-of: networking
+    security.sinlessgames.io/policy: resource-limits
 spec:
   limits:
     - type: Container
@@ -12,3 +18,9 @@ spec:
       default:
         cpu: 500m
         memory: 512Mi
+      min:
+        cpu: 10m
+        memory: 32Mi
+      max:
+        cpu: "2"
+        memory: 2Gi

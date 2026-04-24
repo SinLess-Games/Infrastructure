@@ -1,21 +1,66 @@
 statefulset:
   replicas: 3
+
+  budget:
+    maxUnavailable: 1
+
+  podAntiAffinity:
+    topologyKey: kubernetes.io/hostname
+    type: hard
+
+  topologySpreadConstraints:
+    maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+
+  resources:
+    requests:
+      cpu: "4"
+      memory: 16Gi
+    limits:
+      cpu: "4"
+      memory: 16Gi
+
 storage:
   persistentVolume:
     enabled: true
-    storageClassName: longhorn
+    storageClass: longhorn
     size: 100Gi
+
 conf:
   cache: 4Gi
   max-sql-memory: 4Gi
-visus:
-  enabled: true
-operator:
-  enabled: true
+
 tls:
   enabled: true
-podDisruptionBudget:
+
+prometheus:
   enabled: true
-topologySpreadConstraints:
-  default:
-    whenUnsatisfiable: DoNotSchedule
+
+serviceMonitor:
+  enabled: true
+  namespaced: true
+
+godebug:
+  disablethp: "1"
+
+networkPolicy:
+  enabled: true
+  ingress:
+    grpc:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: helix-ai
+    http:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: helix-ai
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: monitoring
+
+visus:
+  enabled: false
+
+operator:
+  enabled: false

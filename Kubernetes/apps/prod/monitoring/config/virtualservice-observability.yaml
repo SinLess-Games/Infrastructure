@@ -1,11 +1,22 @@
+# Kubernetes/apps/prod/monitoring/config/virtualservice-observability.yaml
 apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
   name: observability-routes
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: observability-routes
+    app.kubernetes.io/component: virtualservice
+    app.kubernetes.io/part-of: monitoring
+    security.sinlessgames.io/exposure: protected-edge
+  annotations:
+    security.sinlessgames.io/required-protection: >-
+      These routes expose administrative observability services and must be
+      protected by Cloudflare Access, oauth2-proxy, or equivalent identity-aware access control.
 spec:
   gateways:
     - istio-system/shared-edge
+
   hosts:
     - grafana.sinlessgames.com
     - kiali.sinlessgames.com
@@ -16,6 +27,7 @@ spec:
     - tempo.sinlessgames.com
     - mimir.sinlessgames.com
     - vault.sinlessgames.com
+
   http:
     - name: grafana
       match:
@@ -23,11 +35,28 @@ spec:
             exact: grafana.sinlessgames.com
         - authority:
             exact: internal.sinlessgames.com
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: "https"
+            X-Forwarded-Host: "grafana.sinlessgames.com"
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "strict-origin-when-cross-origin"
+            Permissions-Policy: "camera=(), microphone=(), geolocation=()"
+      timeout: 30s
+      retries:
+        attempts: 2
+        perTryTimeout: 10s
+        retryOn: connect-failure,refused-stream,unavailable,gateway-error
       route:
         - destination:
             host: grafana.monitoring.svc.cluster.local
             port:
               number: 80
+
     - name: kiali-root
       match:
         - authority:
@@ -36,71 +65,134 @@ spec:
             exact: /
       rewrite:
         uri: /kiali
+      headers:
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "strict-origin-when-cross-origin"
+      timeout: 30s
       route:
         - destination:
             host: kiali.monitoring.svc.cluster.local
             port:
               number: 20001
+
     - name: kiali
       match:
         - authority:
             exact: kiali.sinlessgames.com
           uri:
             prefix: /kiali
+      headers:
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "strict-origin-when-cross-origin"
+      timeout: 30s
       route:
         - destination:
             host: kiali.monitoring.svc.cluster.local
             port:
               number: 20001
+
     - name: prometheus
       match:
         - authority:
             exact: prometheus.sinlessgames.com
+      headers:
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "no-referrer"
+      timeout: 30s
       route:
         - destination:
             host: kube-prometheus-stack-prometheus.monitoring.svc.cluster.local
             port:
               number: 9090
+
     - name: alertmanager
       match:
         - authority:
             exact: alert-manager.sinlessgames.com
+      headers:
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "no-referrer"
+      timeout: 30s
       route:
         - destination:
             host: kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local
             port:
               number: 9093
+
     - name: loki
       match:
         - authority:
             exact: loki.sinlessgames.com
+      headers:
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "no-referrer"
+      timeout: 60s
       route:
         - destination:
             host: loki-gateway.monitoring.svc.cluster.local
             port:
               number: 80
+
     - name: tempo
       match:
         - authority:
             exact: tempo.sinlessgames.com
+      headers:
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "no-referrer"
+      timeout: 60s
       route:
         - destination:
             host: tempo-query-frontend.monitoring.svc.cluster.local
             port:
               number: 3100
+
     - name: mimir
       match:
         - authority:
             exact: mimir.sinlessgames.com
+      headers:
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "no-referrer"
+      timeout: 60s
       route:
         - destination:
             host: mimir-nginx.monitoring.svc.cluster.local
             port:
               number: 80
+
     - name: vault
       match:
         - authority:
             exact: vault.sinlessgames.com
+      headers:
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "no-referrer"
+      timeout: 30s
       route:
         - destination:
             host: vault.platform.local

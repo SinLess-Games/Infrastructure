@@ -1,26 +1,45 @@
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+apiVersion: networking.istio.io/v1
+kind: Gateway
 metadata:
   name: argocd-ui
   namespace: gitops
-  annotations:
-    kubernetes.io/ingress.class: istio
-    gethomepage.dev/enabled: "true"
-    gethomepage.dev/group: Platform
-    gethomepage.dev/name: Argo CD
-    gethomepage.dev/icon: si-argo
-    gethomepage.dev/description: GitOps control plane
-    gethomepage.dev/href: https://argocd.sinlessgames.com
 spec:
-  ingressClassName: istio
-  rules:
-    - host: argocd.sinlessgames.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: argo-cd-argocd-server
-                port:
-                  number: 80
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - argocd.sinlessgames.com
+      tls:
+        httpsRedirect: true
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      hosts:
+        - argocd.sinlessgames.com
+      tls:
+        mode: SIMPLE
+        credentialName: argocd-ui-tls
+        minProtocolVersion: TLSV1_2
+        maxProtocolVersion: TLSV1_3
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: argocd-ui
+  namespace: gitops
+spec:
+  hosts:
+    - argocd.sinlessgames.com
+  gateways:
+    - gitops/argocd-ui
+  http:
+    - route:
+        - destination:
+            host: argo-cd-argocd-server.gitops.svc.cluster.local
+            port:
+              number: 80

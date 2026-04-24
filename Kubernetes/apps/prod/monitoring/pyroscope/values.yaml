@@ -1,19 +1,26 @@
+# Kubernetes/apps/prod/monitoring/pyroscope/values.yaml
+
 pyroscope:
   extraArgs:
-    log.level: debug
+    log.level: info
     config.expand-env: "true"
+
   extraEnvFrom:
     - secretRef:
         name: pyroscope-s3-credentials
+
   structuredConfig:
     storage:
       backend: s3
       s3:
         bucket_name: k8s-prod-pyroscope
         endpoint: ${S3_ENDPOINT}
+        region: ${S3_REGION}
         access_key_id: ${S3_ACCESS_KEY_ID}
         secret_access_key: ${S3_SECRET_ACCESS_KEY}
-        insecure: true
+        insecure: false
+        s3forcepathstyle: true
+
 components:
   querier:
     replicaCount: 2
@@ -24,6 +31,27 @@ components:
       limits:
         cpu: 500m
         memory: 512Mi
+
+  query-frontend:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  distributor:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
   ingester:
     replicaCount: 3
     resources:
@@ -33,5 +61,28 @@ components:
       limits:
         cpu: "1"
         memory: 1Gi
+
+  store-gateway:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+
+  compactor:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+
 serviceMonitor:
   enabled: true
+  labels:
+    release: kube-prometheus-stack

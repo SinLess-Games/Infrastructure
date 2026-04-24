@@ -1,26 +1,67 @@
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# Kubernetes/apps/prod/sinless-games/garage/virtualservice-garage-ui.yaml
+apiVersion: networking.istio.io/v1
+kind: VirtualService
 metadata:
   name: garage-ui
   namespace: sinless-games
+  labels:
+    app.kubernetes.io/name: garage-webui
+    app.kubernetes.io/component: virtualservice
+    app.kubernetes.io/part-of: garage
+    security.sinlessgames.io/exposure: protected-edge
   annotations:
-    kubernetes.io/ingress.class: istio
     gethomepage.dev/enabled: "true"
     gethomepage.dev/group: Storage
     gethomepage.dev/name: Garage
     gethomepage.dev/icon: si-garage
     gethomepage.dev/description: S3 object storage and Garage web UI
     gethomepage.dev/href: https://s3.sinlessgames.com/ui/
+    security.sinlessgames.io/required-protection: "Cloudflare Access or equivalent identity-aware protection required."
 spec:
-  ingressClassName: istio
-  rules:
-    - host: garage.sinlessgames.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: garage-ui
-                port:
-                  number: 3909
+  gateways:
+    - istio-system/shared-edge
+
+  hosts:
+    - garage.sinlessgames.com
+
+  http:
+    - name: garage-ui-root-redirect
+      match:
+        - authority:
+            exact: garage.sinlessgames.com
+          uri:
+            exact: /
+      redirect:
+        uri: /ui/
+
+    - name: garage-ui
+      match:
+        - authority:
+            exact: garage.sinlessgames.com
+          uri:
+            exact: /ui
+        - authority:
+            exact: garage.sinlessgames.com
+          uri:
+            prefix: /ui/
+      headers:
+        request:
+          set:
+            X-Forwarded-Proto: "https"
+            X-Forwarded-Host: "garage.sinlessgames.com"
+        response:
+          set:
+            X-Frame-Options: "DENY"
+            X-Content-Type-Options: "nosniff"
+            Referrer-Policy: "strict-origin-when-cross-origin"
+            Permissions-Policy: "camera=(), microphone=(), geolocation=()"
+      timeout: 30s
+      retries:
+        attempts: 2
+        perTryTimeout: 10s
+        retryOn: connect-failure,refused-stream,unavailable,gateway-error
+      route:
+        - destination:
+            host: garage-ui.sinless-games.svc.cluster.local
+            port:
+              number: 3909
