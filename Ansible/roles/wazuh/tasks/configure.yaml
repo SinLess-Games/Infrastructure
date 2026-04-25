@@ -4,6 +4,12 @@
     wazuh_api_username: "{{ hostvars['localhost'].wazuh_api_username }}"
     wazuh_api_password: "{{ hostvars['localhost'].wazuh_api_password }}"
     wazuh_admin_password: "{{ hostvars['localhost'].wazuh_admin_password }}"
+    vault_wazuh_agent_enrollment_password: "{{ hostvars['localhost'].vault_wazuh_agent_enrollment_password }}"
+    vault_wazuh_github_api_token: "{{ hostvars['localhost'].vault_wazuh_github_api_token }}"
+    vault_wazuh_virustotal_api_key: "{{ hostvars['localhost'].vault_wazuh_virustotal_api_key }}"
+    vault_wazuh_discord_hook_url: "{{ hostvars['localhost'].vault_wazuh_discord_hook_url }}"
+    vault_wazuh_haproxy_password: "{{ hostvars['localhost'].vault_wazuh_haproxy_password }}"
+    vault_wazuh_cluster_key: "{{ hostvars['localhost'].vault_wazuh_cluster_key }}"
   no_log: true
 
 - name: Assert Wazuh runtime secrets are available
@@ -12,7 +18,149 @@
       - wazuh_api_username | length > 0
       - wazuh_api_password | length > 0
       - wazuh_admin_password | length > 0
+      - vault_wazuh_agent_enrollment_password | length > 0
+      - vault_wazuh_github_api_token | length > 0
+      - vault_wazuh_virustotal_api_key | length > 0
+      - vault_wazuh_discord_hook_url | length > 0
+      - vault_wazuh_haproxy_password | length > 0
+      - vault_wazuh_cluster_key | length > 0
     fail_msg: "Required Wazuh runtime secrets are missing from localhost cache."
+
+- name: Define effective Wazuh role paths and service names
+  ansible.builtin.set_fact:
+    wazuh_effective_templates_dir: "{{ wazuh_templates_dir | default((playbook_dir | dirname) ~ '/templates/wazuh') }}"
+    wazuh_effective_manager_service_name: "{{ wazuh_manager_service_name | default('wazuh-manager') }}"
+    wazuh_effective_indexer_service_name: "{{ wazuh_indexer_service_name | default('wazuh-indexer') }}"
+    wazuh_effective_dashboard_service_name: "{{ wazuh_dashboard_service_name | default('wazuh-dashboard') }}"
+    wazuh_effective_dashboard_app_config_file: "{{ wazuh_dashboard_customization_file | default('/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml') }}"
+    wazuh_effective_dashboard_data_dir: "/usr/share/wazuh-dashboard/data"
+
+- name: Define required Wazuh template files
+  ansible.builtin.set_fact:
+    wazuh_required_template_files:
+      - ossec.conf.j2
+      - api-users.j2
+      - local_internal_options.conf.j2
+      - audit.rules.j2
+      - openscap-scan.sh.j2
+      - ciscat-scan.sh.j2
+
+- name: Check required Wazuh templates exist on control node
+  ansible.builtin.stat:
+    path: "{{ wazuh_effective_templates_dir }}/{{ item }}"
+  register: wazuh_required_template_stats
+  loop: "{{ wazuh_required_template_files }}"
+  delegate_to: localhost
+  become: false
+
+- name: Assert required Wazuh templates exist on control node
+  ansible.builtin.assert:
+    that:
+      - wazuh_required_template_stats.results | selectattr('stat.exists', 'equalto', false) | list | length == 0
+    fail_msg: >-
+      One or more Wazuh templates are missing under {{ wazuh_effective_templates_dir }}.
+      Missing: {{
+        wazuh_required_template_stats.results
+        | selectattr('stat.exists', 'equalto', false)
+        | map(attribute='item')
+        | list
+      }}
+
+- name: Build effective Wazuh cluster runtime values
+  ansible.builtin.set_fact:
+    wazuh_effective_cluster_key_raw: "{{ vault_wazuh_cluster_key | string | trim }}"
+    wazuh_effective_cluster_master_address: >-
+      {{
+        (
+          wazuh_cluster.master_address
+          | default(ansible_host | default(ansible_default_ipv4.address | default(inventory_hostname)))
+        )
+        | string
+        | trim
+      }}
+    wazuh_effective_cluster_node_name: >-
+      {{
+        (
+          wazuh_cluster.node_name
+          | default(inventory_hostname)
+        )
+        | string
+        | trim
+        | regex_replace('[^A-Za-z0-9_.-]', '-')
+      }}
+    wazuh_effective_cluster_name: >-
+      {{
+        (
+          wazuh_cluster.name
+          | default('wazuh')
+        )
+        | string
+        | trim
+        | regex_replace('[^A-Za-z0-9_.-]', '-')
+      }}
+  no_log: true
+
+- name: Normalize Wazuh cluster key to a valid 32-character value
+  ansible.builtin.set_fact:
+    wazuh_effective_cluster_key: >-
+      {{
+        wazuh_effective_cluster_key_raw
+        if (wazuh_effective_cluster_key_raw is match('^[A-Za-z0-9]{32}$'))
+        else (
+          wazuh_effective_cluster_key_raw
+          | regex_replace('[^A-Fa-f0-9]', '')
+          | regex_replace('^(.{32}).*$', '\\1')
+        )
+      }}
+  no_log: true
+
+- name: Assert Wazuh cluster runtime values are valid
+  ansible.builtin.assert:
+    that:
+      - wazuh_cluster.enabled | default(true) | bool
+      - wazuh_effective_cluster_name | length > 0
+      - wazuh_effective_cluster_node_name | length > 0
+      - wazuh_effective_cluster_key is match('^[A-Za-z0-9]{32}$')
+      - wazuh_effective_cluster_master_address | length > 0
+    fail_msg: >-
+      Invalid Wazuh cluster configuration. vault_wazuh_cluster_key must resolve
+      to exactly 32 alphanumeric characters. The master address and node name
+      must also be defined.
+    quiet: true
+  no_log: true
+
+- name: Normalize Wazuh cluster config for VM master deployment
+  ansible.builtin.set_fact:
+    wazuh_cluster: >-
+      {{
+        wazuh_cluster
+        | combine(
+            {
+              'name': wazuh_effective_cluster_name,
+              'node_name': wazuh_effective_cluster_node_name,
+              'key': wazuh_effective_cluster_key,
+              'master_address': wazuh_effective_cluster_master_address,
+              'nodes': [wazuh_effective_cluster_master_address],
+              'node_type': 'master',
+              'port': wazuh_cluster.port | default(1516),
+              'bind_addr': wazuh_cluster.bind_addr | default('0.0.0.0'),
+              'hidden': wazuh_cluster.hidden | default('no'),
+              'disabled': 'no',
+              'haproxy_helper': (
+                wazuh_cluster.haproxy_helper | default({})
+                | combine(
+                    {
+                      'enabled': false,
+                      'haproxy_disabled': 'yes'
+                    },
+                    recursive=True
+                  )
+              )
+            },
+            recursive=True
+          )
+      }}
+  no_log: true
 
 - name: Install Wazuh repository prerequisites
   ansible.builtin.apt:
@@ -29,9 +177,47 @@
       - apt-transport-https
       - cloud-guest-utils
       - parted
+      - python3
+      - coreutils
+      - util-linux
+      - findutils
+      - gawk
+      - grep
+      - sed
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+- name: Install Linux audit packages for Wazuh system audit
+  ansible.builtin.apt:
+    name:
+      - "{{ wazuh_system_audit.package | default('auditd') }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when:
+    - wazuh_system_audit.enabled | default(false) | bool
+    - wazuh_system_audit.install | default(true) | bool
+
+- name: Install OpenSCAP packages for Wazuh compliance scanning
+  ansible.builtin.apt:
+    name: "{{ wazuh_openscap.packages | default(['openscap-scanner', 'openscap-utils', 'ssg-base', 'ssg-debian']) }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when:
+    - wazuh_openscap.enabled | default(false) | bool
+    - wazuh_openscap.install | default(true) | bool
+
+- name: Install Java runtime for CIS-CAT when enabled
+  ansible.builtin.apt:
+    name: "{{ wazuh_ciscat.java_package | default('default-jre-headless') }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when:
+    - wazuh_ciscat.enabled | default(false) | bool
+    - wazuh_ciscat.install_java | default(true) | bool
 
 - name: Expand Wazuh root filesystem when template disk layout is undersized
   ansible.builtin.shell: |
@@ -108,7 +294,7 @@
     wazuh_manager_package_present: "{{ not wazuh_dashboard_install_stat.stat.exists and wazuh_manager_package_status.rc == 0 }}"
   when: not wazuh_dashboard_install_stat.stat.exists
 
-- name: Ensure legacy /var/ossec/bin directory exists for broken package cleanup
+- name: Ensure legacy /var/ossec compatibility directories exist for broken package cleanup
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -165,7 +351,7 @@
 
 - name: Stop legacy Wazuh manager service before full-stack deployment
   ansible.builtin.systemd:
-    name: "{{ wazuh_manager_service_name }}"
+    name: "{{ wazuh_effective_manager_service_name }}"
     state: stopped
     enabled: false
   failed_when: false
@@ -234,7 +420,7 @@
   ansible.builtin.command:
     cmd: >-
       bash {{ wazuh_assistant_script }} -a
-      {% if wazuh_assistant_overwrite | bool %}-o{% endif %}
+      {% if wazuh_assistant_overwrite | default(false) | bool %}-o{% endif %}
     chdir: "{{ wazuh_assistant_dir }}"
     creates: "/usr/share/wazuh-dashboard"
   environment:
@@ -265,6 +451,732 @@
     replace: '#deb '
   failed_when: false
 
+- name: Stop Wazuh manager before managed configuration changes
+  ansible.builtin.systemd:
+    name: "{{ wazuh_effective_manager_service_name }}"
+    state: stopped
+    enabled: true
+  failed_when: false
+
+- name: Stop Wazuh dashboard before managed configuration changes
+  ansible.builtin.systemd:
+    name: "{{ wazuh_effective_dashboard_service_name }}"
+    state: stopped
+    enabled: true
+  failed_when: false
+
+- name: Kill stale Wazuh daemons before managed configuration changes
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    changed=0
+
+    systemctl stop "{{ wazuh_effective_manager_service_name }}" >/dev/null 2>&1 || true
+    systemctl kill --kill-who=all "{{ wazuh_effective_manager_service_name }}" >/dev/null 2>&1 || true
+
+    for process_name in \
+      wazuh-db \
+      wazuh-execd \
+      wazuh-syscheckd \
+      wazuh-analysisd \
+      wazuh-remoted \
+      wazuh-logcollector \
+      wazuh-monitord \
+      wazuh-modulesd \
+      wazuh-clusterd \
+      wazuh-authd \
+      wazuh-csyslogd \
+      wazuh-integratord; do
+      if pgrep -x "${process_name}" >/dev/null 2>&1; then
+        changed=1
+        pkill -TERM -x "${process_name}" || true
+      fi
+    done
+
+    pkill -TERM -f '^/var/ossec/bin/(wazuh|ossec)-' || true
+    sleep 5
+
+    for process_name in \
+      wazuh-db \
+      wazuh-execd \
+      wazuh-syscheckd \
+      wazuh-analysisd \
+      wazuh-remoted \
+      wazuh-logcollector \
+      wazuh-monitord \
+      wazuh-modulesd \
+      wazuh-clusterd \
+      wazuh-authd \
+      wazuh-csyslogd \
+      wazuh-integratord; do
+      if pgrep -x "${process_name}" >/dev/null 2>&1; then
+        changed=1
+        pkill -KILL -x "${process_name}" || true
+      fi
+    done
+
+    pkill -KILL -f '^/var/ossec/bin/(wazuh|ossec)-' || true
+    sleep 2
+
+    systemctl reset-failed "{{ wazuh_effective_manager_service_name }}" || true
+
+    echo "changed=${changed}"
+  args:
+    executable: /bin/bash
+  register: wazuh_early_stale_process_cleanup
+  changed_when: "'changed=1' in (wazuh_early_stale_process_cleanup.stdout | default(''))"
+
+- name: Ensure Wazuh manager configuration directory exists
+  ansible.builtin.file:
+    path: /var/ossec/etc
+    state: directory
+    owner: root
+    group: wazuh
+    mode: "0750"
+
+- name: Ensure Wazuh authd enrollment password is installed
+  ansible.builtin.copy:
+    dest: "{{ wazuh_auth.password_file | default('/var/ossec/etc/authd.pass') }}"
+    content: "{{ vault_wazuh_agent_enrollment_password }}\n"
+    owner: root
+    group: wazuh
+    mode: "0640"
+  no_log: true
+  notify: Restart wazuh-manager
+  when:
+    - wazuh_auth.enabled | default(true) | bool
+    - wazuh_auth.use_password | default('yes') | string == 'yes'
+
+- name: Ensure Wazuh local internal options are rendered
+  ansible.builtin.template:
+    src: "{{ wazuh_effective_templates_dir }}/local_internal_options.conf.j2"
+    dest: "{{ wazuh_install_dir }}/etc/local_internal_options.conf"
+    owner: root
+    group: wazuh
+    mode: "0640"
+    backup: true
+  notify: Restart wazuh-manager
+
+- name: Ensure Linux audit rules directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_system_audit.rules_file | default('/etc/audit/rules.d/wazuh.rules') | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  when:
+    - wazuh_system_audit.enabled | default(false) | bool
+
+- name: Configure auditd daemon settings for Wazuh system audit
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: "^{{ item.key }}\\s*="
+    line: "{{ item.key }} = {{ item.value }}"
+    create: false
+    backup: true
+  loop:
+    - key: flush
+      value: "{{ wazuh_system_audit.flush | default('incremental_async') }}"
+    - key: max_log_file
+      value: "{{ wazuh_system_audit.max_log_file | default(64) }}"
+    - key: num_logs
+      value: "{{ wazuh_system_audit.num_logs | default(8) }}"
+    - key: space_left_action
+      value: "{{ wazuh_system_audit.space_left_action | default('syslog') }}"
+    - key: admin_space_left_action
+      value: "{{ wazuh_system_audit.admin_space_left_action | default('halt') }}"
+    - key: disk_full_action
+      value: "{{ wazuh_system_audit.disk_full_action | default('halt') }}"
+    - key: disk_error_action
+      value: "{{ wazuh_system_audit.disk_error_action | default('halt') }}"
+  when:
+    - wazuh_system_audit.enabled | default(false) | bool
+    - wazuh_system_audit.install | default(true) | bool
+
+- name: Deploy Wazuh auditd rules
+  ansible.builtin.template:
+    src: "{{ wazuh_effective_templates_dir }}/audit.rules.j2"
+    dest: "{{ wazuh_system_audit.rules_file | default('/etc/audit/rules.d/wazuh.rules') }}"
+    owner: root
+    group: root
+    mode: "0640"
+    backup: true
+  register: wazuh_audit_rules_template
+  when:
+    - wazuh_system_audit.enabled | default(false) | bool
+
+- name: Ensure auditd service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ wazuh_system_audit.service | default('auditd') }}"
+    state: "{{ wazuh_system_audit.service_state | default('started') }}"
+    enabled: "{{ wazuh_system_audit.service_enabled | default(true) | bool }}"
+  when:
+    - wazuh_system_audit.enabled | default(false) | bool
+    - wazuh_system_audit.install | default(true) | bool
+
+- name: Load Wazuh auditd rules with augenrules
+  ansible.builtin.command: augenrules --load
+  register: wazuh_augenrules_load
+  changed_when: wazuh_audit_rules_template.changed | default(false)
+  failed_when: >-
+    wazuh_augenrules_load.rc != 0
+    and 'enabled 2' not in ((wazuh_augenrules_load.stdout | default('')) ~ (wazuh_augenrules_load.stderr | default('')))
+  when:
+    - wazuh_system_audit.enabled | default(false) | bool
+    - wazuh_audit_rules_template.changed | default(false)
+
+- name: Define Wazuh required CDB list source paths
+  ansible.builtin.set_fact:
+    wazuh_required_cdb_list_sources: >-
+      {{
+        (
+          (wazuh_ruleset.lists | default([]))
+          + [
+              'etc/lists/blacklist-alienvault',
+              'etc/lists/suspicious-programs',
+              'etc/lists/malicious-ioc/malware-hashes',
+              'etc/lists/malicious-ioc/malicious-ip',
+              'etc/lists/malicious-ioc/malicious-domains'
+            ]
+        )
+        | unique
+        | list
+      }}
+
+- name: Define Wazuh required CDB list absolute paths
+  ansible.builtin.set_fact:
+    wazuh_required_cdb_list_files: >-
+      {{
+        wazuh_required_cdb_list_sources
+        | map('regex_replace', '^', wazuh_install_dir ~ '/')
+        | unique
+        | list
+      }}
+
+- name: Define Wazuh configured CDB list files
+  ansible.builtin.set_fact:
+    wazuh_configured_cdb_list_files: "{{ wazuh_cdb_lists.files | default([]) if wazuh_cdb_lists is defined else [] }}"
+
+- name: Define Wazuh configured CDB list paths
+  ansible.builtin.set_fact:
+    wazuh_configured_cdb_list_paths: "{{ wazuh_configured_cdb_list_files | map(attribute='path') | list }}"
+
+- name: Define Wazuh placeholder-only CDB list files
+  ansible.builtin.set_fact:
+    wazuh_placeholder_cdb_list_files: "{{ wazuh_required_cdb_list_files | difference(wazuh_configured_cdb_list_paths) }}"
+
+- name: Define Wazuh all CDB list files
+  ansible.builtin.set_fact:
+    wazuh_all_cdb_list_files: "{{ (wazuh_required_cdb_list_files + wazuh_configured_cdb_list_paths) | unique | list }}"
+
+- name: Ensure Wazuh CDB list directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: wazuh
+    mode: "{{ (wazuh_cdb_lists | default({})).directory_mode | default(wazuh_cdb_list_dir_mode | default('2770')) }}"
+  loop: "{{ wazuh_all_cdb_list_files | map('dirname') | unique | list }}"
+
+- name: Render configured Wazuh CDB list source files
+  ansible.builtin.copy:
+    dest: "{{ item.path }}"
+    content: "{{ (item.entries | default(['__wazuh_placeholder__:disabled'])) | join('\n') }}\n"
+    owner: root
+    group: wazuh
+    mode: "{{ item.mode | default((wazuh_cdb_lists | default({})).file_mode | default(wazuh_cdb_list_file_mode | default('0660'))) }}"
+    backup: true
+  loop: "{{ wazuh_configured_cdb_list_files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  notify: Restart wazuh-manager
+  when:
+    - (wazuh_cdb_lists | default({})).enabled | default(true) | bool
+
+- name: Ensure placeholder Wazuh CDB list source files exist
+  ansible.builtin.copy:
+    dest: "{{ item }}"
+    content: "__wazuh_placeholder__:disabled\n"
+    owner: root
+    group: wazuh
+    mode: "{{ (wazuh_cdb_lists | default({})).file_mode | default(wazuh_cdb_list_file_mode | default('0660')) }}"
+    force: false
+  loop: "{{ wazuh_placeholder_cdb_list_files }}"
+  notify: Restart wazuh-manager
+
+- name: Ensure Wazuh CDB list source file permissions are correct
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: file
+    owner: root
+    group: wazuh
+    mode: "{{ (wazuh_cdb_lists | default({})).file_mode | default(wazuh_cdb_list_file_mode | default('0660')) }}"
+  loop: "{{ wazuh_all_cdb_list_files }}"
+
+- name: Remove stale Wazuh generated CDB artifacts before rebuild
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    changed=0
+
+    if [ -d "{{ wazuh_install_dir }}/etc/lists" ]; then
+      if find "{{ wazuh_install_dir }}/etc/lists" -type f \( -name '*.tmp' -o -name '*.cdb' \) -print -quit | grep -q .; then
+        changed=1
+        find "{{ wazuh_install_dir }}/etc/lists" -type f \( -name '*.tmp' -o -name '*.cdb' \) -delete
+      fi
+
+      find "{{ wazuh_install_dir }}/etc/lists" -type d -exec chown root:wazuh {} +
+      find "{{ wazuh_install_dir }}/etc/lists" -type d -exec chmod 2770 {} +
+      find "{{ wazuh_install_dir }}/etc/lists" -type f -exec chown root:wazuh {} +
+      find "{{ wazuh_install_dir }}/etc/lists" -type f -exec chmod 0660 {} +
+    fi
+
+    echo "changed=${changed}"
+  args:
+    executable: /bin/bash
+  register: wazuh_cdb_cleanup_result
+  changed_when: "'changed=1' in (wazuh_cdb_cleanup_result.stdout | default(''))"
+  notify: Restart wazuh-manager
+
+- name: Ensure Wazuh active response bin directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_install_dir }}/active-response/bin"
+    state: directory
+    owner: root
+    group: wazuh
+    mode: "0750"
+
+- name: Ensure safe placeholder remove-threat active response exists
+  ansible.builtin.copy:
+    dest: "{{ wazuh_install_dir }}/active-response/bin/remove-threat.sh"
+    owner: root
+    group: wazuh
+    mode: "0750"
+    force: false
+    content: |
+      #!/bin/sh
+      # Managed placeholder created by Ansible.
+      # Replace this with a tested malware-removal script before relying on automatic removal.
+      # Wazuh active response sends alert context through STDIN.
+      set -eu
+
+      log_file="/var/ossec/logs/active-responses.log"
+      timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+      {
+        printf '%s remove-threat.sh placeholder invoked. No destructive action was taken.\n' "${timestamp}"
+        cat >/dev/null || true
+      } >> "${log_file}" 2>/dev/null || true
+
+      exit 0
+  when:
+    - wazuh_commands | default([]) | selectattr('name', 'equalto', 'remove-threat') | list | length > 0
+
+- name: Ensure Wazuh integration script directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_install_dir }}/integrations"
+    state: directory
+    owner: root
+    group: wazuh
+    mode: "0750"
+
+- name: Ensure OpenSCAP results directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_openscap.results_dir | default('/var/ossec/logs/openscap') }}"
+    state: directory
+    owner: "{{ wazuh_openscap.owner | default('root') }}"
+    group: "{{ wazuh_openscap.group | default('wazuh') }}"
+    mode: "0750"
+  when:
+    - wazuh_openscap.enabled | default(false) | bool
+
+- name: Ensure OpenSCAP JSON results file exists
+  ansible.builtin.copy:
+    dest: "{{ wazuh_openscap.json_results_file | default('/var/ossec/logs/openscap/openscap-results.json') }}"
+    content: ""
+    owner: "{{ wazuh_openscap.owner | default('root') }}"
+    group: "{{ wazuh_openscap.group | default('wazuh') }}"
+    mode: "0640"
+    force: false
+  when:
+    - wazuh_openscap.enabled | default(false) | bool
+
+- name: Deploy OpenSCAP scan wrapper
+  ansible.builtin.template:
+    src: "{{ wazuh_effective_templates_dir }}/openscap-scan.sh.j2"
+    dest: "{{ wazuh_openscap.script_path | default(wazuh_install_dir ~ '/integrations/openscap-scan.sh') }}"
+    owner: root
+    group: wazuh
+    mode: "0750"
+    backup: true
+  notify: Restart wazuh-manager
+  when:
+    - wazuh_openscap.enabled | default(false) | bool
+
+- name: Ensure CIS-CAT base directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_ciscat.base_dir | default('/opt/cis-cat') }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  when:
+    - wazuh_ciscat.enabled | default(false) | bool
+
+- name: Ensure CIS-CAT reports directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_ciscat.reports_dir | default('/var/ossec/logs/ciscat') }}"
+    state: directory
+    owner: "{{ wazuh_ciscat.owner | default('root') }}"
+    group: "{{ wazuh_ciscat.group | default('wazuh') }}"
+    mode: "0750"
+  when:
+    - wazuh_ciscat.enabled | default(false) | bool
+
+- name: Ensure CIS-CAT JSON results file exists
+  ansible.builtin.copy:
+    dest: "{{ wazuh_ciscat.json_results_file | default('/var/ossec/logs/ciscat/ciscat-results.json') }}"
+    content: ""
+    owner: "{{ wazuh_ciscat.owner | default('root') }}"
+    group: "{{ wazuh_ciscat.group | default('wazuh') }}"
+    mode: "0640"
+    force: false
+  when:
+    - wazuh_ciscat.enabled | default(false) | bool
+
+- name: Deploy CIS-CAT scan wrapper
+  ansible.builtin.template:
+    src: "{{ wazuh_effective_templates_dir }}/ciscat-scan.sh.j2"
+    dest: "{{ wazuh_ciscat.script_path | default(wazuh_install_dir ~ '/integrations/ciscat-scan.sh') }}"
+    owner: root
+    group: wazuh
+    mode: "0750"
+    backup: true
+  notify: Restart wazuh-manager
+  when:
+    - wazuh_ciscat.enabled | default(false) | bool
+
+- name: Check whether CIS-CAT assessor script exists
+  ansible.builtin.stat:
+    path: "{{ wazuh_ciscat.assessor_path | default('/opt/cis-cat/CIS-CAT.sh') }}"
+  register: wazuh_ciscat_assessor_stat
+  when:
+    - wazuh_ciscat.enabled | default(false) | bool
+
+- name: Check whether CIS-CAT assessor jar exists
+  ansible.builtin.stat:
+    path: "{{ wazuh_ciscat.jar_path | default('/opt/cis-cat/CIS-CAT.jar') }}"
+  register: wazuh_ciscat_jar_stat
+  when:
+    - wazuh_ciscat.enabled | default(false) | bool
+
+- name: Print CIS-CAT licensed artifact notice
+  ansible.builtin.debug:
+    msg: >-
+      CIS-CAT is enabled, but no assessor artifact was found at
+      {{ wazuh_ciscat.assessor_path | default('/opt/cis-cat/CIS-CAT.sh') }} or
+      {{ wazuh_ciscat.jar_path | default('/opt/cis-cat/CIS-CAT.jar') }}.
+      The wrapper will emit a JSON error event until the licensed CIS-CAT files are placed there.
+  when:
+    - wazuh_ciscat.enabled | default(false) | bool
+    - not (wazuh_ciscat_assessor_stat.stat.exists | default(false))
+    - not (wazuh_ciscat_jar_stat.stat.exists | default(false))
+
+- name: Ensure Wazuh agent group base directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}"
+    state: directory
+    owner: wazuh
+    group: wazuh
+    mode: "{{ wazuh_agent_groups.directory_mode | default('2770') }}"
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+
+- name: Validate Wazuh agent group names
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name is match('^[A-Za-z0-9._-]+$')
+    fail_msg: "Invalid Wazuh agent group name '{{ item.name | default('undefined') }}'. Use only letters, numbers, dots, underscores, and hyphens."
+  loop: "{{ wazuh_agent_groups.groups | default([]) }}"
+  loop_control:
+    label: "{{ item.name | default('undefined') }}"
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+    - item.enabled | default(true) | bool
+
+- name: Ensure Wazuh agent group directories exist
+  ansible.builtin.file:
+    path: "{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}/{{ item.name }}"
+    state: directory
+    owner: wazuh
+    group: wazuh
+    mode: "{{ wazuh_agent_groups.directory_mode | default('2770') }}"
+  loop: "{{ wazuh_agent_groups.groups | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+    - item.enabled | default(true) | bool
+
+- name: Remove stale temporary Wazuh centralized agent group config
+  ansible.builtin.file:
+    path: "{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}/{{ item.name }}/agent.conf.tmp"
+    state: absent
+  loop: "{{ wazuh_agent_groups.groups | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+    - item.enabled | default(true) | bool
+
+- name: Render safe temporary Wazuh centralized agent group config
+  ansible.builtin.copy:
+    dest: "{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}/{{ item.name }}/agent.conf.tmp"
+    owner: wazuh
+    group: wazuh
+    mode: "{{ wazuh_agent_groups.agent_conf_mode | default('0660') }}"
+    backup: true
+    content: |
+      {% if item.agent_conf is defined and item.agent_conf.raw_xml is defined and (item.agent_conf.raw_xml | string | trim | length > 0) %}
+      {{ item.agent_conf.raw_xml | string | trim }}
+      {% elif item.agent_conf is defined and item.agent_conf.xml is defined and (item.agent_conf.xml | string | trim | length > 0) %}
+      {{ item.agent_conf.xml | string | trim }}
+      {% elif item.agent_conf is defined and item.agent_conf.content is defined and (item.agent_conf.content | string | trim | length > 0) %}
+      {{ item.agent_conf.content | string | trim }}
+      {% else %}
+      <agent_config>
+      </agent_config>
+      {% endif %}
+  loop: "{{ wazuh_agent_groups.groups | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+    - item.enabled | default(true) | bool
+    - (item.agent_conf | default({})).enabled | default(true) | bool
+
+- name: Normalize Wazuh centralized agent group config XML whitespace
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    conf="{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}/{{ item.name }}/agent.conf.tmp"
+
+    python3 <<'PY'
+    from pathlib import Path
+
+    path = Path("{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}/{{ item.name }}/agent.conf.tmp")
+    text = path.read_text()
+
+    text = text.strip()
+    if not text:
+        text = "<agent_config>\n</agent_config>"
+
+    if not text.endswith("\n"):
+        text += "\n"
+
+    path.write_text(text)
+    PY
+
+    chown wazuh:wazuh "${conf}"
+    chmod "{{ wazuh_agent_groups.agent_conf_mode | default('0660') }}" "${conf}"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  loop: "{{ wazuh_agent_groups.groups | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+    - item.enabled | default(true) | bool
+    - (item.agent_conf | default({})).enabled | default(true) | bool
+
+- name: Check whether verify-agent-conf exists
+  ansible.builtin.stat:
+    path: "{{ wazuh_install_dir }}/bin/verify-agent-conf"
+  register: wazuh_verify_agent_conf_stat
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+
+- name: Fail when verify-agent-conf is missing and agent groups are enabled
+  ansible.builtin.fail:
+    msg: "{{ wazuh_install_dir }}/bin/verify-agent-conf was not found. Cannot safely activate centralized agent group configs."
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+    - not (wazuh_verify_agent_conf_stat.stat.exists | default(false))
+
+- name: Validate temporary Wazuh centralized agent group config
+  ansible.builtin.command: >-
+    {{ wazuh_install_dir }}/bin/verify-agent-conf
+    -f {{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}/{{ item.name }}/agent.conf.tmp
+  register: wazuh_verify_agent_conf_result
+  changed_when: false
+  loop: "{{ wazuh_agent_groups.groups | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+    - wazuh_verify_agent_conf_stat.stat.exists | default(false)
+    - item.enabled | default(true) | bool
+    - (item.agent_conf | default({})).enabled | default(true) | bool
+
+- name: Activate Wazuh centralized agent group config
+  ansible.builtin.copy:
+    src: "{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}/{{ item.name }}/agent.conf.tmp"
+    dest: "{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}/{{ item.name }}/agent.conf"
+    owner: wazuh
+    group: wazuh
+    mode: "{{ wazuh_agent_groups.agent_conf_mode | default('0660') }}"
+    remote_src: true
+    backup: true
+  loop: "{{ wazuh_agent_groups.groups | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: Restart wazuh-manager
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+    - item.enabled | default(true) | bool
+    - (item.agent_conf | default({})).enabled | default(true) | bool
+
+- name: Remove temporary Wazuh centralized agent group config
+  ansible.builtin.file:
+    path: "{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}/{{ item.name }}/agent.conf.tmp"
+    state: absent
+  loop: "{{ wazuh_agent_groups.groups | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+    - item.enabled | default(true) | bool
+    - (item.agent_conf | default({})).enabled | default(true) | bool
+
+- name: Ensure Wazuh shared group tree permissions are correct
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    shared_dir="{{ wazuh_agent_groups.base_dir | default(wazuh_install_dir ~ '/etc/shared') }}"
+
+    if [ -d "${shared_dir}" ]; then
+      chown -R wazuh:wazuh "${shared_dir}"
+      find "${shared_dir}" -type d -exec chmod "{{ wazuh_agent_groups.directory_mode | default('2770') }}" {} \;
+      find "${shared_dir}" -type f -name 'agent.conf' -exec chmod "{{ wazuh_agent_groups.agent_conf_mode | default('0660') }}" {} \;
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - wazuh_agent_groups.enabled | default(false) | bool
+
+- name: Ensure Wazuh manager systemd override directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/wazuh-manager.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Extend Wazuh manager startup timeout
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/wazuh-manager.service.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Service]
+      TimeoutStartSec={{ wazuh_manager_start_timeout_sec | default(600) }}
+      TimeoutStopSec={{ wazuh_manager_stop_timeout_sec | default(180) }}
+      KillMode=control-group
+      SendSIGKILL=yes
+  notify: Restart wazuh-manager
+
+- name: Reload systemd after Wazuh manager override changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Deploy Wazuh manager ossec.conf
+  ansible.builtin.template:
+    src: "{{ wazuh_effective_templates_dir }}/ossec.conf.j2"
+    dest: /var/ossec/etc/ossec.conf
+    owner: root
+    group: wazuh
+    mode: "0640"
+    backup: true
+  no_log: "{{ wazuh_hide_sensitive_logs | default(true) }}"
+  notify: Restart wazuh-manager
+
+- name: Render hardened Wazuh cluster block
+  ansible.builtin.copy:
+    dest: /tmp/wazuh-cluster.block
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      <cluster>
+        <name>{{ wazuh_effective_cluster_name }}</name>
+        <node_name>{{ wazuh_effective_cluster_node_name }}</node_name>
+        <node_type>master</node_type>
+        <key>{{ wazuh_effective_cluster_key }}</key>
+        <port>{{ wazuh_cluster.port | default(1516) }}</port>
+        <bind_addr>{{ wazuh_cluster.bind_addr | default('0.0.0.0') }}</bind_addr>
+        <nodes>
+          <node>{{ wazuh_effective_cluster_master_address }}</node>
+        </nodes>
+        <hidden>{{ wazuh_cluster.hidden | default('no') }}</hidden>
+        <disabled>no</disabled>
+      </cluster>
+  no_log: true
+
+- name: Force known-good Wazuh cluster block into ossec.conf
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    python3 <<'PY'
+    from pathlib import Path
+    import re
+
+    ossec_path = Path("/var/ossec/etc/ossec.conf")
+    cluster_path = Path("/tmp/wazuh-cluster.block")
+
+    text = ossec_path.read_text()
+    cluster = cluster_path.read_text().rstrip()
+
+    updated, count = re.subn(
+        r"(?s)<cluster>.*?</cluster>",
+        cluster,
+        text,
+        count=1,
+    )
+
+    if count == 0:
+        updated = text.replace("</ossec_config>", f"{cluster}\n</ossec_config>", 1)
+
+    if updated != text:
+        ossec_path.write_text(updated)
+        print("changed=1")
+    else:
+        print("changed=0")
+    PY
+  args:
+    executable: /bin/bash
+  register: wazuh_cluster_block_enforce
+  changed_when: "'changed=1' in (wazuh_cluster_block_enforce.stdout | default(''))"
+  no_log: true
+  notify: Restart wazuh-manager
+
+- name: Remove temporary Wazuh cluster block
+  ansible.builtin.file:
+    path: /tmp/wazuh-cluster.block
+    state: absent
+  no_log: true
+
+- name: Ensure rendered ossec.conf ownership and permissions are correct after cluster enforcement
+  ansible.builtin.file:
+    path: /var/ossec/etc/ossec.conf
+    state: file
+    owner: root
+    group: wazuh
+    mode: "0640"
+
 - name: Ensure Wazuh API auth directory exists
   ansible.builtin.file:
     path: "{{ wazuh_api_users_file | dirname }}"
@@ -275,30 +1187,567 @@
 
 - name: Deploy Wazuh API users file
   ansible.builtin.template:
-    src: "{{ role_path }}/../../templates/wazuh/api-users.j2"
+    src: "{{ wazuh_effective_templates_dir }}/api-users.j2"
     dest: "{{ wazuh_api_users_file }}"
     owner: root
     group: wazuh
     mode: "0640"
+  no_log: "{{ wazuh_hide_sensitive_logs | default(true) }}"
   notify: Restart wazuh-manager
 
-- name: Ensure Wazuh manager service is enabled and started
+- name: Locate Wazuh CDB makelists utility
+  ansible.builtin.find:
+    paths:
+      - "{{ wazuh_install_dir }}/bin"
+      - "{{ wazuh_install_dir }}"
+    patterns:
+      - ossec-makelists
+      - wazuh-makelists
+    recurse: true
+    file_type: file
+  register: wazuh_makelists_find
+
+- name: Set Wazuh makelists path when available
+  ansible.builtin.set_fact:
+    wazuh_makelists_path: "{{ (wazuh_makelists_find.files | map(attribute='path') | list | first) | default('') }}"
+
+- name: Compile Wazuh CDB lists with safe ownership
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    if [ -z "{{ wazuh_makelists_path }}" ]; then
+      echo "No makelists utility found."
+      exit 0
+    fi
+
+    "{{ wazuh_makelists_path }}" -F
+
+    if [ -d "{{ wazuh_install_dir }}/etc/lists" ]; then
+      find "{{ wazuh_install_dir }}/etc/lists" -type d -exec chown root:wazuh {} +
+      find "{{ wazuh_install_dir }}/etc/lists" -type d -exec chmod 2770 {} +
+      find "{{ wazuh_install_dir }}/etc/lists" -type f -exec chown root:wazuh {} +
+      find "{{ wazuh_install_dir }}/etc/lists" -type f -exec chmod 0660 {} +
+    fi
+
+    echo "changed=1"
+  args:
+    executable: /bin/bash
+  register: wazuh_makelists_result
+  changed_when: "'changed=1' in (wazuh_makelists_result.stdout | default(''))"
+  when: wazuh_makelists_path | length > 0
+  notify: Restart wazuh-manager
+
+- name: Print makelists missing notice
+  ansible.builtin.debug:
+    msg: >-
+      No Wazuh makelists utility was found under {{ wazuh_install_dir }}.
+      Wazuh analysisd will attempt to build/load configured CDB lists during startup.
+  when: wazuh_makelists_path | length == 0
+
+- name: Find Wazuh generated CDB artifacts
+  ansible.builtin.find:
+    paths: "{{ wazuh_install_dir }}/etc/lists"
+    patterns:
+      - "*.cdb"
+      - "*.tmp"
+    recurse: true
+    file_type: file
+  register: wazuh_generated_cdb_artifacts
+
+- name: Ensure Wazuh generated CDB artifact permissions are correct
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: file
+    owner: root
+    group: wazuh
+    mode: "{{ (wazuh_cdb_lists | default({})).file_mode | default(wazuh_cdb_list_file_mode | default('0660')) }}"
+  loop: "{{ wazuh_generated_cdb_artifacts.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - wazuh_generated_cdb_artifacts.files | length > 0
+
+- name: Validate rendered Wazuh ossec.conf does not contain known invalid blocks
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    if grep -Eq '<task-manager>|</task-manager>' /var/ossec/etc/ossec.conf; then
+      echo "Invalid <task-manager> block found in /var/ossec/etc/ossec.conf"
+      exit 1
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Validate rendered Wazuh cluster block is minimal and valid
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    cluster_block="$(awk '
+      /<cluster>/ {show=1}
+      show {print}
+      /<\/cluster>/ {show=0}
+    ' /var/ossec/etc/ossec.conf)"
+
+    printf '%s\n' "${cluster_block}" | grep -q '<node_type>master</node_type>'
+    printf '%s\n' "${cluster_block}" | grep -q '<disabled>no</disabled>'
+    printf '%s\n' "${cluster_block}" | grep -Eq '<key>[A-Za-z0-9]{32}</key>'
+    printf '%s\n' "${cluster_block}" | grep -q '<nodes>'
+    printf '%s\n' "${cluster_block}" | grep -q '<node>{{ wazuh_effective_cluster_master_address }}</node>'
+
+    if printf '%s\n' "${cluster_block}" | grep -q '<haproxy_helper>'; then
+      echo "Invalid for this deployment: haproxy_helper is still rendered in cluster block."
+      exit 1
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  no_log: "{{ wazuh_hide_sensitive_logs | default(true) }}"
+
+- name: Validate Wazuh analysisd configuration
+  ansible.builtin.command: "{{ wazuh_install_dir }}/bin/wazuh-analysisd -t"
+  register: wazuh_analysisd_validate
+  changed_when: false
+
+- name: Validate Wazuh csyslogd configuration
+  ansible.builtin.command: "{{ wazuh_install_dir }}/bin/wazuh-csyslogd -t"
+  register: wazuh_csyslogd_validate
+  changed_when: false
+
+- name: Validate Wazuh cluster configuration
+  ansible.builtin.command: "{{ wazuh_install_dir }}/bin/wazuh-clusterd -t"
+  register: wazuh_clusterd_validate
+  changed_when: false
+  when:
+    - wazuh_cluster.enabled | default(true) | bool
+    - wazuh_cluster.disabled | default('no') | string == 'no'
+
+- name: Stop Wazuh manager before final service start
   ansible.builtin.systemd:
-    name: "{{ wazuh_manager_service_name }}"
-    state: started
+    name: "{{ wazuh_effective_manager_service_name }}"
+    state: stopped
     enabled: true
+  failed_when: false
+
+- name: Kill stale Wazuh daemons left by failed starts
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    changed=0
+
+    systemctl stop "{{ wazuh_effective_manager_service_name }}" >/dev/null 2>&1 || true
+    systemctl kill --kill-who=all "{{ wazuh_effective_manager_service_name }}" >/dev/null 2>&1 || true
+
+    for process_name in \
+      wazuh-db \
+      wazuh-execd \
+      wazuh-syscheckd \
+      wazuh-analysisd \
+      wazuh-remoted \
+      wazuh-logcollector \
+      wazuh-monitord \
+      wazuh-modulesd \
+      wazuh-clusterd \
+      wazuh-authd \
+      wazuh-csyslogd \
+      wazuh-integratord; do
+      if pgrep -x "${process_name}" >/dev/null 2>&1; then
+        changed=1
+        pkill -TERM -x "${process_name}" || true
+      fi
+    done
+
+    pkill -TERM -f '^/var/ossec/bin/(wazuh|ossec)-' || true
+    sleep 5
+
+    for process_name in \
+      wazuh-db \
+      wazuh-execd \
+      wazuh-syscheckd \
+      wazuh-analysisd \
+      wazuh-remoted \
+      wazuh-logcollector \
+      wazuh-monitord \
+      wazuh-modulesd \
+      wazuh-clusterd \
+      wazuh-authd \
+      wazuh-csyslogd \
+      wazuh-integratord; do
+      if pgrep -x "${process_name}" >/dev/null 2>&1; then
+        changed=1
+        pkill -KILL -x "${process_name}" || true
+      fi
+    done
+
+    pkill -KILL -f '^/var/ossec/bin/(wazuh|ossec)-' || true
+    sleep 2
+
+    systemctl reset-failed "{{ wazuh_effective_manager_service_name }}" || true
+
+    echo "changed=${changed}"
+  args:
+    executable: /bin/bash
+  register: wazuh_stale_process_cleanup
+  changed_when: "'changed=1' in (wazuh_stale_process_cleanup.stdout | default(''))"
+
+- name: Validate dashboard report header and footer text constraints
+  ansible.builtin.assert:
+    that:
+      - (wazuh_dashboard_customization_report_header | default('') | string).split('\n') | length <= 3
+      - (([0] + ((wazuh_dashboard_customization_report_header | default('') | string).split('\n') | map('length') | list)) | max) <= 40
+      - (wazuh_dashboard_customization_report_footer | default('') | string).split('\n') | length <= 2
+      - (([0] + ((wazuh_dashboard_customization_report_footer | default('') | string).split('\n') | map('length') | list)) | max) <= 50
+    fail_msg: >-
+      Dashboard report text constraints violated. Header supports up to 3 lines and 40 chars per line.
+      Footer supports up to 2 lines and 50 chars per line.
+  when:
+    - wazuh_dashboard_customization_enabled | default(false) | bool
+
+- name: Verify dashboard customization logo exists on control node
+  ansible.builtin.stat:
+    path: "{{ wazuh_dashboard_custom_logo_src }}"
+  register: wazuh_dashboard_custom_logo_src_stat
+  delegate_to: localhost
+  become: false
+  when:
+    - wazuh_dashboard_customization_enabled | default(false) | bool
+    - wazuh_dashboard_custom_logo_src is defined
+
+- name: Assert dashboard customization logo exists on control node
+  ansible.builtin.assert:
+    that:
+      - wazuh_dashboard_custom_logo_src_stat.stat.exists
+    fail_msg: >-
+      Dashboard customization logo source file was not found at {{ wazuh_dashboard_custom_logo_src }}.
+  when:
+    - wazuh_dashboard_customization_enabled | default(false) | bool
+    - wazuh_dashboard_custom_logo_src is defined
+
+- name: Ensure Wazuh dashboard custom logo asset directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_dashboard_custom_assets_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - wazuh_dashboard_customization_enabled | default(false) | bool
+    - wazuh_dashboard_custom_assets_dir is defined
+
+- name: Install custom logo assets for Wazuh app, healthcheck, and reports
+  ansible.builtin.copy:
+    src: "{{ wazuh_dashboard_custom_logo_src }}"
+    dest: "{{ wazuh_dashboard_custom_assets_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - "{{ wazuh_dashboard_customization_app_logo_filename | default('customization.logo.app.png') }}"
+    - "{{ wazuh_dashboard_customization_healthcheck_logo_filename | default('customization.logo.healthcheck.png') }}"
+    - "{{ wazuh_dashboard_customization_reports_logo_filename | default('customization.logo.reports.png') }}"
+  notify: Restart wazuh-dashboard
+  when:
+    - wazuh_dashboard_customization_enabled | default(false) | bool
+    - wazuh_dashboard_custom_logo_src is defined
+    - wazuh_dashboard_custom_assets_dir is defined
+
+- name: Detect Wazuh dashboard runtime user and group
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    service_user="$(systemctl show -p User --value "{{ wazuh_effective_dashboard_service_name }}" 2>/dev/null || true)"
+
+    if [ -z "${service_user}" ] || [ "${service_user}" = "root" ]; then
+      for candidate in wazuh-dashboard opensearch-dashboards; do
+        if id "${candidate}" >/dev/null 2>&1; then
+          service_user="${candidate}"
+          break
+        fi
+      done
+    fi
+
+    if [ -z "${service_user}" ]; then
+      service_user="$(ps -eo user:32,comm,args | awk '/opensearch-dashboards|wazuh-dashboard/ && !/awk/ {print $1; exit}')"
+    fi
+
+    if [ -z "${service_user}" ]; then
+      service_user="wazuh-dashboard"
+    fi
+
+    service_group="$(id -gn "${service_user}" 2>/dev/null || true)"
+
+    if [ -z "${service_group}" ]; then
+      service_group="${service_user}"
+    fi
+
+    printf '%s:%s\n' "${service_user}" "${service_group}"
+  args:
+    executable: /bin/bash
+  register: wazuh_dashboard_runtime_identity
+  changed_when: false
+
+- name: Set Wazuh dashboard runtime ownership facts
+  ansible.builtin.set_fact:
+    wazuh_dashboard_runtime_user: "{{ (wazuh_dashboard_runtime_identity.stdout | trim).split(':')[0] }}"
+    wazuh_dashboard_runtime_group: "{{ (wazuh_dashboard_runtime_identity.stdout | trim).split(':')[1] }}"
+
+- name: Ensure Wazuh dashboard app config directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_effective_dashboard_app_config_file | dirname }}"
+    state: directory
+    owner: "{{ wazuh_dashboard_runtime_user }}"
+    group: "{{ wazuh_dashboard_runtime_group }}"
+    mode: "0750"
+
+- name: Ensure Wazuh dashboard app config file exists
+  ansible.builtin.copy:
+    dest: "{{ wazuh_effective_dashboard_app_config_file }}"
+    content: ""
+    force: false
+    owner: "{{ wazuh_dashboard_runtime_user }}"
+    group: "{{ wazuh_dashboard_runtime_group }}"
+    mode: "0640"
+
+- name: Sanitize and persist Wazuh dashboard customization settings as valid YAML
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    config_file="{{ wazuh_effective_dashboard_app_config_file }}"
+
+    python3 <<'PY'
+    from pathlib import Path
+    import json
+    import re
+
+    path = Path("{{ wazuh_effective_dashboard_app_config_file }}")
+
+    if path.exists():
+        original_lines = path.read_text(errors="replace").splitlines()
+    else:
+        original_lines = []
+
+    customization_key_re = re.compile(
+        r"^\s*customization\.(enabled|logo\.app|logo\.healthcheck|logo\.reports|reports\.header|reports\.footer)\s*:"
+    )
+    top_level_key_re = re.compile(r"^[A-Za-z0-9_.-]+\s*:")
+
+    cleaned_lines = []
+    skipping_broken_customization_value = False
+
+    for line in original_lines:
+        stripped = line.strip()
+
+        if customization_key_re.match(line):
+            skipping_broken_customization_value = True
+            continue
+
+        if skipping_broken_customization_value:
+            if stripped == "":
+                skipping_broken_customization_value = False
+                continue
+
+            if top_level_key_re.match(line) or stripped.startswith("#"):
+                skipping_broken_customization_value = False
+                cleaned_lines.append(line)
+                continue
+
+            continue
+
+        cleaned_lines.append(line)
+
+    while cleaned_lines and cleaned_lines[-1].strip() == "":
+        cleaned_lines.pop()
+
+    enabled = {{ (wazuh_dashboard_customization_enabled | default(false) | bool) | ternary('True', 'False') }}
+
+    header = {{ (wazuh_dashboard_customization_report_header | default('') | string) | to_json }}
+    footer = {{ (wazuh_dashboard_customization_report_footer | default('') | string) | to_json }}
+
+    header = header.replace("\r\n", "\n").replace("\r", "\n")
+    footer = footer.replace("\r\n", "\n").replace("\r", "\n")
+
+    header_lines = header.split("\n")[:3]
+    footer_lines = footer.split("\n")[:2]
+
+    header = "\n".join(line[:40] for line in header_lines).strip()
+    footer = "\n".join(line[:50] for line in footer_lines).strip()
+
+    if not header:
+        header = " "
+
+    if not footer:
+        footer = " "
+
+    settings = {
+        "customization.enabled": enabled,
+        "customization.logo.app": "custom/images/{{ wazuh_dashboard_customization_app_logo_filename | default('customization.logo.app.png') }}",
+        "customization.logo.healthcheck": "custom/images/{{ wazuh_dashboard_customization_healthcheck_logo_filename | default('customization.logo.healthcheck.png') }}",
+        "customization.logo.reports": "custom/images/{{ wazuh_dashboard_customization_reports_logo_filename | default('customization.logo.reports.png') }}",
+        "customization.reports.header": header,
+        "customization.reports.footer": footer,
+    }
+
+    cleaned_lines.append("")
+    cleaned_lines.append("# Custom branding - managed by Ansible")
+
+    for key, value in settings.items():
+        cleaned_lines.append(f"{key}: {json.dumps(value, ensure_ascii=False)}")
+
+    path.write_text("\n".join(cleaned_lines).rstrip() + "\n")
+    PY
+
+    chown "{{ wazuh_dashboard_runtime_user }}:{{ wazuh_dashboard_runtime_group }}" "${config_file}"
+    chmod 0640 "${config_file}"
+  args:
+    executable: /bin/bash
+  changed_when: true
+  notify: Restart wazuh-dashboard
+
+- name: Ensure Wazuh dashboard data tree ownership is readable by dashboard runtime user
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    data_dir="{{ wazuh_effective_dashboard_data_dir }}"
+
+    if [ -d "${data_dir}" ]; then
+      chown -R "{{ wazuh_dashboard_runtime_user }}:{{ wazuh_dashboard_runtime_group }}" "${data_dir}"
+      find "${data_dir}" -type d -exec chmod 0750 {} \;
+      find "${data_dir}" -type f -exec chmod 0640 {} \;
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  notify: Restart wazuh-dashboard
+
+- name: Ensure Wazuh dashboard app config file permissions are correct
+  ansible.builtin.file:
+    path: "{{ wazuh_effective_dashboard_app_config_file }}"
+    state: file
+    owner: "{{ wazuh_dashboard_runtime_user }}"
+    group: "{{ wazuh_dashboard_runtime_group }}"
+    mode: "0640"
+  notify: Restart wazuh-dashboard
 
 - name: Ensure Wazuh indexer service is enabled and started
   ansible.builtin.systemd:
-    name: "{{ wazuh_indexer_service_name }}"
+    name: "{{ wazuh_effective_indexer_service_name }}"
     state: started
     enabled: true
 
+- name: Ensure Wazuh manager service is enabled and started
+  block:
+    - name: Start Wazuh manager service
+      ansible.builtin.systemd:
+        name: "{{ wazuh_effective_manager_service_name }}"
+        state: started
+        enabled: true
+
+  rescue:
+    - name: Capture Wazuh manager service status after failed start
+      ansible.builtin.command: systemctl status {{ wazuh_effective_manager_service_name }} --no-pager -n 120 -l
+      register: wazuh_manager_failed_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Wazuh manager journal after failed start
+      ansible.builtin.command: journalctl -xeu {{ wazuh_effective_manager_service_name }} --no-pager -n 160
+      register: wazuh_manager_failed_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Wazuh ossec.log after failed start
+      ansible.builtin.command: tail -n 160 {{ wazuh_install_dir }}/logs/ossec.log
+      register: wazuh_manager_failed_ossec_log
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Wazuh cluster.log after failed start
+      ansible.builtin.command: tail -n 160 {{ wazuh_install_dir }}/logs/cluster.log
+      register: wazuh_manager_failed_cluster_log
+      changed_when: false
+      failed_when: false
+
+    - name: Print Wazuh manager failed service status
+      ansible.builtin.debug:
+        var: wazuh_manager_failed_status.stdout_lines
+
+    - name: Print Wazuh manager failed journal
+      ansible.builtin.debug:
+        var: wazuh_manager_failed_journal.stdout_lines
+
+    - name: Print Wazuh ossec.log tail
+      ansible.builtin.debug:
+        var: wazuh_manager_failed_ossec_log.stdout_lines
+
+    - name: Print Wazuh cluster.log tail
+      ansible.builtin.debug:
+        var: wazuh_manager_failed_cluster_log.stdout_lines
+
+    - name: Fail Wazuh manager start with captured diagnostics
+      ansible.builtin.fail:
+        msg: >-
+          Wazuh manager failed to start. Review the printed systemctl, journalctl,
+          ossec.log, and cluster.log output above. The rendered config has already
+          been validated with wazuh-analysisd, wazuh-csyslogd, and wazuh-clusterd.
+
 - name: Ensure Wazuh dashboard service is enabled and started
-  ansible.builtin.systemd:
-    name: "{{ wazuh_dashboard_service_name }}"
-    state: started
-    enabled: true
+  block:
+    - name: Start Wazuh dashboard service
+      ansible.builtin.systemd:
+        name: "{{ wazuh_effective_dashboard_service_name }}"
+        state: started
+        enabled: true
+
+  rescue:
+    - name: Capture Wazuh dashboard service status after failed start
+      ansible.builtin.command: systemctl status {{ wazuh_effective_dashboard_service_name }} --no-pager -n 120 -l
+      register: wazuh_dashboard_failed_status
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Wazuh dashboard journal after failed start
+      ansible.builtin.command: journalctl -xeu {{ wazuh_effective_dashboard_service_name }} --no-pager -n 160
+      register: wazuh_dashboard_failed_journal
+      changed_when: false
+      failed_when: false
+
+    - name: Capture Wazuh dashboard app config permissions after failed start
+      ansible.builtin.command: >-
+        ls -ld
+        {{ wazuh_effective_dashboard_data_dir }}
+        {{ wazuh_effective_dashboard_app_config_file | dirname }}
+        {{ wazuh_effective_dashboard_app_config_file }}
+      register: wazuh_dashboard_failed_permissions
+      changed_when: false
+      failed_when: false
+
+    - name: Print Wazuh dashboard failed service status
+      ansible.builtin.debug:
+        var: wazuh_dashboard_failed_status.stdout_lines
+
+    - name: Print Wazuh dashboard failed journal
+      ansible.builtin.debug:
+        var: wazuh_dashboard_failed_journal.stdout_lines
+
+    - name: Print Wazuh dashboard config permissions
+      ansible.builtin.debug:
+        var: wazuh_dashboard_failed_permissions.stdout_lines
+
+    - name: Fail Wazuh dashboard start with captured diagnostics
+      ansible.builtin.fail:
+        msg: >-
+          Wazuh dashboard failed to start. Review the printed systemctl, journalctl,
+          and dashboard config file permissions above.
+
+- name: Verify Wazuh manager status after start
+  ansible.builtin.command: "{{ wazuh_install_dir }}/bin/wazuh-control status"
+  register: wazuh_manager_status
+  changed_when: false
+  failed_when: false
+
+- name: Print Wazuh manager status
+  ansible.builtin.debug:
+    var: wazuh_manager_status.stdout_lines
 
 - name: Expose Wazuh manager ports in UFW when available
   community.general.ufw:
@@ -309,5 +1758,6 @@
     - "{{ wazuh_dashboard_bind_port | string }}"
     - "1514"
     - "1515"
+    - "1516"
     - "{{ wazuh_api_bind_port | string }}"
   failed_when: false

@@ -1,0 +1,606 @@
+<!--
+  Ansible/templates/wazuh/ossec.conf.j2
+  Managed by Ansible. Do not edit on the host.
+
+  Wazuh manager role: {{ wazuh_manager.role | default(wazuh_cluster.node_type | default('master')) }}
+  Wazuh node name: {{ wazuh_cluster.node_name | default(wazuh_manager.name | default('wazuh-master-01')) }}
+  Environment: {{ wazuh_manager.environment | default('production') }}
+  Organization: {{ wazuh_manager.organization | default('SinLess Games LLC') }}
+  Compliance scope: {{ wazuh_compliance_profiles | default([]) | join(', ') }}
+  Authd password file: {{ wazuh_auth.password_file | default('/var/ossec/etc/authd.pass') }}
+-->
+<ossec_config>
+
+  <!-- Global manager behavior -->
+  <global>
+    <jsonout_output>{{ wazuh_global.jsonout_output | default('yes') }}</jsonout_output>
+    <alerts_log>{{ wazuh_global.alerts_log | default('yes') }}</alerts_log>
+    <logall>{{ wazuh_global.logall | default('no') }}</logall>
+    <logall_json>{{ wazuh_global.logall_json | default('no') }}</logall_json>
+    <email_notification>{{ wazuh_global.email_notification | default('no') }}</email_notification>
+    <smtp_server>{{ wazuh_global.smtp_server | default('localhost') | e }}</smtp_server>
+    <email_from>{{ wazuh_global.email_from | default('wazuh@localhost') | e }}</email_from>
+{% for email in wazuh_global.email_to | default([]) %}
+    <email_to>{{ email | e }}</email_to>
+{% endfor %}
+    <email_maxperhour>{{ wazuh_global.email_maxperhour | default(12) }}</email_maxperhour>
+{% for item in wazuh_global.white_list | default([]) %}
+    <white_list>{{ item | e }}</white_list>
+{% endfor %}
+  </global>
+
+  <alerts>
+    <log_alert_level>{{ wazuh_alerts.log_alert_level | default(3) }}</log_alert_level>
+    <email_alert_level>{{ wazuh_alerts.email_alert_level | default(12) }}</email_alert_level>
+  </alerts>
+
+  <logging>
+    <log_format>{{ wazuh_logging.log_format | default('plain') }}</log_format>
+  </logging>
+
+  <!-- Wazuh indexer connection used by inventory/vulnerability workflows. -->
+{% if wazuh_indexer.enabled | default(false) | bool %}
+  <indexer>
+    <enabled>yes</enabled>
+    <hosts>
+{% for host in wazuh_indexer.hosts | default([]) %}
+      <host>{{ host | e }}</host>
+{% endfor %}
+    </hosts>
+{% if wazuh_indexer.ssl is defined %}
+    <ssl>
+{% if wazuh_indexer.ssl.certificate_authorities is defined and wazuh_indexer.ssl.certificate_authorities | length > 0 %}
+      <certificate_authorities>
+{% for ca in wazuh_indexer.ssl.certificate_authorities | default([]) %}
+        <ca>{{ ca | e }}</ca>
+{% endfor %}
+      </certificate_authorities>
+{% endif %}
+{% if wazuh_indexer.ssl.certificate is defined %}
+      <certificate>{{ wazuh_indexer.ssl.certificate | e }}</certificate>
+{% endif %}
+{% if wazuh_indexer.ssl.key is defined %}
+      <key>{{ wazuh_indexer.ssl.key | e }}</key>
+{% endif %}
+    </ssl>
+{% endif %}
+  </indexer>
+{% else %}
+  <indexer>
+    <enabled>no</enabled>
+  </indexer>
+{% endif %}
+
+  <!-- Receive security events from Wazuh agents and worker managers. -->
+{% if wazuh_remote.secure.enabled | default(true) | bool %}
+  <remote>
+    <connection>{{ wazuh_remote.secure.connection | default('secure') }}</connection>
+    <port>{{ wazuh_remote.secure.port | default(1514) }}</port>
+    <protocol>{{ wazuh_remote.secure.protocol | default('tcp,udp') }}</protocol>
+{% for allowed_ip in wazuh_remote.secure.allowed_ips | default([]) %}
+    <allowed-ips>{{ allowed_ip | e }}</allowed-ips>
+{% endfor %}
+{% for denied_ip in wazuh_remote.secure.denied_ips | default([]) %}
+    <denied-ips>{{ denied_ip | e }}</denied-ips>
+{% endfor %}
+{% if wazuh_remote.secure.local_ip is defined %}
+    <local_ip>{{ wazuh_remote.secure.local_ip | e }}</local_ip>
+{% endif %}
+{% if wazuh_remote.secure.ipv6 is defined %}
+    <ipv6>{{ wazuh_remote.secure.ipv6 }}</ipv6>
+{% endif %}
+    <queue_size>{{ wazuh_remote.secure.queue_size | default(131072) }}</queue_size>
+    <rids_closing_time>{{ wazuh_remote.secure.rids_closing_time | default('5m') }}</rids_closing_time>
+    <connection_overtake_time>{{ wazuh_remote.secure.connection_overtake_time | default(600) }}</connection_overtake_time>
+    <agents>
+      <allow_higher_versions>{{ wazuh_remote.secure.agents.allow_higher_versions | default('no') }}</allow_higher_versions>
+    </agents>
+  </remote>
+{% endif %}
+
+{% if wazuh_remote.syslog.enabled | default(false) | bool %}
+  <remote>
+    <connection>{{ wazuh_remote.syslog.connection | default('syslog') }}</connection>
+    <port>{{ wazuh_remote.syslog.port | default(514) }}</port>
+    <protocol>{{ wazuh_remote.syslog.protocol | default('tcp') }}</protocol>
+{% for allowed_ip in wazuh_remote.syslog.allowed_ips | default([]) %}
+    <allowed-ips>{{ allowed_ip | e }}</allowed-ips>
+{% endfor %}
+{% if wazuh_remote.syslog.local_ip is defined %}
+    <local_ip>{{ wazuh_remote.syslog.local_ip | e }}</local_ip>
+{% endif %}
+  </remote>
+{% endif %}
+
+  <!-- Agent enrollment service. The authd password is intentionally stored outside ossec.conf. -->
+{% if wazuh_auth.enabled | default(true) | bool %}
+  <auth>
+    <disabled>{{ wazuh_auth.disabled | default('no') }}</disabled>
+    <remote_enrollment>{{ wazuh_auth.remote_enrollment | default('yes') }}</remote_enrollment>
+    <port>{{ wazuh_auth.port | default(1515) }}</port>
+{% if wazuh_auth.ipv6 is defined %}
+    <ipv6>{{ wazuh_auth.ipv6 }}</ipv6>
+{% endif %}
+    <use_source_ip>{{ wazuh_auth.use_source_ip | default('no') }}</use_source_ip>
+    <force>
+      <enabled>{{ wazuh_auth.force.enabled | default('yes') }}</enabled>
+      <disconnected_time enabled="{{ wazuh_auth.force.disconnected_time.enabled | default('yes') }}">{{ wazuh_auth.force.disconnected_time.value | default('1h') }}</disconnected_time>
+      <after_registration_time>{{ wazuh_auth.force.after_registration_time | default('1h') }}</after_registration_time>
+      <key_mismatch>{{ wazuh_auth.force.key_mismatch | default('yes') }}</key_mismatch>
+    </force>
+    <purge>{{ wazuh_auth.purge | default('yes') }}</purge>
+    <use_password>{{ wazuh_auth.use_password | default('yes') }}</use_password>
+    <ciphers>{{ wazuh_auth.ciphers | default('HIGH:!ADH:!EXP:!MD5:!RC4:!3DES:!CAMELLIA:@STRENGTH') | e }}</ciphers>
+{% if wazuh_auth.ssl_agent_ca is defined and wazuh_auth.ssl_agent_ca | length > 0 %}
+    <ssl_agent_ca>{{ wazuh_auth.ssl_agent_ca | e }}</ssl_agent_ca>
+{% endif %}
+    <ssl_verify_host>{{ wazuh_auth.ssl_verify_host | default('no') }}</ssl_verify_host>
+    <ssl_manager_cert>{{ wazuh_auth.ssl_manager_cert | default('etc/sslmanager.cert') | e }}</ssl_manager_cert>
+    <ssl_manager_key>{{ wazuh_auth.ssl_manager_key | default('etc/sslmanager.key') | e }}</ssl_manager_key>
+    <ssl_auto_negotiate>{{ wazuh_auth.ssl_auto_negotiate | default('no') }}</ssl_auto_negotiate>
+{% if wazuh_auth.key_request is defined %}
+    <key_request>
+      <enabled>{{ wazuh_auth.key_request.enabled | default('no') }}</enabled>
+{% if wazuh_auth.key_request.exec_path is defined and wazuh_auth.key_request.exec_path | length > 0 %}
+      <exec_path>{{ wazuh_auth.key_request.exec_path | e }}</exec_path>
+{% endif %}
+{% if wazuh_auth.key_request.socket is defined and wazuh_auth.key_request.socket | length > 0 %}
+      <socket>{{ wazuh_auth.key_request.socket | e }}</socket>
+{% endif %}
+{% if wazuh_auth.key_request.timeout is defined %}
+      <timeout>{{ wazuh_auth.key_request.timeout }}</timeout>
+{% endif %}
+{% if wazuh_auth.key_request.threads is defined %}
+      <threads>{{ wazuh_auth.key_request.threads }}</threads>
+{% endif %}
+{% if wazuh_auth.key_request.queue_size is defined %}
+      <queue_size>{{ wazuh_auth.key_request.queue_size }}</queue_size>
+{% endif %}
+    </key_request>
+{% endif %}
+{% if wazuh_auth.agents is defined or wazuh_remote.secure.agents is defined %}
+    <agents>
+      <allow_higher_versions>{{ wazuh_auth.agents.allow_higher_versions | default(wazuh_remote.secure.agents.allow_higher_versions | default('no')) }}</allow_higher_versions>
+    </agents>
+{% endif %}
+{% if wazuh_auth.agent_auto_registration is defined and wazuh_auth.agent_auto_registration.enabled | default('no') | bool %}
+    <!--
+      agent_auto_registration metadata from group_vars:
+        group={{ wazuh_auth.agent_auto_registration.group | default('default') }}
+        password_file={{ wazuh_auth.password_file | default('/var/ossec/etc/authd.pass') }}
+      Wazuh authd reads the enrollment password from authd.pass when use_password=yes.
+      Do not render wazuh_auth.agent_auto_registration.password into ossec.conf.
+      Put agents into groups through agent-side enrollment groups, the Wazuh API, or agent_groups automation.
+    -->
+{% endif %}
+  </auth>
+{% endif %}
+
+  <!-- Cluster master configuration. Kubernetes worker managers should use node_type worker and this master address. -->
+{% if wazuh_cluster.enabled | default(true) | bool %}
+  <cluster>
+    <name>{{ wazuh_cluster.name | default('wazuh') | e }}</name>
+    <node_name>{{ wazuh_cluster.node_name | default(wazuh_manager.name | default('wazuh-master-01')) | e }}</node_name>
+    <node_type>{{ wazuh_cluster.node_type | default('master') }}</node_type>
+    <key>{{ wazuh_cluster.key | default('ChangeMeChangeMeChangeMeChangeMe') | e }}</key>
+    <port>{{ wazuh_cluster.port | default(1516) }}</port>
+    <bind_addr>{{ wazuh_cluster.bind_addr | default('0.0.0.0') | e }}</bind_addr>
+    <nodes>
+{% for node in wazuh_cluster.nodes | default(['wazuh-master.local.sinlessgamesllc.com']) %}
+      <node>{{ node | e }}</node>
+{% endfor %}
+    </nodes>
+    <hidden>{{ wazuh_cluster.hidden | default('no') }}</hidden>
+    <disabled>{{ wazuh_cluster.disabled | default('no') }}</disabled>
+{% if wazuh_cluster.haproxy_helper.enabled | default(false) | bool %}
+    <haproxy_helper>
+      <haproxy_disabled>{{ wazuh_cluster.haproxy_helper.haproxy_disabled | default('no') }}</haproxy_disabled>
+      <haproxy_address>{{ wazuh_cluster.haproxy_helper.haproxy_address | e }}</haproxy_address>
+      <haproxy_user>{{ wazuh_cluster.haproxy_helper.haproxy_user | e }}</haproxy_user>
+      <haproxy_password>{{ wazuh_cluster.haproxy_helper.haproxy_password | e }}</haproxy_password>
+      <haproxy_port>{{ wazuh_cluster.haproxy_helper.haproxy_port | default(5555) }}</haproxy_port>
+      <haproxy_protocol>{{ wazuh_cluster.haproxy_helper.haproxy_protocol | default('http') }}</haproxy_protocol>
+{% if wazuh_cluster.haproxy_helper.haproxy_cert is defined and wazuh_cluster.haproxy_helper.haproxy_cert | length > 0 %}
+      <haproxy_cert>{{ wazuh_cluster.haproxy_helper.haproxy_cert | e }}</haproxy_cert>
+{% endif %}
+{% if wazuh_cluster.haproxy_helper.client_cert is defined and wazuh_cluster.haproxy_helper.client_cert | length > 0 %}
+      <client_cert>{{ wazuh_cluster.haproxy_helper.client_cert | e }}</client_cert>
+{% endif %}
+{% if wazuh_cluster.haproxy_helper.client_cert_key is defined and wazuh_cluster.haproxy_helper.client_cert_key | length > 0 %}
+      <client_cert_key>{{ wazuh_cluster.haproxy_helper.client_cert_key | e }}</client_cert_key>
+{% endif %}
+{% if wazuh_cluster.haproxy_helper.client_cert_password is defined and wazuh_cluster.haproxy_helper.client_cert_password | length > 0 %}
+      <client_cert_password>{{ wazuh_cluster.haproxy_helper.client_cert_password | e }}</client_cert_password>
+{% endif %}
+      <haproxy_backend>{{ wazuh_cluster.haproxy_helper.haproxy_backend | default('wazuh_cluster') }}</haproxy_backend>
+{% if wazuh_cluster.haproxy_helper.haproxy_resolver is defined and wazuh_cluster.haproxy_helper.haproxy_resolver | length > 0 %}
+      <haproxy_resolver>{{ wazuh_cluster.haproxy_helper.haproxy_resolver | e }}</haproxy_resolver>
+{% endif %}
+{% if wazuh_cluster.haproxy_helper.excluded_nodes is defined and wazuh_cluster.haproxy_helper.excluded_nodes | length > 0 %}
+{% for excluded_node in wazuh_cluster.haproxy_helper.excluded_nodes %}
+      <excluded_nodes>{{ excluded_node | e }}</excluded_nodes>
+{% endfor %}
+{% endif %}
+      <frequency>{{ wazuh_cluster.haproxy_helper.frequency | default(60) }}</frequency>
+      <agent_chunk_size>{{ wazuh_cluster.haproxy_helper.agent_chunk_size | default(100) }}</agent_chunk_size>
+      <agent_reconnection_time>{{ wazuh_cluster.haproxy_helper.agent_reconnection_time | default(10) }}</agent_reconnection_time>
+      <agent_reconnection_stability_time>{{ wazuh_cluster.haproxy_helper.agent_reconnection_stability_time | default(60) }}</agent_reconnection_stability_time>
+      <imbalance_tolerance>{{ wazuh_cluster.haproxy_helper.imbalance_tolerance | default(0.1) }}</imbalance_tolerance>
+      <remove_disconnected_node_after>{{ wazuh_cluster.haproxy_helper.remove_disconnected_node_after | default(10) }}</remove_disconnected_node_after>
+    </haproxy_helper>
+{% endif %}
+  </cluster>
+{% endif %}
+
+  <!-- Rules, decoders, and CDB lists. The custom paths are synchronized from the master to workers. -->
+  <ruleset>
+{% for decoder_dir in wazuh_ruleset.default_decoders | default(['ruleset/decoders']) %}
+    <decoder_dir>{{ decoder_dir | e }}</decoder_dir>
+{% endfor %}
+{% for rule_dir in wazuh_ruleset.default_rules | default(['ruleset/rules']) %}
+    <rule_dir>{{ rule_dir | e }}</rule_dir>
+{% endfor %}
+{% for excluded in wazuh_ruleset.rule_exclude | default([]) %}
+    <rule_exclude>{{ excluded | e }}</rule_exclude>
+{% endfor %}
+{% for list in wazuh_ruleset.lists | default([]) %}
+    <list>{{ list | e }}</list>
+{% endfor %}
+{% for decoder_dir in wazuh_ruleset.custom_decoders | default(['etc/decoders']) %}
+    <decoder_dir>{{ decoder_dir | e }}</decoder_dir>
+{% endfor %}
+{% for rule_dir in wazuh_ruleset.custom_rules | default(['etc/rules']) %}
+    <rule_dir>{{ rule_dir | e }}</rule_dir>
+{% endfor %}
+  </ruleset>
+
+  <!-- Manager/VM local logs and optional PoC command monitors. Endpoint-wide config should usually live in agent.conf. -->
+{% for localfile in wazuh_localfiles | default([]) %}
+{% if localfile.enabled | default(true) | bool %}
+  <localfile>
+    <log_format>{{ localfile.log_format | default('syslog') }}</log_format>
+{% if localfile.location is defined %}
+    <location>{{ localfile.location | e }}</location>
+{% endif %}
+{% if localfile.command is defined %}
+    <command>{{ localfile.command | e }}</command>
+{% endif %}
+{% if localfile.alias is defined %}
+    <alias>{{ localfile.alias | e }}</alias>
+{% endif %}
+{% if localfile.frequency is defined %}
+    <frequency>{{ localfile.frequency }}</frequency>
+{% endif %}
+{% if localfile.only_future_events is defined %}
+    <only-future-events>{{ localfile.only_future_events }}</only-future-events>
+{% endif %}
+{% if localfile.query is defined and localfile.query | length > 0 %}
+    <query>{{ localfile.query | e }}</query>
+{% endif %}
+{% if localfile.target is defined and localfile.target | length > 0 %}
+    <target>{{ localfile.target | e }}</target>
+{% endif %}
+{% if localfile.out_format is defined and localfile.out_format | length > 0 %}
+    <out_format>{{ localfile.out_format | e }}</out_format>
+{% endif %}
+{% if localfile.ignore_binaries is defined %}
+    <ignore_binaries>{{ localfile.ignore_binaries }}</ignore_binaries>
+{% endif %}
+{% if localfile.age is defined and localfile.age | length > 0 %}
+    <age>{{ localfile.age }}</age>
+{% endif %}
+{% for exclude in localfile.exclude | default([]) %}
+    <exclude>{{ exclude | e }}</exclude>
+{% endfor %}
+{% if localfile.reconnect_time is defined %}
+    <reconnect_time>{{ localfile.reconnect_time }}</reconnect_time>
+{% endif %}
+{% if localfile.multiline_regex is defined and localfile.multiline_regex | length > 0 %}
+    <multiline_regex{% if localfile.multiline_regex_type is defined and localfile.multiline_regex_type | length > 0 %} type="{{ localfile.multiline_regex_type | e }}"{% endif %}>{{ localfile.multiline_regex | e }}</multiline_regex>
+{% endif %}
+{% for ignore in localfile.ignore | default([]) %}
+    <ignore{% if ignore.type is defined and ignore.type | length > 0 %} type="{{ ignore.type | e }}"{% endif %}>{{ ignore.value | default(ignore) | e }}</ignore>
+{% endfor %}
+{% for restrict in localfile.restrict | default([]) %}
+    <restrict{% if restrict.type is defined and restrict.type | length > 0 %} type="{{ restrict.type | e }}"{% endif %}>{{ restrict.value | default(restrict) | e }}</restrict>
+{% endfor %}
+{% for filter in localfile.filter | default([]) %}
+    <filter{% if filter.type is defined and filter.type | length > 0 %} type="{{ filter.type | e }}"{% endif %}>{{ filter.value | default(filter) | e }}</filter>
+{% endfor %}
+{% for label in localfile.labels | default([]) %}
+    <label key="{{ label.key | e }}">{{ label.value | e }}</label>
+{% endfor %}
+  </localfile>
+{% endif %}
+{% endfor %}
+
+  <!-- File Integrity Monitoring: PCI DSS 11.5, HIPAA, NIST SI-7, GDPR/TSC evidence. -->
+  <syscheck>
+    <disabled>{{ wazuh_syscheck.disabled | default('no') }}</disabled>
+    <frequency>{{ wazuh_syscheck.frequency | default(43200) }}</frequency>
+    <scan_on_start>{{ wazuh_syscheck.scan_on_start | default('yes') }}</scan_on_start>
+    <auto_ignore>{{ wazuh_syscheck.auto_ignore | default('no') }}</auto_ignore>
+    <alert_new_files>{{ wazuh_syscheck.alert_new_files | default('yes') }}</alert_new_files>
+    <remove_old_diff>{{ wazuh_syscheck.remove_old_diff | default('yes') }}</remove_old_diff>
+    <restart_audit>{{ wazuh_syscheck.restart_audit | default('yes') }}</restart_audit>
+{% if wazuh_syscheck.database is defined and wazuh_syscheck.database | length > 0 %}
+    <database>{{ wazuh_syscheck.database | e }}</database>
+{% endif %}
+{% if wazuh_syscheck.file_limit is defined %}
+    <file_limit>
+{% if wazuh_syscheck.file_limit.enabled is defined %}
+      <enabled>{{ wazuh_syscheck.file_limit.enabled }}</enabled>
+{% endif %}
+{% if wazuh_syscheck.file_limit.entries is defined %}
+      <entries>{{ wazuh_syscheck.file_limit.entries }}</entries>
+{% endif %}
+    </file_limit>
+{% endif %}
+{% if wazuh_syscheck.diff is defined %}
+    <diff>
+{% if wazuh_syscheck.diff.disk_quota is defined %}
+      <disk_quota>{{ wazuh_syscheck.diff.disk_quota }}</disk_quota>
+{% endif %}
+{% if wazuh_syscheck.diff.file_size is defined %}
+      <file_size>{{ wazuh_syscheck.diff.file_size }}</file_size>
+{% endif %}
+    </diff>
+{% endif %}
+{% for directory in wazuh_syscheck.directories | default([]) %}
+    <directories{% if directory.attributes is defined %}{% for key, value in directory.attributes.items() %} {{ key }}="{{ value }}"{% endfor %}{% endif %}>{{ directory.path | e }}</directories>
+{% endfor %}
+{% for ignore in wazuh_syscheck.ignores | default([]) %}
+    <ignore>{{ ignore | e }}</ignore>
+{% endfor %}
+{% for ignore in wazuh_syscheck.ignore_regex | default([]) %}
+    <ignore type="sregex">{{ ignore | e }}</ignore>
+{% endfor %}
+{% for nodiff in wazuh_syscheck.nodiff | default([]) %}
+    <nodiff>{{ nodiff | e }}</nodiff>
+{% endfor %}
+    <skip_nfs>{{ wazuh_syscheck.skip_nfs | default('yes') }}</skip_nfs>
+    <skip_dev>{{ wazuh_syscheck.skip_dev | default('yes') }}</skip_dev>
+    <skip_proc>{{ wazuh_syscheck.skip_proc | default('yes') }}</skip_proc>
+    <skip_sys>{{ wazuh_syscheck.skip_sys | default('yes') }}</skip_sys>
+    <process_priority>{{ wazuh_syscheck.process_priority | default(10) }}</process_priority>
+    <max_eps>{{ wazuh_syscheck.max_eps | default(50) }}</max_eps>
+    <synchronization>
+      <enabled>{{ wazuh_syscheck.synchronization.enabled | default('yes') }}</enabled>
+      <interval>{{ wazuh_syscheck.synchronization.interval | default('5m') }}</interval>
+      <max_eps>{{ wazuh_syscheck.synchronization.max_eps | default(10) }}</max_eps>
+    </synchronization>
+  </syscheck>
+
+  <!-- Rootkit, hidden process, hidden port, and trojan checks. -->
+  <rootcheck>
+    <disabled>{{ wazuh_rootcheck.disabled | default('no') }}</disabled>
+    <check_unixaudit>{{ wazuh_rootcheck.check_unixaudit | default('yes') }}</check_unixaudit>
+    <check_files>{{ wazuh_rootcheck.check_files | default('yes') }}</check_files>
+    <check_trojans>{{ wazuh_rootcheck.check_trojans | default('yes') }}</check_trojans>
+    <check_dev>{{ wazuh_rootcheck.check_dev | default('yes') }}</check_dev>
+    <check_sys>{{ wazuh_rootcheck.check_sys | default('yes') }}</check_sys>
+    <check_pids>{{ wazuh_rootcheck.check_pids | default('yes') }}</check_pids>
+    <check_ports>{{ wazuh_rootcheck.check_ports | default('yes') }}</check_ports>
+    <check_if>{{ wazuh_rootcheck.check_if | default('yes') }}</check_if>
+{% for ignore in wazuh_rootcheck.ignore_regex | default([]) %}
+    <ignore type="sregex">{{ ignore | e }}</ignore>
+{% endfor %}
+    <frequency>{{ wazuh_rootcheck.frequency | default(43200) }}</frequency>
+    <rootkit_files>{{ wazuh_rootcheck.rootkit_files | default('etc/shared/rootkit_files.txt') | e }}</rootkit_files>
+    <rootkit_trojans>{{ wazuh_rootcheck.rootkit_trojans | default('etc/shared/rootkit_trojans.txt') | e }}</rootkit_trojans>
+    <skip_nfs>{{ wazuh_rootcheck.skip_nfs | default('yes') }}</skip_nfs>
+  </rootcheck>
+
+  <!-- Security Configuration Assessment for compliance evidence. -->
+  <sca>
+    <enabled>{{ 'yes' if wazuh_sca.enabled | default(true) | bool else 'no' }}</enabled>
+    <scan_on_start>{{ wazuh_sca.scan_on_start | default('yes') }}</scan_on_start>
+    <interval>{{ wazuh_sca.interval | default('12h') }}</interval>
+    <skip_nfs>{{ wazuh_sca.skip_nfs | default('yes') }}</skip_nfs>
+  </sca>
+
+  <!-- Vulnerability detection. Requires Syscollector package inventory and indexer connectivity. -->
+  <vulnerability-detection>
+    <enabled>{{ 'yes' if wazuh_vulnerability_detection.enabled | default(true) | bool else 'no' }}</enabled>
+    <index-status>{{ wazuh_vulnerability_detection.index_status | default('yes') }}</index-status>
+    <feed-update-interval>{{ wazuh_vulnerability_detection.feed_update_interval | default('60m') }}</feed-update-interval>
+{% if wazuh_vulnerability_detection.offline_url is defined and wazuh_vulnerability_detection.offline_url | length > 0 %}
+    <offline-url>{{ wazuh_vulnerability_detection.offline_url | e }}</offline-url>
+{% endif %}
+  </vulnerability-detection>
+
+  <!-- System inventory for compliance, vulnerability detection, and investigations. -->
+  <wodle name="syscollector">
+    <disabled>{{ 'no' if wazuh_syscollector.enabled | default(true) | bool else 'yes' }}</disabled>
+    <interval>{{ wazuh_syscollector.interval | default('1h') }}</interval>
+    <scan_on_start>{{ wazuh_syscollector.scan_on_start | default('yes') }}</scan_on_start>
+    <hardware>{{ wazuh_syscollector.hardware | default('yes') }}</hardware>
+    <os>{{ wazuh_syscollector.os | default('yes') }}</os>
+    <network>{{ wazuh_syscollector.network | default('yes') }}</network>
+    <packages>{{ wazuh_syscollector.packages | default('yes') }}</packages>
+    <ports all="{{ wazuh_syscollector.ports.all | default('no') }}">{{ wazuh_syscollector.ports.enabled | default('yes') }}</ports>
+    <processes>{{ wazuh_syscollector.processes | default('yes') }}</processes>
+    <hotfixes>{{ wazuh_syscollector.hotfixes | default('yes') }}</hotfixes>
+    <users>{{ wazuh_syscollector.users | default('yes') }}</users>
+    <groups>{{ wazuh_syscollector.groups | default('yes') }}</groups>
+    <services>{{ wazuh_syscollector.services | default('yes') }}</services>
+    <browser_extensions>{{ wazuh_syscollector.browser_extensions | default('yes') }}</browser_extensions>
+    <synchronization>
+      <max_eps>{{ wazuh_syscollector.synchronization.max_eps | default(10) }}</max_eps>
+    </synchronization>
+  </wodle>
+
+  <!-- Docker event monitoring. Keep disabled on RKE2/containerd-only hosts. -->
+  <wodle name="docker-listener">
+    <interval>{{ wazuh_docker_listener.interval | default('10m') }}</interval>
+    <attempts>{{ wazuh_docker_listener.attempts | default(5) }}</attempts>
+    <run_on_start>{{ wazuh_docker_listener.run_on_start | default('yes') }}</run_on_start>
+    <disabled>{{ 'no' if wazuh_docker_listener.enabled | default(false) | bool else 'yes' }}</disabled>
+  </wodle>
+
+  <!-- Optional osquery integration. -->
+  <wodle name="osquery">
+    <disabled>{{ 'no' if wazuh_osquery.enabled | default(false) | bool else 'yes' }}</disabled>
+    <run_daemon>{{ wazuh_osquery.run_daemon | default('no') }}</run_daemon>
+    <log_path>{{ wazuh_osquery.log_path | default('/var/log/osquery/osqueryd.results.log') | e }}</log_path>
+    <config_path>{{ wazuh_osquery.config_path | default('/etc/osquery/osquery.conf') | e }}</config_path>
+    <add_labels>{{ wazuh_osquery.add_labels | default('yes') }}</add_labels>
+  </wodle>
+
+  <!-- GitHub organization audit logs. Requires GitHub Enterprise Cloud and a PAT with audit_log scope. -->
+{% if wazuh_github.enabled | default(false) | bool %}
+  <github>
+    <enabled>yes</enabled>
+    <interval>{{ wazuh_github.interval | default('1m') }}</interval>
+    <time_delay>{{ wazuh_github.time_delay | default('1m') }}</time_delay>
+    <curl_max_size>{{ wazuh_github.curl_max_size | default('1M') }}</curl_max_size>
+    <only_future_events>{{ wazuh_github.only_future_events | default('yes') }}</only_future_events>
+{% for auth in wazuh_github.api_auth | default([]) %}
+    <api_auth>
+      <org_name>{{ auth.org_name | e }}</org_name>
+      <api_token>{{ auth.api_token | e }}</api_token>
+    </api_auth>
+{% endfor %}
+    <api_parameters>
+      <event_type>{{ wazuh_github.api_parameters.event_type | default('all') }}</event_type>
+    </api_parameters>
+  </github>
+{% endif %}
+
+  <!-- External integrations: VirusTotal, Slack, Shuffle, Discord/custom. -->
+{% if wazuh_integrations.virustotal.enabled | default(false) | bool %}
+  <integration>
+    <name>virustotal</name>
+    <api_key>{{ wazuh_integrations.virustotal.api_key | e }}</api_key>
+{% if wazuh_integrations.virustotal.rule_id is defined and wazuh_integrations.virustotal.rule_id | string | length > 0 %}
+    <rule_id>{{ wazuh_integrations.virustotal.rule_id }}</rule_id>
+{% endif %}
+{% if wazuh_integrations.virustotal.group is defined and wazuh_integrations.virustotal.group | length > 0 %}
+    <group>{{ wazuh_integrations.virustotal.group }}</group>
+{% endif %}
+    <alert_format>{{ wazuh_integrations.virustotal.alert_format | default('json') }}</alert_format>
+    <timeout>{{ wazuh_integrations.virustotal.timeout | default(30) }}</timeout>
+    <retries>{{ wazuh_integrations.virustotal.retries | default(5) }}</retries>
+  </integration>
+{% endif %}
+
+{% if wazuh_integrations.slack.enabled | default(false) | bool %}
+  <integration>
+    <name>slack</name>
+    <hook_url>{{ wazuh_integrations.slack.hook_url | e }}</hook_url>
+    <level>{{ wazuh_integrations.slack.level | default(10) }}</level>
+    <group>{{ wazuh_integrations.slack.group | default('multiple_drops,authentication_failures') }}</group>
+    <alert_format>{{ wazuh_integrations.slack.alert_format | default('json') }}</alert_format>
+{% if wazuh_integrations.slack.options is defined and wazuh_integrations.slack.options | length > 0 %}
+    <options>{{ wazuh_integrations.slack.options | e }}</options>
+{% endif %}
+  </integration>
+{% endif %}
+
+{% if wazuh_integrations.shuffle.enabled | default(false) | bool %}
+  <integration>
+    <name>shuffle</name>
+    <hook_url>{{ wazuh_integrations.shuffle.hook_url | e }}</hook_url>
+    <level>{{ wazuh_integrations.shuffle.level | default(10) }}</level>
+{% if wazuh_integrations.shuffle.group is defined and wazuh_integrations.shuffle.group | length > 0 %}
+    <group>{{ wazuh_integrations.shuffle.group }}</group>
+{% endif %}
+    <alert_format>{{ wazuh_integrations.shuffle.alert_format | default('json') }}</alert_format>
+{% if wazuh_integrations.shuffle.options is defined and wazuh_integrations.shuffle.options | length > 0 %}
+    <options>{{ wazuh_integrations.shuffle.options | e }}</options>
+{% endif %}
+  </integration>
+{% endif %}
+
+{% if wazuh_integrations.discord.enabled | default(false) | bool %}
+  <integration>
+    <name>custom-discord</name>
+    <hook_url>{{ wazuh_integrations.discord.hook_url | e }}</hook_url>
+    <level>{{ wazuh_integrations.discord.level | default(10) }}</level>
+{% if wazuh_integrations.discord.group is defined and wazuh_integrations.discord.group | length > 0 %}
+    <group>{{ wazuh_integrations.discord.group }}</group>
+{% endif %}
+    <alert_format>{{ wazuh_integrations.discord.alert_format | default('json') }}</alert_format>
+{% if wazuh_integrations.discord.options is defined and wazuh_integrations.discord.options | length > 0 %}
+    <options>{{ wazuh_integrations.discord.options | e }}</options>
+{% endif %}
+  </integration>
+{% endif %}
+
+  <!-- Active response command definitions. Scripts must exist in /var/ossec/active-response/bin on target endpoints. -->
+{% for command in wazuh_commands | default([]) %}
+  <command>
+    <name>{{ command.name | e }}</name>
+    <executable>{{ command.executable | e }}</executable>
+{% if command.expect is defined and command.expect | length > 0 %}
+    <expect>{{ command.expect | e }}</expect>
+{% endif %}
+{% if command.extra_args is defined and command.extra_args | length > 0 %}
+    <extra_args>{{ command.extra_args | e }}</extra_args>
+{% endif %}
+    <timeout_allowed>{{ command.timeout_allowed | default('no') }}</timeout_allowed>
+  </command>
+{% endfor %}
+
+  <!-- Active responses. Keep high-risk destructive responses disabled until endpoint scripts are tested. -->
+{% for response in wazuh_active_responses | default([]) %}
+  <active-response>
+    <disabled>{{ 'no' if response.enabled | default(false) | bool else 'yes' }}</disabled>
+    <command>{{ response.command | e }}</command>
+    <location>{{ response.location | default('local') }}</location>
+{% if response.agent_id is defined %}
+    <agent_id>{{ response.agent_id }}</agent_id>
+{% endif %}
+{% if response.level is defined %}
+    <level>{{ response.level }}</level>
+{% endif %}
+{% if response.rules_group is defined and response.rules_group | length > 0 %}
+    <rules_group>{{ response.rules_group }}</rules_group>
+{% endif %}
+{% if response.rules_id is defined %}
+    <rules_id>{{ response.rules_id }}</rules_id>
+{% endif %}
+{% if response.timeout is defined %}
+    <timeout>{{ response.timeout }}</timeout>
+{% endif %}
+{% if response.repeated_offenders is defined and response.repeated_offenders | string | length > 0 %}
+    <repeated_offenders>{{ response.repeated_offenders }}</repeated_offenders>
+{% endif %}
+  </active-response>
+{% endfor %}
+
+{% if wazuh_reports.enabled | default(false) | bool %}
+  <reports>
+    <category>{{ wazuh_reports.category | default('syscheck') }}</category>
+    <title>{{ wazuh_reports.title | default('Wazuh report') | e }}</title>
+{% for email in wazuh_reports.email_to | default([]) %}
+    <email_to>{{ email | e }}</email_to>
+{% endfor %}
+    <showlogs>{{ wazuh_reports.showlogs | default('no') }}</showlogs>
+  </reports>
+{% endif %}
+
+{% if wazuh_rule_test.enabled | default(true) | bool %}
+  <rule_test>
+    <enabled>{{ wazuh_rule_test.enabled | default('yes') }}</enabled>
+    <threads>{{ wazuh_rule_test.threads | default(1) }}</threads>
+    <max_sessions>{{ wazuh_rule_test.max_sessions | default(64) }}</max_sessions>
+    <session_timeout>{{ wazuh_rule_test.session_timeout | default('15m') }}</session_timeout>
+  </rule_test>
+{% endif %}
+
+{% if wazuh_agent_upgrade is defined %}
+  <agent-upgrade>
+{% if wazuh_agent_upgrade.chunk_size is defined %}
+    <chunk_size>{{ wazuh_agent_upgrade.chunk_size }}</chunk_size>
+{% endif %}
+{% if wazuh_agent_upgrade.wpk_repository is defined %}
+    <wpk_repository>{{ wazuh_agent_upgrade.wpk_repository | default('https://packages.wazuh.com/4.x/wpk/') | e }}</wpk_repository>
+{% endif %}
+{% if wazuh_agent_upgrade.max_threads is defined %}
+    <max_threads>{{ wazuh_agent_upgrade.max_threads }}</max_threads>
+{% endif %}
+  </agent-upgrade>
+{% endif %}
+
+</ossec_config>

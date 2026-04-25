@@ -174,8 +174,8 @@ tasks:
           {{.ANSIBLE_DIR}}/playbooks/deploy-postgres.yaml \
           {{.CLI_ARGS}}
 
-  deploy-minio:
-    desc: "Deploy MinIO S3-compatible object storage cluster"
+  deploy-wazuh:
+    desc: "Deploy Wazuh cluster using Terraform via Ansible role"
     deps: [init]
     cmds:
       - |
@@ -183,7 +183,7 @@ tasks:
         export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
         {{.VENV_DIR}}/bin/ansible-playbook \
           -i {{.ANSIBLE_DIR}}/inventory \
-          {{.ANSIBLE_DIR}}/playbooks/deploy-minio.yaml \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-wazuh.yaml \
           {{.CLI_ARGS}}
   # =============================================================================
   # Kubernetes Deployment Tasks

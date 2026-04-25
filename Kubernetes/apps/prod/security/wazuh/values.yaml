@@ -18,10 +18,13 @@ wazuh:
     host: 10.10.10.21
     protocol: tcp
     port: 1514
+    registrationHost: 10.10.10.21
     registrationPort: 1515
+
   agent:
     group: rke2-prod
     namePrefix: rke2-prod
+    stateHostPath: /var/lib/wazuh-agent
 
 env:
   - name: WAZUH_MANAGER
@@ -36,6 +39,8 @@ env:
     value: "1515"
   - name: WAZUH_AGENT_GROUP
     value: "rke2-prod"
+  - name: WAZUH_AGENT_NAME_PREFIX
+    value: "rke2-prod"
 
 resources:
   requests:
@@ -47,12 +52,18 @@ resources:
 
 securityContext:
   privileged: false
-  allowPrivilegeEscalation: false
+  allowPrivilegeEscalation: true
   readOnlyRootFilesystem: false
   runAsUser: 0
   capabilities:
     drop:
       - ALL
+    add:
+      - SETGID
+      - SETUID
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
   seccompProfile:
     type: RuntimeDefault
 
@@ -61,8 +72,9 @@ tolerations:
 
 nodeSelector: {}
 
-hostPID: false
+hostPID: true
 hostNetwork: false
+hostIPC: false
 
 hostPathMounts:
   enabled: true
@@ -70,24 +82,39 @@ hostPathMounts:
     - name: host-var-log
       hostPath: /var/log
       mountPath: /host/var/log
+      type: Directory
       readOnly: true
+
     - name: host-etc
       hostPath: /etc
       mountPath: /host/etc
+      type: Directory
       readOnly: true
+
     - name: host-usr-bin
       hostPath: /usr/bin
       mountPath: /host/usr/bin
+      type: Directory
       readOnly: true
+
+    - name: host-proc
+      hostPath: /proc
+      mountPath: /host/proc
+      type: Directory
+      readOnly: true
+
     - name: host-var-lib-rancher-rke2
       hostPath: /var/lib/rancher/rke2
       mountPath: /host/var/lib/rancher/rke2
+      type: DirectoryOrCreate
       readOnly: true
 
 persistence:
+  enabled: false
+
+hostPathState:
   enabled: true
-  storageClassName: longhorn
-  size: 1Gi
+  path: /var/lib/wazuh-agent
 
 serviceMonitor:
   enabled: false

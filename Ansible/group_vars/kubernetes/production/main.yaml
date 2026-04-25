@@ -118,7 +118,6 @@ kubernetes_nodes:
       clone_template: "debian-13-template-pve-01"
       gpu_passthrough_devices:
         - "NVidia-1060"
-        - "Nvidia-3060"
       labels:
         - "accelerator.nvidia.com/gpu=true"
         - "node.kubernetes.io/gpu=true"
@@ -159,6 +158,8 @@ kubernetes_nodes:
       vmid: 415
       target_node: "pve-01"
       clone_template: "debian-13-template-pve-01"
+      gpu_passthrough_devices:
+        - "Nvidia-3060"
 
 kubernetes_platform:
   storage_class_default: "longhorn"

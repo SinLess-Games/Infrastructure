@@ -14,3 +14,13 @@ wazuh_vault_secret_field_map:
   api_username: wazuh_api_username
   api_password: wazuh_api_password
   admin_password: wazuh_admin_password
+
+wazuh_dashboard_customization_enabled: true
+wazuh_dashboard_custom_logo_src: "{{ wazuh_repo_root }}/Ansible/files/images/company-logo.png"
+wazuh_dashboard_custom_assets_dir: "/usr/share/wazuh-dashboard/plugins/wazuh/public/assets/custom/images"
+wazuh_dashboard_customization_file: "/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml"
+wazuh_dashboard_customization_app_logo_filename: "customization.logo.app.png"
+wazuh_dashboard_customization_healthcheck_logo_filename: "customization.logo.healthcheck.png"
+wazuh_dashboard_customization_reports_logo_filename: "customization.logo.reports.png"
+wazuh_dashboard_customization_report_header: ""
+wazuh_dashboard_customization_report_footer: ""

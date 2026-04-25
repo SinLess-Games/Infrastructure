@@ -95,6 +95,7 @@ module "kubernetes_prod_workers" {
       target_node = "pve-01"
       storage     = "vm_disks_01"
       clone_template = "debian-13-template-pve-01"
+  gpu_passthrough_devices = ["NVidia-1060"]
       ip_address  = "10.10.40.20"
       hostname    = "rke2-prod-wk-01"
       fqdn        = "rke2-prod-wk-01.prod.k8s.sinlessgames.com"
@@ -145,6 +146,7 @@ module "kubernetes_prod_workers" {
       target_node = "pve-01"
       storage     = "vm_disks_01"
       clone_template = "debian-13-template-pve-01"
+  gpu_passthrough_devices = ["Nvidia-3060"]
       ip_address  = "10.10.40.25"
       hostname    = "rke2-prod-wk-06"
       fqdn        = "rke2-prod-wk-06.prod.k8s.sinlessgames.com"

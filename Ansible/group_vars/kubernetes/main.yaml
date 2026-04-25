@@ -80,8 +80,8 @@ kubernetes_operation:
   wait_for_ssh_timeout: 600
   wait_for_kubeconfig_timeout: 300
   wait_for_api_timeout: 600
-  wait_for_node_ready_timeout: 60
-  wait_for_node_ready_retries: 15
+  wait_for_node_ready_timeout: 120
+  wait_for_node_ready_retries: 30
   wait_for_node_ready_delay: 20
   wait_for_rke2_active_retries: 120
   wait_for_rke2_active_delay: 10

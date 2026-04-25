@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+# {{ ansible_managed | default('Managed by Ansible') }}
+#
+# Template: Ansible/templates/wazuh/ciscat-scan.sh.j2
+#
+# Purpose:
+#   Run CIS-CAT Assessor when the licensed assessor files are present and emit
+#   compact JSON events that Wazuh can ingest.
+#
+# Expected Wazuh localfile:
+#   <localfile>
+#     <log_format>json</log_format>
+#     <location>{{ wazuh_ciscat.json_results_file | default('/var/ossec/logs/ciscat/ciscat-results.json') }}</location>
+#   </localfile>
+#
+# Notes:
+#   - CIS-CAT Assessor is licensed software. This script does not install or fetch it.
+#   - Place the licensed assessor under {{ wazuh_ciscat.base_dir | default('/opt/cis-cat') }}.
+#   - This script exits 0 after writing JSON so Wazuh command scheduling does not get wedged.
+
+set -uo pipefail
+
+BASE_DIR="{{ wazuh_ciscat.base_dir | default('/opt/cis-cat') }}"
+ASSESSOR_PATH="{{ wazuh_ciscat.assessor_path | default('/opt/cis-cat/CIS-CAT.sh') }}"
+JAR_PATH="{{ wazuh_ciscat.jar_path | default('/opt/cis-cat/CIS-CAT.jar') }}"
+BENCHMARK="{{ wazuh_ciscat.benchmark | default('/opt/cis-cat/benchmarks/CIS_Debian_Linux_12_Benchmark.xml') }}"
+PROFILE="{{ wazuh_ciscat.profile | default('') }}"
+
+REPORTS_DIR="{{ wazuh_ciscat.reports_dir | default('/var/ossec/logs/ciscat') }}"
+RESULTS_FILE="{{ wazuh_ciscat.results_file | default('/var/ossec/logs/ciscat/ciscat-results.xml') }}"
+NATIVE_JSON_FILE="{{ wazuh_ciscat.native_json_file | default('/var/ossec/logs/ciscat/ciscat-native-results.json') }}"
+JSON_RESULTS_FILE="{{ wazuh_ciscat.json_results_file | default('/var/ossec/logs/ciscat/ciscat-results.json') }}"
+RUN_LOG_FILE="{{ wazuh_ciscat.run_log_file | default('/var/ossec/logs/ciscat/ciscat-scan.log') }}"
+
+LOCK_FILE="{{ wazuh_ciscat.lock_file | default('/var/run/wazuh-ciscat-scan.lock') }}"
+TIMEOUT_SECONDS="{{ wazuh_ciscat.scan.timeout | default(3600) }}"
+
+WAZUH_OWNER="{{ wazuh_ciscat.owner | default('root') }}"
+WAZUH_GROUP="{{ wazuh_ciscat.group | default('wazuh') }}"
+
+REPORT_PREFIX="{{ wazuh_ciscat.report_prefix | default('wazuh-ciscat') }}"
+GENERATE_HTML="{{ wazuh_ciscat.html_report | default(true) | ternary('true', 'false') }}"
+GENERATE_CSV="{{ wazuh_ciscat.csv_report | default(false) | ternary('true', 'false') }}"
+GENERATE_TXT="{{ wazuh_ciscat.txt_report | default(false) | ternary('true', 'false') }}"
+GENERATE_JSON="{{ wazuh_ciscat.json_report | default(true) | ternary('true', 'false') }}"
+NON_PASS_RESULTS="{{ wazuh_ciscat.non_pass_results | default(true) | ternary('true', 'false') }}"
+
+umask 027
+
+timestamp_utc() {
+  date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+log_line() {
+  printf '%s %s\n' "$(timestamp_utc)" "$*" >> "${RUN_LOG_FILE}"
+}
+
+write_json_event() {
+  local status="$1"
+  local exit_code="$2"
+  local message="$3"
+  local stdout_file="${4:-}"
+  local discovered_xml="${5:-}"
+  local discovered_json="${6:-}"
+  local discovered_html="${7:-}"
+  local discovered_csv="${8:-}"
+
+  python3 - "$status" "$exit_code" "$message" "$stdout_file" \
+    "$BASE_DIR" "$ASSESSOR_PATH" "$JAR_PATH" "$BENCHMARK" "$PROFILE" \
+    "$REPORTS_DIR" "$RESULTS_FILE" "$NATIVE_JSON_FILE" "$discovered_xml" "$discovered_json" "$discovered_html" "$discovered_csv" <<'PY' >> "${JSON_RESULTS_FILE}"
+import csv
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+status = sys.argv[1]
+exit_code = int(sys.argv[2])
+message = sys.argv[3]
+stdout_file = sys.argv[4]
+base_dir = sys.argv[5]
+assessor_path = sys.argv[6]
+jar_path = sys.argv[7]
+benchmark = sys.argv[8]
+profile = sys.argv[9]
+reports_dir = sys.argv[10]
+results_file = sys.argv[11]
+native_json_file = sys.argv[12]
+discovered_xml = sys.argv[13]
+discovered_json = sys.argv[14]
+discovered_html = sys.argv[15]
+discovered_csv = sys.argv[16]
+
+stdout_text = ""
+output_tail = []
+
+if stdout_file and Path(stdout_file).exists():
+    stdout_text = Path(stdout_file).read_text(errors="replace")
+    output_tail = stdout_text.splitlines()[-60:]
+
+counts = {
+    "pass": 0,
+    "fail": 0,
+    "error": 0,
+    "unknown": 0,
+    "notapplicable": 0,
+    "notchecked": 0,
+    "notselected": 0,
+    "informational": 0,
+    "manual": 0,
+}
+
+score = None
+benchmark_title = None
+
+score_patterns = [
+    r"\bscore\b[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)\s*%",
+    r"\bscore\b[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)",
+    r"\bassessment score\b[^0-9]{0,20}([0-9]+(?:\.[0-9]+)?)",
+]
+
+for pattern in score_patterns:
+    match = re.search(pattern, stdout_text, flags=re.IGNORECASE)
+    if match:
+        try:
+            score = float(match.group(1))
+            break
+        except ValueError:
+            pass
+
+# Try parsing native JSON if the licensed assessor produced one.
+if discovered_json and Path(discovered_json).exists():
+    try:
+        native = json.loads(Path(discovered_json).read_text(errors="replace"))
+        raw = json.dumps(native)
+
+        for key, value in re.findall(r'"result"\s*:\s*"([^"]+)"', raw, flags=re.IGNORECASE):
+            normalized = key.strip().lower()
+            if normalized in counts:
+                counts[normalized] += 1
+            else:
+                counts["unknown"] += 1
+
+        if score is None:
+            score_match = re.search(r'"score"\s*:\s*([0-9]+(?:\.[0-9]+)?)', raw, flags=re.IGNORECASE)
+            if score_match:
+                score = float(score_match.group(1))
+
+        title_match = re.search(r'"benchmark[^"]*"\s*:\s*"([^"]+)"', raw, flags=re.IGNORECASE)
+        if title_match:
+            benchmark_title = title_match.group(1)
+    except Exception as exc:
+        output_tail.append(f"Native JSON parse warning: {exc}")
+
+# Try parsing XCCDF/XML-style output.
+xml_candidate = discovered_xml or results_file
+if not any(counts.values()) and xml_candidate and Path(xml_candidate).exists():
+    try:
+        tree = ET.parse(xml_candidate)
+        root = tree.getroot()
+
+        for elem in root.iter():
+            tag = elem.tag.lower()
+            if tag.endswith("title") and not benchmark_title and elem.text:
+                benchmark_title = elem.text.strip()
+
+            if tag.endswith("rule-result"):
+                result_text = None
+                for child in elem:
+                    if child.tag.lower().endswith("result") and child.text:
+                        result_text = child.text.strip().lower()
+                        break
+
+                if result_text:
+                    if result_text in counts:
+                        counts[result_text] += 1
+                    else:
+                        counts["unknown"] += 1
+
+            if tag.endswith("score") and score is None and elem.text:
+                try:
+                    score = float(elem.text.strip())
+                except ValueError:
+                    pass
+    except Exception as exc:
+        output_tail.append(f"XML parse warning: {exc}")
+
+# Try parsing CSV output if present.
+if not any(counts.values()) and discovered_csv and Path(discovered_csv).exists():
+    try:
+        with open(discovered_csv, newline="", errors="replace") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                joined_keys = {k.lower(): v for k, v in row.items() if k}
+                result = (
+                    joined_keys.get("result")
+                    or joined_keys.get("status")
+                    or joined_keys.get("assessment status")
+                    or ""
+                ).strip().lower()
+
+                if result:
+                    if result in counts:
+                        counts[result] += 1
+                    else:
+                        counts["unknown"] += 1
+    except Exception as exc:
+        output_tail.append(f"CSV parse warning: {exc}")
+
+# Fallback: count result-looking lines from stdout.
+if not any(counts.values()):
+    for result in re.findall(r"\b(pass|fail|error|unknown|notapplicable|notchecked|notselected|informational|manual)\b", stdout_text, flags=re.IGNORECASE):
+        normalized = result.strip().lower()
+        if normalized in counts:
+            counts[normalized] += 1
+        else:
+            counts["unknown"] += 1
+
+event = {
+    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "integration": "ciscat",
+    "scanner": "cis-cat",
+    "status": status,
+    "exit_code": exit_code,
+    "message": message,
+    "base_dir": base_dir,
+    "assessor_path": assessor_path,
+    "jar_path": jar_path,
+    "benchmark": benchmark,
+    "benchmark_title": benchmark_title,
+    "profile": profile,
+    "reports_dir": reports_dir,
+    "results_file": results_file,
+    "native_json_file": native_json_file,
+    "discovered_xml": discovered_xml or None,
+    "discovered_json": discovered_json or None,
+    "discovered_html": discovered_html or None,
+    "discovered_csv": discovered_csv or None,
+    "score": score,
+    "counts": counts,
+    "has_failures": counts.get("fail", 0) > 0 or counts.get("error", 0) > 0 or (score is not None and score < 80),
+    "output_tail": output_tail,
+}
+
+print(json.dumps(event, separators=(",", ":")))
+PY
+}
+
+discover_newest_file() {
+  local pattern="$1"
+
+  find "${REPORTS_DIR}" -type f -name "${pattern}" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -nr \
+    | awk 'NR == 1 {print substr($0, index($0,$2))}'
+}
+
+mkdir -p "${REPORTS_DIR}"
+touch "${JSON_RESULTS_FILE}" "${RUN_LOG_FILE}" 2>/dev/null || true
+
+chown "${WAZUH_OWNER}:${WAZUH_GROUP}" "${REPORTS_DIR}" "${JSON_RESULTS_FILE}" "${RUN_LOG_FILE}" 2>/dev/null || true
+chmod 0750 "${REPORTS_DIR}" 2>/dev/null || true
+chmod 0640 "${JSON_RESULTS_FILE}" "${RUN_LOG_FILE}" 2>/dev/null || true
+
+exec 9>"${LOCK_FILE}"
+if ! flock -n 9; then
+  write_json_event "skipped" 0 "CIS-CAT scan already running." ""
+  exit 0
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  log_line "ERROR python3 is required to write JSON scan events."
+  exit 0
+fi
+
+if [ ! -d "${BASE_DIR}" ]; then
+  write_json_event "error" 66 "CIS-CAT base directory is missing: ${BASE_DIR}" ""
+  exit 0
+fi
+
+if [ ! -r "${BENCHMARK}" ]; then
+  write_json_event "error" 66 "CIS-CAT benchmark is missing or unreadable: ${BENCHMARK}" ""
+  exit 0
+fi
+
+tmp_dir="$(mktemp -d "${REPORTS_DIR}/.ciscat-scan.XXXXXX")"
+tmp_stdout="${tmp_dir}/stdout.log"
+
+cleanup() {
+  rm -rf "${tmp_dir}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+run_args=()
+
+if [ -x "${ASSESSOR_PATH}" ]; then
+  run_args=("${ASSESSOR_PATH}")
+elif [ -r "${JAR_PATH}" ] && command -v java >/dev/null 2>&1; then
+  run_args=(java -jar "${JAR_PATH}")
+else
+  write_json_event "error" 127 "CIS-CAT Assessor was not found. Expected executable ${ASSESSOR_PATH} or readable jar ${JAR_PATH} with java installed." ""
+  exit 0
+fi
+
+# Prefer the explicit command from group_vars when supplied.
+# This allows you to match whichever licensed CIS-CAT Assessor CLI edition you have.
+if [ -n "{{ wazuh_ciscat.command.command | default('') | trim }}" ]; then
+  shell_command="{{ wazuh_ciscat.command.command | default('') }}"
+else
+  # Generic CIS-CAT command. Some CIS-CAT editions use slightly different flags.
+  # The wrapper records any CLI incompatibility into JSON rather than failing Wazuh.
+  shell_command=""
+fi
+
+log_line "Starting CIS-CAT scan benchmark=${BENCHMARK} profile=${PROFILE:-none}"
+
+if [ -n "${shell_command}" ]; then
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${TIMEOUT_SECONDS}s" bash -lc "${shell_command}" >"${tmp_stdout}" 2>&1
+    scan_rc=$?
+  else
+    bash -lc "${shell_command}" >"${tmp_stdout}" 2>&1
+    scan_rc=$?
+  fi
+else
+  cmd=("${run_args[@]}" -a -b "${BENCHMARK}" -r "${REPORTS_DIR}")
+
+  if [ -n "${PROFILE}" ]; then
+    cmd+=(-p "${PROFILE}")
+  fi
+
+  if [ "${GENERATE_JSON}" = "true" ]; then
+    cmd+=(-json)
+  fi
+
+  if [ "${GENERATE_HTML}" = "true" ]; then
+    cmd+=(-html)
+  fi
+
+  if [ "${GENERATE_CSV}" = "true" ]; then
+    cmd+=(-csv)
+  fi
+
+  if [ "${GENERATE_TXT}" = "true" ]; then
+    cmd+=(-txt)
+  fi
+
+  if [ "${NON_PASS_RESULTS}" = "true" ]; then
+    cmd+=(-npr)
+  fi
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${TIMEOUT_SECONDS}s" "${cmd[@]}" >"${tmp_stdout}" 2>&1
+    scan_rc=$?
+  else
+    "${cmd[@]}" >"${tmp_stdout}" 2>&1
+    scan_rc=$?
+  fi
+fi
+
+cat "${tmp_stdout}" >> "${RUN_LOG_FILE}" 2>/dev/null || true
+
+discovered_xml="$(discover_newest_file '*.xml')"
+discovered_json="$(discover_newest_file '*.json')"
+discovered_html="$(discover_newest_file '*.html')"
+discovered_csv="$(discover_newest_file '*.csv')"
+
+if [ -n "${discovered_xml}" ] && [ -r "${discovered_xml}" ]; then
+  cp -f "${discovered_xml}" "${RESULTS_FILE}" 2>/dev/null || true
+  chown "${WAZUH_OWNER}:${WAZUH_GROUP}" "${RESULTS_FILE}" 2>/dev/null || true
+  chmod 0640 "${RESULTS_FILE}" 2>/dev/null || true
+fi
+
+if [ -n "${discovered_json}" ] && [ -r "${discovered_json}" ]; then
+  cp -f "${discovered_json}" "${NATIVE_JSON_FILE}" 2>/dev/null || true
+  chown "${WAZUH_OWNER}:${WAZUH_GROUP}" "${NATIVE_JSON_FILE}" 2>/dev/null || true
+  chmod 0640 "${NATIVE_JSON_FILE}" 2>/dev/null || true
+fi
+
+find "${REPORTS_DIR}" -maxdepth 1 -type f \
+  \( -name '*.xml' -o -name '*.html' -o -name '*.json' -o -name '*.csv' -o -name '*.txt' \) \
+  -exec chown "${WAZUH_OWNER}:${WAZUH_GROUP}" {} \; \
+  -exec chmod 0640 {} \; 2>/dev/null || true
+
+case "${scan_rc}" in
+  0)
+    write_json_event "completed" "${scan_rc}" "CIS-CAT scan completed successfully." "${tmp_stdout}" "${discovered_xml}" "${discovered_json}" "${discovered_html}" "${discovered_csv}"
+    log_line "Completed CIS-CAT scan successfully."
+    ;;
+  124)
+    write_json_event "timeout" "${scan_rc}" "CIS-CAT scan exceeded timeout of ${TIMEOUT_SECONDS} seconds." "${tmp_stdout}" "${discovered_xml}" "${discovered_json}" "${discovered_html}" "${discovered_csv}"
+    log_line "CIS-CAT scan timed out after ${TIMEOUT_SECONDS} seconds."
+    ;;
+  *)
+    write_json_event "completed_with_findings_or_errors" "${scan_rc}" "CIS-CAT scan finished with non-zero exit code ${scan_rc}." "${tmp_stdout}" "${discovered_xml}" "${discovered_json}" "${discovered_html}" "${discovered_csv}"
+    log_line "CIS-CAT scan finished with non-zero exit code ${scan_rc}."
+    ;;
+esac
+
+exit 0

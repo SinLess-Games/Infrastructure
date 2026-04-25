@@ -26,6 +26,7 @@ spec:
         app.kubernetes.io/component: node-security-agent
         app.kubernetes.io/part-of: wazuh
         security.sinlessgames.io/zone: node-security
+
     spec:
       serviceAccountName: wazuh-agent
       automountServiceAccountToken: false
@@ -34,35 +35,261 @@ spec:
       hostNetwork: false
       hostIPC: false
 
-      nodeSelector:
-        security.sinlessgames.com/wazuh-agent: "enabled"
+      terminationGracePeriodSeconds: 30
 
       tolerations:
         - operator: Exists
 
+      initContainers:
+        - name: cleanup-ossec-stale
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+
+              echo "[init] Cleaning stale Wazuh PID and lock files..."
+              mkdir -p /agent/var/run /agent/queue/ossec /agent/tmp
+              rm -f /agent/var/run/*.pid || true
+              rm -f /agent/queue/ossec/*.lock || true
+              rm -f /agent/tmp/*.lock || true
+          volumeMounts:
+            - name: wazuh-agent-state
+              mountPath: /agent
+
+        - name: seed-ossec-tree
+          image: wazuh/wazuh-agent:4.11.2
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+
+              echo "[init] Checking Wazuh agent state tree..."
+
+              if [ ! -d /agent/bin ] || [ ! -f /agent/bin/wazuh-control ]; then
+                echo "[init] Seeding /var/ossec into hostPath state..."
+                rm -rf /agent/*
+                tar -C /var/ossec -cf - . | tar -C /agent -xpf -
+              else
+                echo "[init] Existing Wazuh state found; skipping seed."
+              fi
+          volumeMounts:
+            - name: wazuh-agent-state
+              mountPath: /agent
+
+        - name: write-ossec-config
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: WAZUH_MANAGER
+              value: "10.10.10.21"
+
+            - name: WAZUH_MANAGER_PORT
+              value: "1514"
+
+            - name: WAZUH_PROTOCOL
+              value: "tcp"
+
+            - name: WAZUH_REGISTRATION_SERVER
+              value: "10.10.10.21"
+
+            - name: WAZUH_REGISTRATION_PORT
+              value: "1515"
+
+            - name: WAZUH_AGENT_GROUP
+              value: "rke2-prod"
+
+            - name: WAZUH_AGENT_NAME_PREFIX
+              value: "rke2-prod"
+
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+
+              WAZUH_AGENT_NAME="${WAZUH_AGENT_NAME_PREFIX}-${NODE_NAME}"
+
+              echo "[init] Writing Wazuh agent ossec.conf for ${WAZUH_AGENT_NAME}..."
+              mkdir -p /agent/etc
+
+              cat > /agent/etc/ossec.conf <<EOF
+              <ossec_config>
+                <client>
+                  <server>
+                    <address>${WAZUH_MANAGER}</address>
+                    <port>${WAZUH_MANAGER_PORT}</port>
+                    <protocol>${WAZUH_PROTOCOL}</protocol>
+                  </server>
+
+                  <enrollment>
+                    <enabled>yes</enabled>
+                    <manager_address>${WAZUH_REGISTRATION_SERVER}</manager_address>
+                    <port>${WAZUH_REGISTRATION_PORT}</port>
+                    <agent_name>${WAZUH_AGENT_NAME}</agent_name>
+                    <groups>${WAZUH_AGENT_GROUP}</groups>
+                    <authorization_pass_path>/var/ossec/etc/authd.pass</authorization_pass_path>
+                  </enrollment>
+                </client>
+
+                <client_buffer>
+                  <disabled>no</disabled>
+                  <queue_size>5000</queue_size>
+                  <events_per_second>500</events_per_second>
+                </client_buffer>
+
+                <localfile>
+                  <log_format>syslog</log_format>
+                  <location>/host/var/log/syslog</location>
+                </localfile>
+
+                <localfile>
+                  <log_format>syslog</log_format>
+                  <location>/host/var/log/messages</location>
+                </localfile>
+
+                <localfile>
+                  <log_format>syslog</log_format>
+                  <location>/host/var/log/auth.log</location>
+                </localfile>
+
+                <localfile>
+                  <log_format>syslog</log_format>
+                  <location>/host/var/log/secure</location>
+                </localfile>
+
+                <localfile>
+                  <log_format>syslog</log_format>
+                  <location>/host/var/log/audit/audit.log</location>
+                </localfile>
+
+                <localfile>
+                  <log_format>syslog</log_format>
+                  <location>/host/var/log/containers/*.log</location>
+                </localfile>
+
+                <localfile>
+                  <log_format>syslog</log_format>
+                  <location>/host/var/log/pods/*/*/*.log</location>
+                </localfile>
+              </ossec_config>
+              EOF
+
+              chown 999:999 /agent/etc/ossec.conf
+              chmod 0640 /agent/etc/ossec.conf
+          volumeMounts:
+            - name: wazuh-agent-state
+              mountPath: /agent
+
+        - name: install-authd-pass
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+
+              echo "[init] Installing Wazuh enrollment password..."
+              mkdir -p /agent/etc
+              cp /secret/authd.pass /agent/etc/authd.pass
+              chown 0:999 /agent/etc/authd.pass
+              chmod 0640 /agent/etc/authd.pass
+          volumeMounts:
+            - name: wazuh-agent-state
+              mountPath: /agent
+
+            - name: wazuh-agent-enrollment
+              mountPath: /secret/authd.pass
+              subPath: authd.pass
+              readOnly: true
+
+        - name: fix-ossec-permissions
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+
+              echo "[init] Fixing Wazuh agent state permissions..."
+
+              for d in etc logs queue var rids tmp active-response; do
+                if [ -d "/agent/${d}" ]; then
+                  chown -R 999:999 "/agent/${d}" || true
+                fi
+              done
+
+              chown -R 0:0 /agent/bin /agent/lib 2>/dev/null || true
+              find /agent/bin -type f -exec chmod 0755 {} \; 2>/dev/null || true
+              chmod 0640 /agent/etc/ossec.conf
+              chmod 0640 /agent/etc/authd.pass
+          volumeMounts:
+            - name: wazuh-agent-state
+              mountPath: /agent
+
       containers:
         - name: wazuh-agent
-          image: wazuh/wazuh-agent:4.9.0
+          image: wazuh/wazuh-agent:4.11.2
           imagePullPolicy: IfNotPresent
+
+          command:
+            - /bin/sh
+            - -lc
+          args:
+            - |
+              set -eu
+
+              ln -sf /var/ossec/etc/ossec.conf /etc/ossec.conf || true
+              exec /init
 
           env:
             - name: WAZUH_MANAGER
               value: "10.10.10.21"
+
             - name: WAZUH_MANAGER_PORT
               value: "1514"
+
             - name: WAZUH_PROTOCOL
               value: "tcp"
+
             - name: WAZUH_REGISTRATION_SERVER
               value: "10.10.10.21"
+
             - name: WAZUH_REGISTRATION_PORT
               value: "1515"
+
             - name: WAZUH_AGENT_GROUP
-              value: "kubernetes-prod"
+              value: "rke2-prod"
+
             - name: WAZUH_REGISTRATION_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: wazuh-agent-enrollment
                   key: enrollment_password
+
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+            - name: WAZUH_AGENT_NAME
+              value: "rke2-prod-$(NODE_NAME)"
 
           resources:
             requests:
@@ -74,30 +301,48 @@ spec:
 
           securityContext:
             privileged: false
-            allowPrivilegeEscalation: false
+            allowPrivilegeEscalation: true
             readOnlyRootFilesystem: false
             runAsUser: 0
             capabilities:
               drop:
                 - ALL
+              add:
+                - SETGID
+                - SETUID
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
             seccompProfile:
               type: RuntimeDefault
+
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -lc
+                  - /var/ossec/bin/wazuh-control stop || true; sleep 2
 
           volumeMounts:
             - name: host-var-log
               mountPath: /host/var/log
               readOnly: true
 
-            - name: host-etc-os-release
-              mountPath: /host/etc/os-release
+            - name: host-etc
+              mountPath: /host/etc
               readOnly: true
 
-            - name: host-etc-hostname
-              mountPath: /host/etc/hostname
+            - name: host-usr-bin
+              mountPath: /host/usr/bin
               readOnly: true
 
-            - name: host-etc-machine-id
-              mountPath: /host/etc/machine-id
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+
+            - name: host-var-lib-rancher-rke2
+              mountPath: /host/var/lib/rancher/rke2
               readOnly: true
 
             - name: wazuh-agent-state
@@ -109,22 +354,32 @@ spec:
             path: /var/log
             type: Directory
 
-        - name: host-etc-os-release
+        - name: host-etc
           hostPath:
-            path: /etc/os-release
-            type: File
+            path: /etc
+            type: Directory
 
-        - name: host-etc-hostname
+        - name: host-usr-bin
           hostPath:
-            path: /etc/hostname
-            type: File
+            path: /usr/bin
+            type: Directory
 
-        - name: host-etc-machine-id
+        - name: host-proc
           hostPath:
-            path: /etc/machine-id
-            type: File
+            path: /proc
+            type: Directory
+
+        - name: host-var-lib-rancher-rke2
+          hostPath:
+            path: /var/lib/rancher/rke2
+            type: DirectoryOrCreate
 
         - name: wazuh-agent-state
           hostPath:
             path: /var/lib/wazuh-agent
             type: DirectoryOrCreate
+
+        - name: wazuh-agent-enrollment
+          secret:
+            secretName: wazuh-agent-enrollment
+            defaultMode: 0440

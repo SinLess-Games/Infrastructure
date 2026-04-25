@@ -10,6 +10,7 @@ locals {
       hostname       = try(node.hostname, node.name)
       fqdn           = try(node.fqdn, null)
       storage        = try(node.storage, null)
+      gpu_passthrough_devices = try(node.gpu_passthrough_devices, [])
     }
   ]
 
@@ -81,6 +82,17 @@ EOT
   boot    = "order=virtio0;net0"
   scsihw  = "virtio-scsi-pci"
   hotplug = "network,disk,usb"
+  machine = length(local.node_details[count.index].gpu_passthrough_devices) > 0 ? "q35" : "pc"
+
+  dynamic "pci" {
+    for_each = local.node_details[count.index].gpu_passthrough_devices
+    content {
+      id         = tonumber(pci.key)
+      mapping_id = pci.value
+      pcie       = true
+      rombar     = true
+    }
+  }
 
   disk {
     slot     = "virtio0"

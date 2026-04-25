@@ -1,3 +1,81 @@
+# ==============================================================================
+# MkDocs documentation dependencies
+# ==============================================================================
+#
+# This file is installed inside the Docker builder stage by Docs/Dockerfile.
+# Keep the versions bounded so the docs build is repeatable, but still receives
+# compatible patch/minor updates from Renovate.
+#
+# Features targeted:
+# - Material for MkDocs theme
+# - Built-in MkDocs search
+# - Mermaid diagrams/charts
+# - Markdown tables
+# - Admonitions/callouts
+# - Code highlighting
+# - Tabs
+# - Task lists
+# - Embedded PNG/SVG/PDF assets
+# - Image zoom/lightbox
+# - Last-updated timestamps
+# - Redirects for moved documentation pages
+# - Production build minification
+# - Reusable snippets/macros
+
+# ------------------------------------------------------------------------------
+# Core site generator
+# ------------------------------------------------------------------------------
+# MkDocs builds the Markdown documentation into static HTML.
 mkdocs>=1.6,<2.0
-mkdocs-material>=9.5,<10.0
-pymdown-extensions>=10.0,<11.0
+
+# ------------------------------------------------------------------------------
+# Theme
+# ------------------------------------------------------------------------------
+# Material provides the UI, navigation, search integration, Mermaid support,
+# tables styling, admonitions, icons, tabs, code blocks, dark mode, and more.
+mkdocs-material>=9.7,<10.0
+
+# ------------------------------------------------------------------------------
+# Markdown feature extensions
+# ------------------------------------------------------------------------------
+# Adds advanced Markdown syntax used heavily by Material:
+# admonitions, collapsible details, task lists, superfences, Mermaid fences,
+# tabbed content, highlights, keyboard keys, emoji/icons, captions, etc.
+pymdown-extensions>=10.21,<11.0
+
+# ------------------------------------------------------------------------------
+# Images
+# ------------------------------------------------------------------------------
+# Adds click-to-zoom/lightbox behavior for embedded images such as screenshots,
+# architecture diagrams, PNG diagrams, and SVG exports.
+mkdocs-glightbox>=0.4,<1.0
+
+# ------------------------------------------------------------------------------
+# Git metadata
+# ------------------------------------------------------------------------------
+# Shows useful "last updated" metadata on documentation pages based on Git history.
+mkdocs-git-revision-date-localized-plugin>=1.5,<2.0
+
+# ------------------------------------------------------------------------------
+# Redirects
+# ------------------------------------------------------------------------------
+# Lets you move or rename docs pages without breaking old URLs.
+mkdocs-redirects>=1.2,<2.0
+
+# ------------------------------------------------------------------------------
+# Build optimization
+# ------------------------------------------------------------------------------
+# Minifies generated HTML, CSS, and JavaScript before the site is copied into
+# the Nginx runtime image.
+mkdocs-minify-plugin>=0.8,<1.0
+
+# ------------------------------------------------------------------------------
+# Reusable docs content
+# ------------------------------------------------------------------------------
+# Lets Markdown pages use variables/macros such as project name, domain names,
+# versions, repository URLs, environment names, etc.
+mkdocs-macros-plugin>=1.5,<2.0
+
+# Lets pages include reusable Markdown snippets or partial files.
+# Useful for shared warnings, command blocks, install steps, or architecture notes.
+mkdocs-include-markdown-plugin>=7.1,<8.0

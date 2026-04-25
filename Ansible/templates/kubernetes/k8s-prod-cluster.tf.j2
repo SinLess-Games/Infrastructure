@@ -16,6 +16,9 @@ module "kubernetes_prod_control_plane" {
 {% if node.clone_template is defined %}
       clone_template = "{{ node.clone_template }}"
 {% endif %}
+{% if node.gpu_passthrough_devices is defined and (node.gpu_passthrough_devices | length) > 0 %}
+  gpu_passthrough_devices = [{% for gpu in node.gpu_passthrough_devices %}"{{ gpu }}"{{ ", " if not loop.last else "" }}{% endfor %}]
+{% endif %}
       ip_address  = "{{ node.ip }}"
       hostname    = "{{ node.hostname }}"
       fqdn        = "{{ node.fqdn }}"
@@ -61,6 +64,9 @@ module "kubernetes_prod_workers" {
       storage     = "{{ node.storage | default(kubernetes_proxmox.storage_by_node[node.target_node] | default(kubernetes_proxmox.storage)) }}"
 {% if node.clone_template is defined %}
       clone_template = "{{ node.clone_template }}"
+{% endif %}
+{% if node.gpu_passthrough_devices is defined and (node.gpu_passthrough_devices | length) > 0 %}
+  gpu_passthrough_devices = [{% for gpu in node.gpu_passthrough_devices %}"{{ gpu }}"{{ ", " if not loop.last else "" }}{% endfor %}]
 {% endif %}
       ip_address  = "{{ node.ip }}"
       hostname    = "{{ node.hostname }}"

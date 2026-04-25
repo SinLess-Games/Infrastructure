@@ -117,3 +117,10 @@ wazuh_tags:
   - "siem"
   - "security"
 wazuh_description: "Wazuh single-node VM"
+
+wazuh_dashboard_customization_enabled: true
+wazuh_dashboard_custom_logo_src: "{{ wazuh_repo_root }}/Ansible/files/images/company-logo.png"
+wazuh_dashboard_customization_report_header: |
+  SinLess Games LLC
+wazuh_dashboard_customization_report_footer: |
+  Security Operations - local.sinlessgames.com

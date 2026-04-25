@@ -8,6 +8,7 @@
   vars_files:
     - ../group_vars/all/ansible.yaml
     - ../group_vars/wazuh/main.yaml
+    - ../group_vars/wazuh/config.yaml
 
   vars:
     ansible_python_interpreter: "{{ playbook_dir | dirname }}/.venv/bin/python"
@@ -31,6 +32,7 @@
   vars_files:
     - ../group_vars/all/ansible.yaml
     - ../group_vars/wazuh/main.yaml
+    - ../group_vars/wazuh/config.yaml
 
   tasks:
     - name: Wait for SSH on Wazuh node
@@ -61,6 +63,7 @@
     - ../group_vars/all/zsh.yaml
     - ../group_vars/all/users.yaml
     - ../group_vars/all/ssh.yaml
+    - ../group_vars/wazuh/config.yaml
 
   vars:
     packages_role_groups:
@@ -70,6 +73,7 @@
     dns_search_domains:
       - "{{ wazuh_domain }}"
       - local
+    wazuh_ossec_conf_path: /var/ossec/etc/ossec.conf
 
   pre_tasks:
     - name: Validate localhost Wazuh runtime cache exists
@@ -79,6 +83,39 @@
           - hostvars['localhost'].wazuh_runtime_secrets is defined
           - hostvars['localhost'].wazuh_runtime_secrets | length > 0
         fail_msg: "Wazuh runtime secrets were not loaded on localhost."
+      tags:
+        - wazuh
+        - validate
+
+    - name: Validate required Wazuh config secrets are available from localhost cache
+      ansible.builtin.assert:
+        that:
+          - hostvars['localhost'].vault_wazuh_agent_enrollment_password is defined
+          - hostvars['localhost'].vault_wazuh_github_api_token is defined
+          - hostvars['localhost'].vault_wazuh_virustotal_api_key is defined
+          - hostvars['localhost'].vault_wazuh_discord_hook_url is defined
+          - hostvars['localhost'].vault_wazuh_haproxy_password is defined
+          - hostvars['localhost'].vault_wazuh_cluster_key is defined
+          - hostvars['localhost'].vault_wazuh_agent_enrollment_password | length > 0
+          - hostvars['localhost'].vault_wazuh_github_api_token | length > 0
+          - hostvars['localhost'].vault_wazuh_virustotal_api_key | length > 0
+          - hostvars['localhost'].vault_wazuh_discord_hook_url | length > 0
+          - hostvars['localhost'].vault_wazuh_haproxy_password | length > 0
+          - hostvars['localhost'].vault_wazuh_cluster_key | length > 0
+        fail_msg: "One or more Wazuh runtime secrets are missing from localhost cache."
+        quiet: true
+      no_log: true
+      tags:
+        - wazuh
+        - validate
+        - secrets
+
+    - name: Validate GitHub and VirusTotal are enabled in Wazuh config vars
+      ansible.builtin.assert:
+        that:
+          - wazuh_github.enabled | bool
+          - wazuh_integrations.virustotal.enabled | bool
+        fail_msg: "GitHub and VirusTotal must be enabled in Ansible/group_vars/wazuh/config.yaml."
       tags:
         - wazuh
         - validate
@@ -143,3 +180,90 @@
       tags:
         - wazuh
         - configure
+
+  post_tasks:
+    - name: Check rendered Wazuh ossec.conf exists
+      ansible.builtin.stat:
+        path: "{{ wazuh_ossec_conf_path }}"
+      register: wazuh_ossec_conf_stat
+      tags:
+        - wazuh
+        - validate
+        - ossec
+
+    - name: Assert rendered Wazuh ossec.conf exists
+      ansible.builtin.assert:
+        that:
+          - wazuh_ossec_conf_stat.stat.exists
+          - wazuh_ossec_conf_stat.stat.isreg
+        fail_msg: "Rendered Wazuh config was not found at {{ wazuh_ossec_conf_path }}."
+      tags:
+        - wazuh
+        - validate
+        - ossec
+
+    - name: Verify invalid task-manager block is not rendered
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if grep -Eq '<task-manager>|</task-manager>' "{{ wazuh_ossec_conf_path }}"; then
+          echo "Invalid <task-manager> block found in {{ wazuh_ossec_conf_path }}"
+          exit 1
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      tags:
+        - wazuh
+        - validate
+        - ossec
+
+    - name: Verify GitHub and VirusTotal blocks rendered
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        grep -Eq '<github>' "{{ wazuh_ossec_conf_path }}"
+        grep -Eq '<name>virustotal</name>' "{{ wazuh_ossec_conf_path }}"
+      args:
+        executable: /bin/bash
+      changed_when: false
+      tags:
+        - wazuh
+        - validate
+        - ossec
+
+    - name: Validate Wazuh csyslogd configuration parser
+      ansible.builtin.command: /var/ossec/bin/wazuh-csyslogd -t
+      changed_when: false
+      tags:
+        - wazuh
+        - validate
+        - ossec
+
+    - name: Validate Wazuh analysisd configuration parser
+      ansible.builtin.command: /var/ossec/bin/wazuh-analysisd -t
+      changed_when: false
+      tags:
+        - wazuh
+        - validate
+        - ossec
+
+    - name: Show rendered Wazuh config feature lines
+      ansible.builtin.shell: |
+        set -euo pipefail
+        grep -n -E '<task-manager>|</task-manager>|<github>|<integration>|virustotal|<directories|<localfile>|<syscheck>' "{{ wazuh_ossec_conf_path }}" || true
+      args:
+        executable: /bin/bash
+      register: wazuh_ossec_feature_lines
+      changed_when: false
+      tags:
+        - wazuh
+        - validate
+        - ossec
+
+    - name: Print rendered Wazuh config feature lines
+      ansible.builtin.debug:
+        var: wazuh_ossec_feature_lines.stdout_lines
+      tags:
+        - wazuh
+        - validate
+        - ossec

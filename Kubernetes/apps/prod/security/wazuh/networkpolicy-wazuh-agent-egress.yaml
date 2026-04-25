@@ -12,8 +12,10 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: wazuh-agent
+
   policyTypes:
     - Egress
+
   egress:
     - to:
         - ipBlock:

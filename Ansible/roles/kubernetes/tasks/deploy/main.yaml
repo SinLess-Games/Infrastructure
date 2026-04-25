@@ -288,6 +288,57 @@
     TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
     TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
 
+- name: Check SSH access for GPU passthrough host management
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - ConnectTimeout=5
+      - -o
+      - BatchMode=yes
+      - -o
+      - StrictHostKeyChecking=no
+      - -o
+      - UserKnownHostsFile=/dev/null
+      - "{{ (kubernetes_proxmox_gpu.host_user | default('root')) ~ '@' ~ (kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host)) }}"
+      - true
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  failed_when: false
+  register: kubernetes_gpu_proxmox_ssh_access_check
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+
+- name: Determine whether GPU passthrough management tasks should run
+  ansible.builtin.set_fact:
+    kubernetes_gpu_passthrough_manage_enabled: >-
+      {{
+        (kubernetes_proxmox_gpu.enabled | bool)
+        and ((kubernetes_gpu_proxmox_ssh_access_check.rc | default(1)) == 0)
+      }}
+  delegate_to: localhost
+  run_once: true
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+
+- name: Report skipped GPU passthrough management when Proxmox SSH is unavailable
+  ansible.builtin.debug:
+    msg: >-
+      Skipping GPU passthrough management because SSH access to {{ kubernetes_proxmox_gpu.host }} is unavailable.
+      Configure key-based access for {{ kubernetes_proxmox_gpu.host_user | default('root') }} to re-enable this step.
+  delegate_to: localhost
+  run_once: true
+  when:
+    - kubernetes_proxmox_gpu.enabled | bool
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+    - not (kubernetes_gpu_passthrough_manage_enabled | default(false))
+
 - name: Read dedicated GPU worker VM config from Proxmox
   ansible.builtin.command:
     argv:
@@ -300,7 +351,7 @@
   changed_when: false
   register: kubernetes_gpu_vm_config
   when:
-    - kubernetes_proxmox_gpu.enabled | bool
+    - kubernetes_gpu_passthrough_manage_enabled | default(false)
     - not kubernetes_operation.plan_only | bool
     - not kubernetes_operation.destroy | bool
 
@@ -315,7 +366,7 @@
   delegate_to: localhost
   run_once: true
   when:
-    - kubernetes_proxmox_gpu.enabled | bool
+    - kubernetes_gpu_passthrough_manage_enabled | default(false)
     - not kubernetes_operation.plan_only | bool
     - not kubernetes_operation.destroy | bool
 
@@ -337,7 +388,7 @@
   changed_when: true
   register: kubernetes_gpu_passthrough_config
   when:
-    - kubernetes_proxmox_gpu.enabled | bool
+    - kubernetes_gpu_passthrough_manage_enabled | default(false)
     - not kubernetes_operation.plan_only | bool
     - not kubernetes_operation.destroy | bool
     - kubernetes_gpu_passthrough_needs_update | default(false)
@@ -354,7 +405,7 @@
   changed_when: false
   register: kubernetes_gpu_vm_status
   when:
-    - kubernetes_proxmox_gpu.enabled | bool
+    - kubernetes_gpu_passthrough_manage_enabled | default(false)
     - not kubernetes_operation.plan_only | bool
     - not kubernetes_operation.destroy | bool
     - kubernetes_gpu_passthrough_needs_update | default(false)
@@ -371,7 +422,7 @@
   changed_when: true
   failed_when: false
   when:
-    - kubernetes_proxmox_gpu.enabled | bool
+    - kubernetes_gpu_passthrough_manage_enabled | default(false)
     - not kubernetes_operation.plan_only | bool
     - not kubernetes_operation.destroy | bool
     - kubernetes_gpu_passthrough_needs_update | default(false)
@@ -393,7 +444,7 @@
   delay: 5
   until: "'status: stopped' in kubernetes_gpu_vm_stopped.stdout"
   when:
-    - kubernetes_proxmox_gpu.enabled | bool
+    - kubernetes_gpu_passthrough_manage_enabled | default(false)
     - not kubernetes_operation.plan_only | bool
     - not kubernetes_operation.destroy | bool
     - kubernetes_gpu_passthrough_needs_update | default(false)
@@ -409,7 +460,7 @@
   run_once: true
   changed_when: true
   when:
-    - kubernetes_proxmox_gpu.enabled | bool
+    - kubernetes_gpu_passthrough_manage_enabled | default(false)
     - not kubernetes_operation.plan_only | bool
     - not kubernetes_operation.destroy | bool
     - kubernetes_gpu_passthrough_needs_update | default(false)

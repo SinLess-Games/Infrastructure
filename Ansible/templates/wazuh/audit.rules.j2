@@ -1,0 +1,137 @@
+# {{ ansible_managed | default('Managed by Ansible') }}
+#
+# Template: Ansible/templates/wazuh/audit.rules.j2
+# Target:   {{ wazuh_system_audit.rules_file | default('/etc/audit/rules.d/wazuh.rules') }}
+#
+# Purpose:
+#   Linux Audit rules for Wazuh system-call and file-watch monitoring.
+#
+# Notes:
+#   - This file is consumed by augenrules.
+#   - Runtime auditd daemon settings such as flush, max_log_file, num_logs,
+#     disk_full_action, and space_left_action belong in auditd.conf, not here.
+#   - Wazuh maps audit rule keys through /var/ossec/etc/lists/audit-keys.
+#   - Avoid enabling immutable mode by default because it prevents audit rule
+#     changes until reboot.
+
+{% set audit = wazuh_system_audit | default({}) %}
+{% set audit_enabled = audit.enabled | default(true) | bool %}
+{% set audit_rules = audit.rules | default([]) %}
+{% set audit_extra_rules = audit.extra_rules | default([]) %}
+{% set audit_backlog_limit = audit.backlog_limit | default(8192) %}
+{% set audit_failure_mode = audit.failure_mode | default(1) %}
+{% set audit_rate_limit = audit.rate_limit | default(0) %}
+{% set audit_enable_flag = audit.enable_flag | default(1) %}
+{% set audit_immutable = audit.immutable | default(false) | bool %}
+
+{% if audit_enabled %}
+# -----------------------------------------------------------------------------
+# Audit control rules
+# -----------------------------------------------------------------------------
+
+# Delete existing rules before loading this managed rule set.
+-D
+
+# Kernel audit backlog limit.
+-b {{ audit_backlog_limit }}
+
+# Failure mode:
+#   0 = silent
+#   1 = printk
+#   2 = panic
+-f {{ audit_failure_mode }}
+
+# Rate limit. 0 means unlimited.
+-r {{ audit_rate_limit }}
+
+# Enable audit.
+-e {{ 2 if audit_immutable else audit_enable_flag }}
+
+# -----------------------------------------------------------------------------
+# Wazuh managed audit rules
+# -----------------------------------------------------------------------------
+# Rule source: wazuh_system_audit.rules
+#
+# Key mapping should exist in:
+#   {{ audit.cdb_list | default('/var/ossec/etc/lists/audit-keys') }}
+#
+# Format:
+#   -w <path> -p <permissions> -k <key>
+#   -a always,exit ... -k <key>
+# -----------------------------------------------------------------------------
+
+{% for item in audit_rules %}
+{% if item.enabled | default(true) | bool %}
+# {{ item.name | default('wazuh-audit-rule-' ~ loop.index) }}
+{{ item.rule }}
+{% endif %}
+
+{% endfor %}
+{% if audit_extra_rules | length > 0 %}
+# -----------------------------------------------------------------------------
+# Extra unmanaged passthrough rules
+# -----------------------------------------------------------------------------
+
+{% for rule in audit_extra_rules %}
+{{ rule }}
+{% endfor %}
+
+{% endif %}
+# -----------------------------------------------------------------------------
+# Baseline fallback rules
+# -----------------------------------------------------------------------------
+# These only render when wazuh_system_audit.rules is empty.
+# -----------------------------------------------------------------------------
+{% if audit_rules | length == 0 %}
+
+# Identity and access-control files.
+-w /etc/passwd -p wa -k audit-identity
+-w /etc/group -p wa -k audit-identity
+-w /etc/shadow -p wa -k audit-identity
+-w /etc/gshadow -p wa -k audit-identity
+
+# Sudo configuration.
+-w /etc/sudoers -p wa -k audit-sudoers
+-w /etc/sudoers.d/ -p wa -k audit-sudoers
+
+# SSH daemon configuration.
+-w /etc/ssh/sshd_config -p wa -k audit-wazuh-w
+
+# Audit configuration changes.
+-w /etc/audit/ -p wa -k audit-wazuh-w
+
+# Login/session records.
+-w /var/log/faillog -p wa -k audit-login
+-w /var/log/lastlog -p wa -k audit-login
+-w /var/log/wtmp -p wa -k audit-session
+-w /var/log/btmp -p wa -k audit-session
+
+# Privileged command execution.
+-a always,exit -F path=/usr/bin/sudo -F perm=x -F auid>=1000 -F auid!=unset -k audit-command
+-a always,exit -F path=/usr/bin/su -F perm=x -F auid>=1000 -F auid!=unset -k audit-command
+
+# File deletion events.
+-a always,exit -F arch=b64 -S unlink,unlinkat,rename,renameat -F auid>=1000 -F auid!=unset -k audit-delete
+-a always,exit -F arch=b32 -S unlink,unlinkat,rename,renameat -F auid>=1000 -F auid!=unset -k audit-delete
+
+# Permission and ownership changes.
+-a always,exit -F arch=b64 -S chmod,fchmod,fchmodat,chown,fchown,fchownat,lchown,setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=unset -k audit-permission-change
+-a always,exit -F arch=b32 -S chmod,fchmod,fchmodat,chown,fchown,fchownat,lchown,setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=unset -k audit-permission-change
+
+# Time changes.
+-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k audit-time-change
+-a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime -k audit-time-change
+
+# Host/network environment changes.
+-a always,exit -F arch=b64 -S sethostname,setdomainname -k audit-system-locale
+-a always,exit -F arch=b32 -S sethostname,setdomainname -k audit-system-locale
+
+# Kernel module tooling.
+-w /sbin/insmod -p x -k audit-kernel-modules
+-w /sbin/rmmod -p x -k audit-kernel-modules
+-w /sbin/modprobe -p x -k audit-kernel-modules
+
+{% endif %}
+{% else %}
+# Wazuh system audit is disabled by wazuh_system_audit.enabled=false.
+{% endif %}

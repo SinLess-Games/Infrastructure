@@ -1,0 +1,1237 @@
+---
+# Ansible/group_vars/wazuh/config.yaml
+# Variables consumed by Ansible/templates/wazuh/ossec.conf.j2 and the Wazuh role.
+#
+# Target architecture:
+#   - VM-based Wazuh manager is the cluster master.
+#   - Kubernetes-hosted Wazuh manager pods are cluster workers.
+#   - Custom rules, decoders, CDB lists, SCA policies, and agent groups should be managed on the master
+#     so they can be synchronized to the worker nodes by the Wazuh cluster.
+#
+# Notes:
+#   - Wazuh 4.x uses SCA as the maintained native replacement for legacy OpenSCAP/CIS-CAT workflows.
+#   - OpenSCAP and CIS-CAT are still represented here as explicit configurable variables because this
+#     environment wants those controls enabled, but the role/template should render them through safe
+#     command/SCA/agent.conf workflows unless legacy wodles are intentionally restored.
+
+wazuh_manager:
+  name: wazuh-master-01
+  environment: production
+  role: master
+  home: /var/ossec
+  local_domain: local.sinlessgamesllc.com
+  organization: SinLess Games LLC
+  owner: sinless777
+  timezone: America/Boise
+
+# Compliance goals supported by the enabled Wazuh capabilities below.
+# NOTE: SOC 2 and SOC 3 are report types based on Trust Services Criteria, so the Wazuh TSC mapping is
+# the closest native Wazuh compliance mapping for SOC2/SOC3 evidence collection.
+wazuh_compliance_profiles:
+  - pci_dss
+  - gdpr
+  - hipaa
+  - nist_800_53
+  - tsc
+  - soc2
+  - soc3
+
+wazuh_global:
+  jsonout_output: "yes"
+  alerts_log: "yes"
+  logall: "no"
+  logall_json: "no"
+  email_notification: "no"
+  smtp_server: 127.0.0.1
+  email_from: wazuh@local.sinlessgamesllc.com
+  email_to:
+    - security@sinlessgamesllc.com
+  email_maxperhour: 24
+  white_list:
+    - 127.0.0.1
+    - ::1
+    - localhost.localdomain
+    - localhost
+
+wazuh_alerts:
+  log_alert_level: 3
+  email_alert_level: 12
+
+wazuh_logging:
+  log_format: plain
+
+wazuh_remote:
+  # Agent event listener. Expose this through the VM or load balancer for agents and K8s worker managers.
+  secure:
+    enabled: true
+    connection: secure
+    port: 1514
+    protocol: tcp,udp
+    queue_size: 131072
+    rids_closing_time: 5m
+    connection_overtake_time: 600
+    allowed_ips:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+    agents:
+      allow_higher_versions: "no"
+
+  # Optional network/syslog receiver. Keep restricted to internal RFC1918 networks.
+  syslog:
+    enabled: true
+    connection: syslog
+    port: 514
+    protocol: tcp
+    allowed_ips:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+
+wazuh_auth:
+  enabled: true
+  disabled: "no"
+  remote_enrollment: "yes"
+  port: 1515
+  use_source_ip: "no"
+  purge: "yes"
+  use_password: "yes"
+
+  # Manage this file separately with Ansible/Vault. It is intentionally not placed in ossec.conf.
+  password_file: /var/ossec/etc/authd.pass
+
+  ciphers: HIGH:!ADH:!EXP:!MD5:!RC4:!3DES:!CAMELLIA:@STRENGTH
+  ssl_verify_host: "no"
+  ssl_manager_cert: etc/sslmanager.cert
+  ssl_manager_key: etc/sslmanager.key
+  ssl_auto_negotiate: "no"
+
+  force:
+    enabled: "yes"
+    disconnected_time:
+      enabled: "yes"
+      value: 1h
+    after_registration_time: 1h
+    key_mismatch: "yes"
+
+  agent_auto_registration:
+    enabled: "yes"
+    group: "{{ wazuh_agent_groups.default_agent_groups | default(['default']) | join(',') }}"
+    password: "{{ vault_wazuh_agent_enrollment_password | default('') }}"
+
+wazuh_cluster:
+  enabled: true
+  name: wazuh
+  node_name: wazuh-01
+  node_type: master
+
+  # Wazuh requires one shared 32-character alphanumeric key across all cluster nodes.
+  key: "{{ vault_wazuh_cluster_key | default('ChangeMeChangeMeChangeMeChangeMe') }}"
+
+  port: 1516
+  bind_addr: 0.0.0.0
+
+  # Wazuh currently allows one master node in this list.
+  # Workers in Kubernetes should point at this VM master.
+  master_address: 10.10.10.21
+  nodes:
+    - 10.10.10.21
+
+  hidden: "no"
+  disabled: "no"
+
+  haproxy_helper:
+    enabled: false
+    haproxy_disabled: "yes"
+    haproxy_address: wazuh-agent-lb.local.sinlessgamesllc.com
+    haproxy_user: haproxy
+    haproxy_password: "{{ vault_wazuh_haproxy_password | default('') }}"
+    haproxy_port: 5555
+    haproxy_protocol: http
+    haproxy_backend: wazuh_cluster
+    frequency: 60
+    agent_chunk_size: 100
+    agent_reconnection_time: 10
+    agent_reconnection_stability_time: 60
+    imbalance_tolerance: 0.1
+    remove_disconnected_node_after: 10
+
+# Wazuh indexer connection for vulnerability inventory/status indexing.
+wazuh_indexer:
+  enabled: true
+  hosts:
+    - https://wazuh-indexer.security.svc.cluster.local:9200
+  ssl:
+    certificate_authorities:
+      - /etc/filebeat/certs/root-ca.pem
+    certificate: /etc/filebeat/certs/wazuh-master.pem
+    key: /etc/filebeat/certs/wazuh-master-key.pem
+
+wazuh_ruleset:
+  default_decoders:
+    - ruleset/decoders
+
+  default_rules:
+    - ruleset/rules
+
+  rule_exclude:
+    - 0215-policy_rules.xml
+
+  lists:
+    - etc/lists/audit-keys
+    - etc/lists/amazon/aws-eventnames
+    - etc/lists/security-eventchannel
+    - etc/lists/blacklist-alienvault
+    - etc/lists/suspicious-programs
+    - etc/lists/malicious-ioc/malware-hashes
+    - etc/lists/malicious-ioc/malicious-ip
+    - etc/lists/malicious-ioc/malicious-domains
+
+  custom_decoders:
+    - etc/decoders
+
+  custom_rules:
+    - etc/rules
+
+# CDB list content that the role can create before ossec-makelists runs.
+wazuh_cdb_lists:
+  enabled: true
+  base_dir: /var/ossec/etc/lists
+  directory_mode: "2770"
+  file_mode: "0660"
+
+  files:
+    - path: /var/ossec/etc/lists/audit-keys
+      mode: "0660"
+      entries:
+        - audit-wazuh-w:write
+        - audit-wazuh-r:read
+        - audit-wazuh-a:attribute
+        - audit-wazuh-x:execute
+        - audit-wazuh-c:command
+        - audit-command:command
+        - audit-privileged:command
+        - audit-sudoers:write
+        - audit-identity:write
+        - audit-network:write
+        - audit-kernel-modules:command
+        - audit-time-change:write
+        - audit-system-locale:write
+        - audit-permission-change:attribute
+        - audit-login:write
+        - audit-session:write
+        - audit-mac-policy:write
+        - audit-dac-permission:write
+        - audit-delete:write
+        - audit-scope:write
+
+    - path: /var/ossec/etc/lists/blacklist-alienvault
+      mode: "0660"
+      entries:
+        - __wazuh_placeholder__:disabled
+
+    - path: /var/ossec/etc/lists/suspicious-programs
+      mode: "0660"
+      entries:
+        - nc:netcat
+        - ncat:netcat
+        - netcat:netcat
+        - socat:suspicious_network_tool
+        - cryptcat:suspicious_network_tool
+        - tcpdump:packet_capture
+        - tshark:packet_capture
+        - wireshark:packet_capture
+        - masscan:scanner
+        - nmap:scanner
+        - hydra:bruteforce_tool
+        - john:password_cracker
+        - hashcat:password_cracker
+
+    - path: /var/ossec/etc/lists/malicious-ioc/malware-hashes
+      mode: "0660"
+      entries:
+        - __wazuh_placeholder__:disabled
+
+    - path: /var/ossec/etc/lists/malicious-ioc/malicious-ip
+      mode: "0660"
+      entries:
+        - __wazuh_placeholder__:disabled
+
+    - path: /var/ossec/etc/lists/malicious-ioc/malicious-domains
+      mode: "0660"
+      entries:
+        - __wazuh_placeholder__:disabled
+
+wazuh_localfiles:
+  - name: wazuh-alerts-json
+    enabled: true
+    log_format: json
+    location: /var/ossec/logs/alerts/alerts.json
+
+  - name: wazuh-active-responses
+    enabled: true
+    log_format: syslog
+    location: /var/ossec/logs/active-responses.log
+
+  - name: auth-log
+    enabled: true
+    log_format: syslog
+    location: /var/log/auth.log
+
+  - name: syslog
+    enabled: true
+    log_format: syslog
+    location: /var/log/syslog
+
+  - name: kern-log
+    enabled: true
+    log_format: syslog
+    location: /var/log/kern.log
+
+  - name: auditd
+    enabled: true
+    log_format: audit
+    location: /var/log/audit/audit.log
+
+  - name: openscap-results
+    enabled: true
+    log_format: json
+    location: /var/ossec/logs/openscap/openscap-results.json
+
+  - name: ciscat-results
+    enabled: true
+    log_format: json
+    location: /var/ossec/logs/ciscat/ciscat-results.json
+
+  - name: nginx-access
+    enabled: false
+    log_format: syslog
+    location: /var/log/nginx/access.log
+
+  - name: nginx-error
+    enabled: false
+    log_format: syslog
+    location: /var/log/nginx/error.log
+
+  - name: apache-access
+    enabled: false
+    log_format: syslog
+    location: /var/log/apache2/access.log
+
+  - name: apache-error
+    enabled: false
+    log_format: syslog
+    location: /var/log/apache2/error.log
+
+  # Enable only if the Kubernetes audit log is mounted onto the VM manager.
+  - name: kubernetes-audit
+    enabled: false
+    log_format: json
+    location: /var/log/kubernetes/audit/audit.log
+
+  # Used by the unauthorized process / Netcat PoC. Consider moving this into agent.conf for endpoints.
+  - name: process-list
+    enabled: true
+    log_format: full_command
+    alias: process list
+    command: ps -e -o pid,uname,command
+    frequency: 30
+
+# Linux Audit / auditd configuration.
+# Wazuh processes audit events from /var/log/audit/audit.log and uses CDB audit keys to classify them.
+wazuh_system_audit:
+  enabled: true
+  install: true
+  package: auditd
+  service: auditd
+  service_enabled: true
+  service_state: started
+
+  audit_log: /var/log/audit/audit.log
+  rules_file: /etc/audit/rules.d/wazuh.rules
+
+  backlog_limit: 8192
+  failure_mode: 1
+  rate_limit: 0
+  flush: incremental_async
+  max_log_file: 64
+  num_logs: 8
+  space_left_action: syslog
+  admin_space_left_action: halt
+  disk_full_action: halt
+  disk_error_action: halt
+
+  cdb_list: /var/ossec/etc/lists/audit-keys
+
+  rules:
+    - name: audit-delete-events
+      rule: -a always,exit -F arch=b64 -S unlink,unlinkat,rename,renameat -F auid>=1000 -F auid!=unset -k audit-delete
+
+    - name: audit-32bit-delete-events
+      rule: -a always,exit -F arch=b32 -S unlink,unlinkat,rename,renameat -F auid>=1000 -F auid!=unset -k audit-delete
+
+    - name: audit-privileged-commands
+      rule: -a always,exit -F path=/usr/bin/sudo -F perm=x -F auid>=1000 -F auid!=unset -k audit-command
+
+    - name: audit-su
+      rule: -a always,exit -F path=/usr/bin/su -F perm=x -F auid>=1000 -F auid!=unset -k audit-command
+
+    - name: audit-passwd
+      rule: -w /etc/passwd -p wa -k audit-identity
+
+    - name: audit-shadow
+      rule: -w /etc/shadow -p wa -k audit-identity
+
+    - name: audit-group
+      rule: -w /etc/group -p wa -k audit-identity
+
+    - name: audit-gshadow
+      rule: -w /etc/gshadow -p wa -k audit-identity
+
+    - name: audit-sudoers
+      rule: -w /etc/sudoers -p wa -k audit-sudoers
+
+    - name: audit-sudoers-d
+      rule: -w /etc/sudoers.d/ -p wa -k audit-sudoers
+
+    - name: audit-ssh-config
+      rule: -w /etc/ssh/sshd_config -p wa -k audit-wazuh-w
+
+    - name: audit-audit-config
+      rule: -w /etc/audit/ -p wa -k audit-wazuh-w
+
+    - name: audit-kernel-modules
+      rule: -w /sbin/insmod -p x -k audit-kernel-modules
+
+    - name: audit-kernel-rmmod
+      rule: -w /sbin/rmmod -p x -k audit-kernel-modules
+
+    - name: audit-kernel-modprobe
+      rule: -w /sbin/modprobe -p x -k audit-kernel-modules
+
+    - name: audit-time-change
+      rule: -a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k audit-time-change
+
+    - name: audit-network-environment
+      rule: -a always,exit -F arch=b64 -S sethostname,setdomainname -k audit-system-locale
+
+    - name: audit-permission-change
+      rule: -a always,exit -F arch=b64 -S chmod,fchmod,fchmodat,chown,fchown,fchownat,lchown,setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=unset -k audit-permission-change
+
+    - name: audit-login-records
+      rule: -w /var/log/faillog -p wa -k audit-login
+
+    - name: audit-lastlog
+      rule: -w /var/log/lastlog -p wa -k audit-login
+
+    - name: audit-tallylog
+      rule: -w /var/log/tallylog -p wa -k audit-login
+
+    - name: audit-session
+      rule: -w /var/run/utmp -p wa -k audit-session
+
+    - name: audit-wtmp
+      rule: -w /var/log/wtmp -p wa -k audit-session
+
+    - name: audit-btmp
+      rule: -w /var/log/btmp -p wa -k audit-session
+
+wazuh_syscheck:
+  enabled: true
+  disabled: "no"
+  frequency: 43200
+  scan_on_start: "yes"
+  auto_ignore: "no"
+  alert_new_files: "yes"
+  remove_old_diff: "yes"
+  restart_audit: "yes"
+  skip_nfs: "yes"
+  skip_dev: "yes"
+  skip_proc: "yes"
+  skip_sys: "yes"
+  process_priority: 10
+  max_eps: 50
+
+  directories:
+    - path: /etc
+      attributes:
+        check_all: "yes"
+        report_changes: "yes"
+        realtime: "yes"
+
+    - path: /usr/bin
+      attributes:
+        check_all: "yes"
+
+    - path: /usr/sbin
+      attributes:
+        check_all: "yes"
+
+    - path: /bin
+      attributes:
+        check_all: "yes"
+
+    - path: /sbin
+      attributes:
+        check_all: "yes"
+
+    - path: /boot
+      attributes:
+        check_all: "yes"
+
+    - path: /var/ossec/etc
+      attributes:
+        check_all: "yes"
+        report_changes: "yes"
+        realtime: "yes"
+
+    # Used by malware, VirusTotal, YARA, and suspicious binary PoCs on a Linux endpoint.
+    # For production agents, prefer centralizing equivalent entries in agent.conf groups.
+    - path: /root
+      attributes:
+        check_all: "yes"
+        report_changes: "yes"
+        realtime: "yes"
+
+  ignores:
+    - /etc/mtab
+    - /etc/hosts.deny
+    - /etc/mail/statistics
+    - /etc/random-seed
+    - /etc/random.seed
+    - /etc/adjtime
+    - /etc/httpd/logs
+    - /etc/utmpx
+    - /etc/wtmpx
+    - /etc/cups/certs
+    - /etc/dumpdates
+    - /etc/svc/volatile
+
+  ignore_regex:
+    - .log$|.swp$|.tmp$|.pid$
+
+  nodiff:
+    - /etc/ssl/private.key
+    - /etc/ssh/ssh_host_rsa_key
+    - /etc/ssh/ssh_host_ecdsa_key
+    - /etc/ssh/ssh_host_ed25519_key
+    - /var/ossec/etc/authd.pass
+
+  synchronization:
+    enabled: "yes"
+    interval: 5m
+    max_eps: 10
+
+wazuh_rootcheck:
+  enabled: true
+  disabled: "no"
+  check_unixaudit: "yes"
+  check_files: "yes"
+  check_trojans: "yes"
+  check_dev: "yes"
+  check_sys: "yes"
+  check_pids: "yes"
+  check_ports: "yes"
+  check_if: "yes"
+  frequency: 43200
+  rootkit_files: etc/shared/rootkit_files.txt
+  rootkit_trojans: etc/shared/rootkit_trojans.txt
+  skip_nfs: "yes"
+  ignore_regex:
+    - ^/etc/
+
+# Native maintained Wazuh Security Configuration Assessment.
+# This is the primary configuration-assessment path for Wazuh 4.x.
+wazuh_sca:
+  enabled: true
+  scan_on_start: "yes"
+  interval: 12h
+  skip_nfs: "yes"
+
+  # Render these only after the role verifies the files exist on the target.
+  verify_policy_files_before_render: true
+  policies:
+    - path: ruleset/sca/cis_debian12.yml
+      enabled: true
+
+    - path: ruleset/sca/system_audit_rcl.yml
+      enabled: true
+
+    - path: ruleset/sca/system_audit_ssh.yml
+      enabled: true
+
+    - path: ruleset/sca/system_audit_pw.yml
+      enabled: true
+
+# Legacy OpenSCAP workflow.
+# In Wazuh 4.x, prefer SCA for native Wazuh hardening/compliance checks.
+# This block lets the role install OpenSCAP tooling and run scans through a command workflow.
+wazuh_openscap:
+  enabled: true
+  mode: command
+  deprecated_upstream: true
+  prefer_sca: true
+
+  install: true
+  packages:
+    - openscap-scanner
+    - openscap-utils
+    - ssg-base
+    - ssg-debian
+
+  binary: /usr/bin/oscap
+  content_path: /usr/share/xml/scap/ssg/content/ssg-debian12-ds.xml
+  profile: xccdf_org.ssgproject.content_profile_cis
+  results_dir: /var/ossec/logs/openscap
+  results_file: /var/ossec/logs/openscap/openscap-results.xml
+  report_file: /var/ossec/logs/openscap/openscap-report.html
+  json_results_file: /var/ossec/logs/openscap/openscap-results.json
+
+  scan:
+    run_on_start: "yes"
+    interval: 1d
+    timeout: 1800
+    ignore_output: "no"
+
+  command:
+    tag: openscap-cis-scan
+    command: >-
+      /usr/bin/oscap xccdf eval
+      --profile xccdf_org.ssgproject.content_profile_cis
+      --results /var/ossec/logs/openscap/openscap-results.xml
+      --report /var/ossec/logs/openscap/openscap-report.html
+      /usr/share/xml/scap/ssg/content/ssg-debian12-ds.xml
+    run_on_start: "yes"
+    interval: 1d
+    timeout: 1800
+    ignore_output: "no"
+
+# Legacy CIS-CAT workflow.
+# CIS-CAT requires the CIS-CAT Assessor and the appropriate CIS license/benchmarks.
+# In Wazuh 4.x, prefer SCA where possible.
+wazuh_ciscat:
+  enabled: true
+  mode: command
+  deprecated_upstream: true
+  prefer_sca: true
+
+  install_java: true
+  java_package: openjdk-21-jre-headless
+
+  # Place CIS-CAT Assessor files here out-of-band or with a separate licensed artifact task.
+  base_dir: /opt/cis-cat
+  assessor_path: /opt/cis-cat/CIS-CAT.sh
+  jar_path: /opt/cis-cat/CIS-CAT.jar
+  benchmarks_dir: /opt/cis-cat/benchmarks
+  benchmark: /opt/cis-cat/benchmarks/CIS_Debian_Linux_12_Benchmark.xml
+
+  reports_dir: /var/ossec/logs/ciscat
+  results_file: /var/ossec/logs/ciscat/ciscat-results.xml
+  json_results_file: /var/ossec/logs/ciscat/ciscat-results.json
+
+  scan:
+    run_on_start: "yes"
+    interval: 1d
+    timeout: 3600
+    ignore_output: "no"
+
+  command:
+    tag: ciscat-cis-scan
+    command: >-
+      /opt/cis-cat/CIS-CAT.sh
+      -a
+      -b /opt/cis-cat/benchmarks/CIS_Debian_Linux_12_Benchmark.xml
+      -r /var/ossec/logs/ciscat
+    run_on_start: "yes"
+    interval: 1d
+    timeout: 3600
+    ignore_output: "no"
+
+# Generic command wodles the template may render into ossec.conf.
+# These are used for tools such as OpenSCAP and CIS-CAT when legacy native wodles are not available.
+wazuh_command_wodles:
+  - name: openscap-cis-scan
+    enabled: "{{ wazuh_openscap.enabled | default(false) }}"
+    tag: "{{ wazuh_openscap.command.tag }}"
+    command: "{{ wazuh_openscap.command.command }}"
+    run_on_start: "{{ wazuh_openscap.command.run_on_start }}"
+    interval: "{{ wazuh_openscap.command.interval }}"
+    timeout: "{{ wazuh_openscap.command.timeout }}"
+    ignore_output: "{{ wazuh_openscap.command.ignore_output }}"
+    skip_verification: "yes"
+
+  - name: ciscat-cis-scan
+    enabled: "{{ wazuh_ciscat.enabled | default(false) }}"
+    tag: "{{ wazuh_ciscat.command.tag }}"
+    command: "{{ wazuh_ciscat.command.command }}"
+    run_on_start: "{{ wazuh_ciscat.command.run_on_start }}"
+    interval: "{{ wazuh_ciscat.command.interval }}"
+    timeout: "{{ wazuh_ciscat.command.timeout }}"
+    ignore_output: "{{ wazuh_ciscat.command.ignore_output }}"
+    skip_verification: "yes"
+
+wazuh_vulnerability_detection:
+  enabled: true
+  index_status: "yes"
+  feed_update_interval: 60m
+  offline_url: ""
+
+wazuh_syscollector:
+  enabled: true
+  interval: 1h
+  scan_on_start: "yes"
+  hardware: "yes"
+  os: "yes"
+  network: "yes"
+  packages: "yes"
+  ports:
+    enabled: "yes"
+    all: "no"
+  processes: "yes"
+
+  # The hotfixes scan is Windows-only. Keep it disabled on this Debian manager to avoid startup warnings.
+  hotfixes: "no"
+
+  users: "yes"
+  groups: "yes"
+  services: "yes"
+  browser_extensions: "yes"
+  synchronization:
+    max_eps: 10
+
+wazuh_docker_listener:
+  # This monitors Docker events on Docker hosts. RKE2 uses containerd, so leave disabled unless Docker is present.
+  enabled: false
+  interval: 10m
+  attempts: 5
+  run_on_start: "yes"
+
+wazuh_osquery:
+  enabled: true
+  run_daemon: "no"
+  log_path: /var/log/osquery/osqueryd.results.log
+  config_path: /etc/osquery/osquery.conf
+  add_labels: "yes"
+
+wazuh_github:
+  # Requires GitHub Enterprise Cloud audit log API access and a PAT with audit_log scope.
+  enabled: true
+  interval: 1m
+  time_delay: 1m
+  curl_max_size: 1M
+  only_future_events: "yes"
+  api_auth:
+    - org_name: SinLess-Games
+      api_token: "{{ vault_wazuh_github_api_token | default('') }}"
+  api_parameters:
+    event_type: all
+
+wazuh_integrations:
+  virustotal:
+    enabled: true
+    api_key: "{{ vault_wazuh_virustotal_api_key | default('') }}"
+    # Free VirusTotal API keys are rate limited. Keep the rule list tight.
+    rule_id: 100200,100201
+    group: syscheck
+    alert_format: json
+    timeout: 30
+    retries: 5
+
+  slack:
+    enabled: false
+    hook_url: "{{ vault_wazuh_slack_hook_url | default('') }}"
+    level: 10
+    group: multiple_drops,authentication_failures,syscheck,virustotal
+    alert_format: json
+
+  shuffle:
+    enabled: false
+    hook_url: "{{ vault_wazuh_shuffle_hook_url | default('') }}"
+    level: 10
+    alert_format: json
+
+  discord:
+    enabled: true
+    hook_url: "{{ vault_wazuh_discord_hook_url | default('') }}"
+    level: 10
+    group: multiple_drops,authentication_failures,syscheck,virustotal
+    alert_format: json
+
+wazuh_commands:
+  - name: host-deny
+    executable: host-deny
+    timeout_allowed: "yes"
+
+  - name: firewall-drop
+    executable: firewall-drop
+    timeout_allowed: "yes"
+
+  - name: restart-wazuh
+    executable: restart-wazuh
+    timeout_allowed: "no"
+
+  - name: disable-account
+    executable: disable-account
+    timeout_allowed: "yes"
+
+  - name: remove-threat
+    executable: remove-threat.sh
+    timeout_allowed: "no"
+
+  - name: netsh
+    executable: netsh.exe
+    timeout_allowed: "yes"
+
+wazuh_active_responses:
+  # SSH brute-force and generic authentication failures.
+  - name: block-authentication-abuse
+    enabled: true
+    command: firewall-drop
+    location: local
+    rules_group: authentication_failures,|sshd,|pci_dss_11.4,
+    level: 10
+    timeout: 600
+
+  # Known malicious IP from AlienVault/CDB reputation list. Requires custom rule id 100100 in local_rules.xml.
+  - name: block-known-malicious-ip
+    enabled: true
+    command: firewall-drop
+    location: local
+    rules_id: 100100
+    timeout: 600
+
+  # VirusTotal-positive malware removal. Requires remove-threat.sh on endpoints and rule id 87105.
+  - name: remove-virustotal-threat
+    enabled: true
+    command: remove-threat
+    location: local
+    rules_id: 87105
+
+wazuh_reports:
+  enabled: false
+  category: syscheck
+  title: Daily Wazuh security report
+  email_to:
+    - security@sinlessgamesllc.com
+  showlogs: "no"
+
+wazuh_labels:
+  - key: environment
+    value: production
+
+  - key: owner
+    value: sinless777
+
+  - key: organization
+    value: SinLess Games LLC
+
+  - key: compliance.scope
+    value: pci_dss,gdpr,hipaa,nist_800_53,tsc,soc2,soc3
+
+wazuh_rule_test:
+  enabled: true
+  threads: 1
+  max_sessions: 64
+  session_timeout: 15m
+
+wazuh_agent_upgrade:
+  enabled: true
+  wpk_repository: https://packages.wazuh.com/4.x/wpk/
+
+# Wazuh agent groups and centralized agent.conf defaults.
+#
+# The role should:
+#   - create /var/ossec/etc/shared/<group>/ for each enabled group
+#   - render /var/ossec/etc/shared/<group>/agent.conf from this structure
+#   - assign newly enrolled agents to default_agent_groups when supported by enrollment
+#   - keep group names restricted to letters, numbers, dots, underscores, and hyphens
+wazuh_agent_groups:
+  enabled: true
+  base_dir: /var/ossec/etc/shared
+
+  default_group: default
+  default_agent_groups:
+    - default
+    - Production
+    - Security
+    - Infrastructure
+
+  directory_mode: "0750"
+  agent_conf_mode: "0640"
+  owner: root
+  group: wazuh
+
+  groups:
+    - name: default
+      enabled: true
+      assign_by_default: true
+      description: Baseline settings applied to every enrolled Wazuh agent.
+      agent_conf:
+        enabled: true
+        labels:
+          - key: environment
+            value: production
+          - key: organization
+            value: SinLess Games LLC
+        localfiles:
+          - name: auth-log
+            enabled: true
+            log_format: syslog
+            location: /var/log/auth.log
+          - name: syslog
+            enabled: true
+            log_format: syslog
+            location: /var/log/syslog
+          - name: auditd
+            enabled: true
+            log_format: audit
+            location: /var/log/audit/audit.log
+        sca:
+          enabled: true
+          scan_on_start: "yes"
+          interval: 12h
+          skip_nfs: "yes"
+        syscollector:
+          enabled: true
+          interval: 1h
+          scan_on_start: "yes"
+          hardware: "yes"
+          os: "yes"
+          network: "yes"
+          packages: "yes"
+          ports:
+            enabled: "yes"
+            all: "no"
+          processes: "yes"
+          hotfixes: "no"
+          users: "yes"
+          groups: "yes"
+          services: "yes"
+          browser_extensions: "yes"
+        syscheck:
+          enabled: true
+          disabled: "no"
+          frequency: 43200
+          scan_on_start: "yes"
+          directories:
+            - path: /etc
+              attributes:
+                check_all: "yes"
+                report_changes: "yes"
+            - path: /usr/bin
+              attributes:
+                check_all: "yes"
+            - path: /usr/sbin
+              attributes:
+                check_all: "yes"
+        rootcheck:
+          enabled: true
+          disabled: "no"
+
+    - name: Production
+      enabled: true
+      assign_by_default: true
+      description: Production workloads and servers.
+      agent_conf:
+        enabled: true
+        labels:
+          - key: environment
+            value: production
+          - key: criticality
+            value: high
+        sca:
+          enabled: true
+          scan_on_start: "yes"
+          interval: 12h
+          skip_nfs: "yes"
+        syscheck:
+          enabled: true
+          disabled: "no"
+          frequency: 21600
+          scan_on_start: "yes"
+          directories:
+            - path: /etc
+              attributes:
+                check_all: "yes"
+                report_changes: "yes"
+                realtime: "yes"
+            - path: /boot
+              attributes:
+                check_all: "yes"
+            - path: /usr/bin
+              attributes:
+                check_all: "yes"
+            - path: /usr/sbin
+              attributes:
+                check_all: "yes"
+
+    - name: Development
+      enabled: true
+      assign_by_default: false
+      description: Development endpoints and non-production engineering systems.
+      agent_conf:
+        enabled: true
+        labels:
+          - key: environment
+            value: development
+          - key: criticality
+            value: medium
+        sca:
+          enabled: true
+          scan_on_start: "yes"
+          interval: 24h
+          skip_nfs: "yes"
+        syscheck:
+          enabled: true
+          disabled: "no"
+          frequency: 43200
+          scan_on_start: "yes"
+
+    - name: Staging
+      enabled: true
+      assign_by_default: false
+      description: Staging and pre-production systems.
+      agent_conf:
+        enabled: true
+        labels:
+          - key: environment
+            value: staging
+          - key: criticality
+            value: medium
+        sca:
+          enabled: true
+          scan_on_start: "yes"
+          interval: 12h
+          skip_nfs: "yes"
+        syscheck:
+          enabled: true
+          disabled: "no"
+          frequency: 28800
+          scan_on_start: "yes"
+
+    - name: Security
+      enabled: true
+      assign_by_default: true
+      description: Security infrastructure, SIEM, Vault, GitOps, and audit-sensitive systems.
+      agent_conf:
+        enabled: true
+        labels:
+          - key: role
+            value: security
+          - key: compliance.scope
+            value: pci_dss,gdpr,hipaa,nist_800_53,tsc,soc2,soc3
+        localfiles:
+          - name: auditd
+            enabled: true
+            log_format: audit
+            location: /var/log/audit/audit.log
+          - name: auth-log
+            enabled: true
+            log_format: syslog
+            location: /var/log/auth.log
+        sca:
+          enabled: true
+          scan_on_start: "yes"
+          interval: 6h
+          skip_nfs: "yes"
+        syscheck:
+          enabled: true
+          disabled: "no"
+          frequency: 21600
+          scan_on_start: "yes"
+          directories:
+            - path: /etc
+              attributes:
+                check_all: "yes"
+                report_changes: "yes"
+                realtime: "yes"
+            - path: /var/ossec/etc
+              attributes:
+                check_all: "yes"
+                report_changes: "yes"
+                realtime: "yes"
+            - path: /root
+              attributes:
+                check_all: "yes"
+                report_changes: "yes"
+
+    - name: Infrastructure
+      enabled: true
+      assign_by_default: true
+      description: Core infrastructure servers, Kubernetes nodes, network services, and storage services.
+      agent_conf:
+        enabled: true
+        labels:
+          - key: role
+            value: infrastructure
+          - key: criticality
+            value: high
+        localfiles:
+          - name: auth-log
+            enabled: true
+            log_format: syslog
+            location: /var/log/auth.log
+          - name: syslog
+            enabled: true
+            log_format: syslog
+            location: /var/log/syslog
+          - name: kern-log
+            enabled: true
+            log_format: syslog
+            location: /var/log/kern.log
+        sca:
+          enabled: true
+          scan_on_start: "yes"
+          interval: 12h
+          skip_nfs: "yes"
+        syscheck:
+          enabled: true
+          disabled: "no"
+          frequency: 21600
+          scan_on_start: "yes"
+          directories:
+            - path: /etc
+              attributes:
+                check_all: "yes"
+                report_changes: "yes"
+                realtime: "yes"
+            - path: /boot
+              attributes:
+                check_all: "yes"
+            - path: /usr/bin
+              attributes:
+                check_all: "yes"
+            - path: /usr/sbin
+              attributes:
+                check_all: "yes"
+
+    - name: Kubernetes
+      enabled: true
+      assign_by_default: false
+      description: Kubernetes control-plane and worker nodes.
+      agent_conf:
+        enabled: true
+        labels:
+          - key: platform
+            value: kubernetes
+          - key: cluster
+            value: rke2-prod
+        localfiles:
+          - name: auth-log
+            enabled: true
+            log_format: syslog
+            location: /var/log/auth.log
+          - name: syslog
+            enabled: true
+            log_format: syslog
+            location: /var/log/syslog
+          - name: kubelet
+            enabled: false
+            log_format: syslog
+            location: /var/log/kubelet.log
+          - name: kubernetes-audit
+            enabled: false
+            log_format: json
+            location: /var/log/kubernetes/audit/audit.log
+        sca:
+          enabled: true
+          scan_on_start: "yes"
+          interval: 12h
+          skip_nfs: "yes"
+        syscollector:
+          enabled: true
+          interval: 1h
+          scan_on_start: "yes"
+          hardware: "yes"
+          os: "yes"
+          network: "yes"
+          packages: "yes"
+          ports:
+            enabled: "yes"
+            all: "no"
+          processes: "yes"
+          users: "yes"
+          groups: "yes"
+          services: "yes"
+
+    - name: Windows
+      enabled: true
+      assign_by_default: false
+      description: Windows endpoints.
+      agent_conf:
+        enabled: true
+        labels:
+          - key: os.family
+            value: windows
+        sca:
+          enabled: true
+          scan_on_start: "yes"
+          interval: 12h
+          skip_nfs: "yes"
+        syscollector:
+          enabled: true
+          interval: 1h
+          scan_on_start: "yes"
+          hardware: "yes"
+          os: "yes"
+          network: "yes"
+          packages: "yes"
+          ports:
+            enabled: "yes"
+            all: "no"
+          processes: "yes"
+          hotfixes: "yes"
+          users: "yes"
+          groups: "yes"
+          services: "yes"
+          browser_extensions: "yes"
+
+wazuh_local_internal_options:
+  agent_remote_conf: 1
+
+  remote_commands:
+    # Required for centralized <wodle name="command"> in agent.conf.
+    # Set to 1 only on agents/groups that need manager-pushed commands.
+    wazuh_command: 1
+
+    # Required only if centralized logcollector command entries are used.
+    logcollector: 0
+
+    # Required if shared SCA policies execute commands.
+    sca: 1
+
+  sca_commands_timeout: 300
+  execd_request_timeout: 300
+  wazuh_modules_kill_timeout: 30
+  remoted_merge_shared: 1
+  remoted_disk_storage: 1
+
+  limits:
+    wazuh_modules_rlimit_nofile: 65536
+    wazuh_modules_max_eps: 1000
+    agent_tolerance: 15
+    agent_warn_level: 90
+    agent_normal_level: 70
+    agent_min_eps: 50
+    agent_recv_timeout: 60
+    agent_state_interval: 5
+    remoted_sender_pool: 8
+    remoted_request_pool: 1024
+    remoted_request_timeout: 10
+    remoted_response_timeout: 60
+    wazuh_db_worker_pool_size: 8
+    wazuh_db_open_db_limit: 256
+    wazuh_db_rlimit_nofile: 65536
+
+  debug:
+    agent: 0
+    authd: 0
+    execd: 0
+    integrator: 0
+    logcollector: 0
+    monitord: 0
+    remoted: 0
+    syscheck: 0
+    wazuh_modules: 0
+    wazuh_db: 0
+    analysisd: 0

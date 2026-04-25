@@ -31,6 +31,7 @@ variable "nodes" {
     hostname       = optional(string)
     fqdn           = optional(string)
     storage        = optional(string)
+    gpu_passthrough_devices = optional(list(string), [])
   }))
 }
 

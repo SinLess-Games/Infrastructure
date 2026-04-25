@@ -91,6 +91,26 @@
   tags:
     - rootfs
 
+- name: Reconcile system hostname with inventory hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+  register: kubernetes_role_hostname_update
+  when: ansible_hostname != inventory_hostname
+
+- name: Clear stale RKE2 agent state
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/lib/rancher/rke2/agent
+    - /etc/rancher/node
+  notify: Restart rke2-agent
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+
+- name: Flush pending handler after RKE2 agent state reset
+  ansible.builtin.meta: flush_handlers
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+
 - name: Enable Debian non-free APT components on dedicated GPU worker
   ansible.builtin.replace:
     path: /etc/apt/sources.list
@@ -204,7 +224,6 @@
           kubernetes_role_local_server_token.content
           | b64decode
           | trim
-          | regex_replace('^K[^:]+::server:', '')
         )
         if (
           kubernetes_role_local_server_token is defined

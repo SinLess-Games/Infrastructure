@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+# {{ ansible_managed | default('Managed by Ansible') }}
+#
+# Template: Ansible/templates/wazuh/openscap-scan.sh.j2
+#
+# Purpose:
+#   Run an OpenSCAP XCCDF evaluation and emit a compact JSON event that Wazuh can ingest.
+#
+# Expected Wazuh localfile:
+#   <localfile>
+#     <log_format>json</log_format>
+#     <location>{{ wazuh_openscap.json_results_file | default('/var/ossec/logs/openscap/openscap-results.json') }}</location>
+#   </localfile>
+
+set -uo pipefail
+
+OSCAP_BIN="{{ wazuh_openscap.binary | default('/usr/bin/oscap') }}"
+CONTENT_PATH="{{ wazuh_openscap.content_path | default('/usr/share/xml/scap/ssg/content/ssg-debian12-ds.xml') }}"
+PROFILE="{{ wazuh_openscap.profile | default('xccdf_org.ssgproject.content_profile_cis') }}"
+
+RESULTS_DIR="{{ wazuh_openscap.results_dir | default('/var/ossec/logs/openscap') }}"
+RESULTS_FILE="{{ wazuh_openscap.results_file | default('/var/ossec/logs/openscap/openscap-results.xml') }}"
+REPORT_FILE="{{ wazuh_openscap.report_file | default('/var/ossec/logs/openscap/openscap-report.html') }}"
+JSON_RESULTS_FILE="{{ wazuh_openscap.json_results_file | default('/var/ossec/logs/openscap/openscap-results.json') }}"
+RUN_LOG_FILE="{{ wazuh_openscap.run_log_file | default('/var/ossec/logs/openscap/openscap-scan.log') }}"
+
+LOCK_FILE="{{ wazuh_openscap.lock_file | default('/var/run/wazuh-openscap-scan.lock') }}"
+TIMEOUT_SECONDS="{{ wazuh_openscap.scan.timeout | default(1800) }}"
+
+WAZUH_OWNER="{{ wazuh_openscap.owner | default('root') }}"
+WAZUH_GROUP="{{ wazuh_openscap.group | default('wazuh') }}"
+
+umask 027
+
+timestamp_utc() {
+  date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+write_json_event() {
+  local status="$1"
+  local exit_code="$2"
+  local message="$3"
+  local stdout_file="${4:-}"
+
+  python3 - "$status" "$exit_code" "$message" "$stdout_file" \
+    "$OSCAP_BIN" "$CONTENT_PATH" "$PROFILE" "$RESULTS_FILE" "$REPORT_FILE" <<'PY' >> "${JSON_RESULTS_FILE}"
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+status = sys.argv[1]
+exit_code = int(sys.argv[2])
+message = sys.argv[3]
+stdout_file = sys.argv[4]
+oscap_bin = sys.argv[5]
+content_path = sys.argv[6]
+profile = sys.argv[7]
+results_file = sys.argv[8]
+report_file = sys.argv[9]
+
+counts = {
+    "pass": 0,
+    "fail": 0,
+    "error": 0,
+    "unknown": 0,
+    "notapplicable": 0,
+    "notchecked": 0,
+    "notselected": 0,
+    "informational": 0,
+    "fixed": 0,
+}
+
+output_tail = []
+stdout_text = ""
+
+if stdout_file and Path(stdout_file).exists():
+    stdout_text = Path(stdout_file).read_text(errors="replace")
+    output_tail = stdout_text.splitlines()[-40:]
+
+for result in re.findall(r"^\s*Result\s+([A-Za-z0-9_-]+)\s*$", stdout_text, flags=re.MULTILINE):
+    normalized = result.strip().lower()
+    if normalized in counts:
+        counts[normalized] += 1
+    else:
+        counts["unknown"] += 1
+
+# Fallback parser for XCCDF result XML when stdout did not expose counts.
+if not any(counts.values()) and Path(results_file).exists():
+    try:
+        tree = ET.parse(results_file)
+        root = tree.getroot()
+        for elem in root.iter():
+            if elem.tag.endswith("rule-result"):
+                result_elem = None
+                for child in elem:
+                    if child.tag.endswith("result"):
+                        result_elem = child
+                        break
+                if result_elem is not None and result_elem.text:
+                    normalized = result_elem.text.strip().lower()
+                    if normalized in counts:
+                        counts[normalized] += 1
+                    else:
+                        counts["unknown"] += 1
+    except Exception as exc:
+        output_tail.append(f"XML parse warning: {exc}")
+
+event = {
+    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "integration": "openscap",
+    "scanner": "openscap",
+    "status": status,
+    "exit_code": exit_code,
+    "message": message,
+    "profile": profile,
+    "content_path": content_path,
+    "results_file": results_file,
+    "report_file": report_file,
+    "oscap_binary": oscap_bin,
+    "counts": counts,
+    "has_failures": counts.get("fail", 0) > 0 or counts.get("error", 0) > 0,
+    "output_tail": output_tail,
+}
+
+print(json.dumps(event, separators=(",", ":")))
+PY
+}
+
+log_line() {
+  printf '%s %s\n' "$(timestamp_utc)" "$*" >> "${RUN_LOG_FILE}"
+}
+
+mkdir -p "${RESULTS_DIR}"
+touch "${JSON_RESULTS_FILE}" "${RUN_LOG_FILE}" 2>/dev/null || true
+
+chown "${WAZUH_OWNER}:${WAZUH_GROUP}" "${RESULTS_DIR}" "${JSON_RESULTS_FILE}" "${RUN_LOG_FILE}" 2>/dev/null || true
+chmod 0750 "${RESULTS_DIR}" 2>/dev/null || true
+chmod 0640 "${JSON_RESULTS_FILE}" "${RUN_LOG_FILE}" 2>/dev/null || true
+
+exec 9>"${LOCK_FILE}"
+if ! flock -n 9; then
+  write_json_event "skipped" 0 "OpenSCAP scan already running." ""
+  exit 0
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  log_line "ERROR python3 is required to write JSON scan events."
+  exit 0
+fi
+
+if [ ! -x "${OSCAP_BIN}" ]; then
+  write_json_event "error" 127 "OpenSCAP binary is missing or not executable: ${OSCAP_BIN}" ""
+  exit 0
+fi
+
+if [ ! -r "${CONTENT_PATH}" ]; then
+  write_json_event "error" 66 "OpenSCAP content file is missing or unreadable: ${CONTENT_PATH}" ""
+  exit 0
+fi
+
+tmp_dir="$(mktemp -d "${RESULTS_DIR}/.openscap-scan.XXXXXX")"
+tmp_stdout="${tmp_dir}/stdout.log"
+tmp_results="${tmp_dir}/results.xml"
+tmp_report="${tmp_dir}/report.html"
+
+cleanup() {
+  rm -rf "${tmp_dir}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+log_line "Starting OpenSCAP scan profile=${PROFILE} content=${CONTENT_PATH}"
+
+if command -v timeout >/dev/null 2>&1; then
+  timeout "${TIMEOUT_SECONDS}s" \
+    "${OSCAP_BIN}" xccdf eval \
+      --profile "${PROFILE}" \
+      --results "${tmp_results}" \
+      --report "${tmp_report}" \
+      "${CONTENT_PATH}" >"${tmp_stdout}" 2>&1
+  scan_rc=$?
+else
+  "${OSCAP_BIN}" xccdf eval \
+    --profile "${PROFILE}" \
+    --results "${tmp_results}" \
+    --report "${tmp_report}" \
+    "${CONTENT_PATH}" >"${tmp_stdout}" 2>&1
+  scan_rc=$?
+fi
+
+if [ -s "${tmp_results}" ]; then
+  mv -f "${tmp_results}" "${RESULTS_FILE}"
+  chown "${WAZUH_OWNER}:${WAZUH_GROUP}" "${RESULTS_FILE}" 2>/dev/null || true
+  chmod 0640 "${RESULTS_FILE}" 2>/dev/null || true
+fi
+
+if [ -s "${tmp_report}" ]; then
+  mv -f "${tmp_report}" "${REPORT_FILE}"
+  chown "${WAZUH_OWNER}:${WAZUH_GROUP}" "${REPORT_FILE}" 2>/dev/null || true
+  chmod 0640 "${REPORT_FILE}" 2>/dev/null || true
+fi
+
+cat "${tmp_stdout}" >> "${RUN_LOG_FILE}" 2>/dev/null || true
+
+case "${scan_rc}" in
+  0)
+    write_json_event "completed" "${scan_rc}" "OpenSCAP scan completed successfully." "${tmp_stdout}"
+    log_line "Completed OpenSCAP scan successfully."
+    ;;
+  124)
+    write_json_event "timeout" "${scan_rc}" "OpenSCAP scan exceeded timeout of ${TIMEOUT_SECONDS} seconds." "${tmp_stdout}"
+    log_line "OpenSCAP scan timed out after ${TIMEOUT_SECONDS} seconds."
+    ;;
+  *)
+    # oscap may return non-zero for scan/evaluation conditions. Preserve the code in JSON,
+    # but exit 0 so Wazuh command scheduling does not get wedged by compliance findings.
+    write_json_event "completed_with_findings_or_errors" "${scan_rc}" "OpenSCAP scan finished with non-zero exit code ${scan_rc}." "${tmp_stdout}"
+    log_line "OpenSCAP scan finished with non-zero exit code ${scan_rc}."
+    ;;
+esac
+
+exit 0

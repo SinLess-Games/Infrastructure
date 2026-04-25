@@ -186,8 +186,8 @@
           wait_for_ssh_timeout: 600
           wait_for_kubeconfig_timeout: 300
           wait_for_api_timeout: 600
-          wait_for_node_ready_timeout: 60
-          wait_for_node_ready_retries: 15
+          wait_for_node_ready_timeout: 120
+          wait_for_node_ready_retries: 30
           wait_for_node_ready_delay: 20
       environment:
         TF_IN_AUTOMATION: "1"
@@ -282,7 +282,10 @@
   hosts: kubernetes_prod
   gather_facts: false
   any_errors_fatal: true
-  serial: "{{ hostvars['localhost'].kubernetes_runtime_configure_serial | default(3) | int }}"
+  order: inventory
+  serial:
+    - 1
+    - "{{ hostvars['localhost'].kubernetes_runtime_configure_serial | default(3) | int }}"
   vars_files:
     - ../group_vars/all/ansible.yaml
     - ../group_vars/all/users.yaml
@@ -306,6 +309,8 @@
       ansible.builtin.debug:
         msg: >-
           Kubernetes nodes are reachable; beginning OS and RKE2 configuration.
+          The first inventory host is configured alone so the bootstrap control
+          plane can start before secondary nodes attempt to join.
       tags:
         - configure
         - kubernetes
@@ -352,7 +357,6 @@
               (
                 kubernetes_bootstrap_token_file.stdout
                 | trim
-                | regex_replace('^K[^:]+::server:', '')
               )
               if (kubernetes_bootstrap_token_file.rc | default(1)) == 0
               and (kubernetes_bootstrap_token_file.stdout | default('') | trim | length > 0)
@@ -404,7 +408,7 @@
 
           Distribution: {{ kubernetes_configure_distribution | default('rke2') }}
           Version: {{ kubernetes_configure_version | default(kubernetes_rke2_version) }}
-          Serial Batch Size: {{ hostvars['localhost'].kubernetes_runtime_configure_serial | default(3) | int }}
+          Serial Batch Size: bootstrap first, then {{ hostvars['localhost'].kubernetes_runtime_configure_serial | default(3) | int }}
           ========================================================
       tags:
         - configure

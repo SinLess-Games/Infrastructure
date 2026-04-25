@@ -1,0 +1,111 @@
+# {{ ansible_managed | default('Managed by Ansible') }}
+#
+# Template: Ansible/templates/wazuh/local_internal_options.conf.j2
+#
+# Target:
+#   Linux manager/agent: /var/ossec/etc/local_internal_options.conf
+#
+# Purpose:
+#   Persist Wazuh internal option overrides that must survive upgrades.
+#
+# Important:
+#   /var/ossec/etc/internal_options.conf is overwritten during upgrades.
+#   Custom overrides belong in /var/ossec/etc/local_internal_options.conf.
+#
+# Security warning:
+#   Remote commands are disabled by default in Wazuh for security reasons.
+#   Only enable them on agent groups/endpoints where centralized command execution is required.
+
+{% set internal = wazuh_local_internal_options | default({}) %}
+{% set remote_commands = internal.remote_commands | default({}) %}
+{% set debug = internal.debug | default({}) %}
+{% set limits = internal.limits | default({}) %}
+
+# -----------------------------------------------------------------------------
+# Agent centralized configuration
+# -----------------------------------------------------------------------------
+# agent.remote_conf:
+#   1 = allow centralized agent.conf from the Wazuh manager
+#   0 = refuse centralized agent.conf
+agent.remote_conf={{ internal.agent_remote_conf | default(1) }}
+
+# -----------------------------------------------------------------------------
+# Remote command controls
+# -----------------------------------------------------------------------------
+# Required when centralized agent.conf uses:
+#   <wodle name="command"> ... </wodle>
+#
+# This is needed for centralized command workflows such as OpenSCAP/CIS-CAT
+# when they are pushed through agent groups.
+wazuh_command.remote_commands={{ remote_commands.wazuh_command | default(0) }}
+
+# Required when centralized agent.conf uses command-based logcollector entries.
+logcollector.remote_commands={{ remote_commands.logcollector | default(0) }}
+
+# Required when SCA policies from shared configuration execute commands.
+sca.remote_commands={{ remote_commands.sca | default(0) }}
+
+# Command execution timeout for SCA policy commands.
+sca.commands_timeout={{ internal.sca_commands_timeout | default(300) }}
+
+# -----------------------------------------------------------------------------
+# Execution timeouts
+# -----------------------------------------------------------------------------
+# execd.request_timeout:
+#   Timeout in seconds for active response / remote execution requests.
+execd.request_timeout={{ internal.execd_request_timeout | default(300) }}
+
+# wazuh_modules.kill_timeout:
+#   Time in seconds to wait before killing module processes during shutdown.
+wazuh_modules.kill_timeout={{ internal.wazuh_modules_kill_timeout | default(30) }}
+
+# -----------------------------------------------------------------------------
+# Wazuh modules resource limits
+# -----------------------------------------------------------------------------
+wazuh_modules.rlimit_nofile={{ limits.wazuh_modules_rlimit_nofile | default(65536) }}
+wazuh_modules.max_eps={{ limits.wazuh_modules_max_eps | default(1000) }}
+
+# -----------------------------------------------------------------------------
+# Agent buffer tuning
+# -----------------------------------------------------------------------------
+agent.tolerance={{ limits.agent_tolerance | default(15) }}
+agent.warn_level={{ limits.agent_warn_level | default(90) }}
+agent.normal_level={{ limits.agent_normal_level | default(70) }}
+agent.min_eps={{ limits.agent_min_eps | default(50) }}
+agent.recv_timeout={{ limits.agent_recv_timeout | default(60) }}
+agent.state_interval={{ limits.agent_state_interval | default(5) }}
+
+# -----------------------------------------------------------------------------
+# Remoted tuning for shared configuration distribution
+# -----------------------------------------------------------------------------
+remoted.merge_shared={{ internal.remoted_merge_shared | default(1) }}
+remoted.disk_storage={{ internal.remoted_disk_storage | default(1) }}
+remoted.sender_pool={{ limits.remoted_sender_pool | default(8) }}
+remoted.request_pool={{ limits.remoted_request_pool | default(1024) }}
+remoted.request_timeout={{ limits.remoted_request_timeout | default(10) }}
+remoted.response_timeout={{ limits.remoted_response_timeout | default(60) }}
+
+# -----------------------------------------------------------------------------
+# Database/resource tuning
+# -----------------------------------------------------------------------------
+wazuh_db.worker_pool_size={{ limits.wazuh_db_worker_pool_size | default(8) }}
+wazuh_db.open_db_limit={{ limits.wazuh_db_open_db_limit | default(256) }}
+wazuh_db.rlimit_nofile={{ limits.wazuh_db_rlimit_nofile | default(65536) }}
+
+# -----------------------------------------------------------------------------
+# Debug levels
+# -----------------------------------------------------------------------------
+# 0 = disabled
+# 1 = standard debug
+# 2 = verbose debug
+agent.debug={{ debug.agent | default(0) }}
+authd.debug={{ debug.authd | default(0) }}
+execd.debug={{ debug.execd | default(0) }}
+integrator.debug={{ debug.integrator | default(0) }}
+logcollector.debug={{ debug.logcollector | default(0) }}
+monitord.debug={{ debug.monitord | default(0) }}
+remoted.debug={{ debug.remoted | default(0) }}
+syscheck.debug={{ debug.syscheck | default(0) }}
+wazuh_modules.debug={{ debug.wazuh_modules | default(0) }}
+wazuh_db.debug={{ debug.wazuh_db | default(0) }}
+analysisd.debug={{ debug.analysisd | default(0) }}
