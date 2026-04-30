@@ -34,6 +34,7 @@ kubernetes_control_plane:
   cpu_cores: 4
   cpu_sockets: 1
   memory_mb: 8192
+  memory_balloon_mb: 4096
   disk_size: "150G"
   clone_template: "debian-13-template"
   target_nodes:
@@ -47,6 +48,7 @@ kubernetes_workers:
   cpu_cores: 6
   cpu_sockets: 1
   memory_mb: 16384
+  memory_balloon_mb: 8192
   disk_size: "150G"
   clone_template: "debian-13-template"
   target_nodes:
