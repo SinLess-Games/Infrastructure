@@ -32,10 +32,6 @@ spec:
     targetRevision: main
     path: Kubernetes/apps/prod/gitops/applications
 
-    directory:
-      recurse: true
-      include: "*.yaml"
-
   destination:
     server: https://kubernetes.default.svc
     namespace: gitops
