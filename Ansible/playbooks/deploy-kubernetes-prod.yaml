@@ -617,6 +617,22 @@
           | password_hash('bcrypt')
         )
       }}
+    kubernetes_argocd_redis_password_raw: >-
+      {{
+        (
+          hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/workloads', {}).get('redis_password', '')
+          | default(hostvars['localhost'].kubernetes_vault_data.get('redis_password', ''), true)
+        )
+        if (
+          (
+            hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/workloads', {}).get('redis_password', '')
+            | default(hostvars['localhost'].kubernetes_vault_data.get('redis_password', ''), true)
+          ) | length > 0
+        )
+        else (
+          kubernetes_vault_seed_documents.get('kubernetes/production/workloads', {}).get('data', {}).get('redis_password', '')
+        )
+      }}
 
   tasks:
     - name: Skip GitOps bootstrap when disabled or not in apply mode
@@ -657,8 +673,10 @@
           - kubernetes_argocd_admin_password_raw | length > 0
           - kubernetes_argocd_admin_password_bcrypt is defined
           - kubernetes_argocd_admin_password_bcrypt | length > 0
+          - kubernetes_argocd_redis_password_raw is defined
+          - kubernetes_argocd_redis_password_raw | length > 0
         fail_msg: >-
-          Missing argocd_admin_password in the cached Vault data.
+          Missing argocd_admin_password or redis_password in the cached Vault data.
           Update Ansible/group_vars/vault/vault-secrets.yaml and run task vault:update-secrets.
       no_log: true
       tags:
@@ -735,6 +753,25 @@
       changed_when: >-
         'configured' in (kubernetes_gitops_namespace_apply.stdout | default(''))
         or 'created' in (kubernetes_gitops_namespace_apply.stdout | default(''))
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Ensure Argo CD Redis auth secret exists
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubernetes_kubeconfig_archive_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: argocd-redis
+            namespace: "{{ kubernetes_gitops.namespace }}"
+          type: Opaque
+          stringData:
+            auth: "{{ kubernetes_argocd_redis_password_raw }}"
+      no_log: true
       tags:
         - apps
         - gitops
