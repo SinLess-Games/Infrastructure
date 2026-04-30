@@ -105,11 +105,15 @@
     - /var/lib/rancher/rke2/agent
     - /etc/rancher/node
   notify: Restart rke2-agent
-  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+    - kubernetes_rke2_reset_agent_state | default(false) | bool
 
 - name: Flush pending handler after RKE2 agent state reset
   ansible.builtin.meta: flush_handlers
-  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+    - kubernetes_rke2_reset_agent_state | default(false) | bool
 
 - name: Enable Debian non-free APT components on dedicated GPU worker
   ansible.builtin.replace:
