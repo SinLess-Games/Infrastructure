@@ -29,3 +29,28 @@ vault_kubernetes_ansible_development_data: {}
 
 kubernetes_deploy_rke2_server_token: "{{ vault_kubernetes_development_data.rke2_server_token | default('') }}"
 kubernetes_deploy_ssh_keys: "{{ vault_kubernetes_ansible_development_data.kubernetes_ssh_keys | default([]) }}"
+
+kubernetes_nodes:
+  control_plane:
+    - name: "k8s-dev-master-01"
+      hostname: "k8s-dev-master-01"
+      fqdn: "k8s-dev-master-01.dev.k8s.sinlessgames.com"
+      ip: "10.10.20.11"
+      vmid: 300
+      target_node: "pve-01"
+      clone_template: "debian-13-template"
+  workers:
+    - name: "k8s-dev-worker-01"
+      hostname: "k8s-dev-worker-01"
+      fqdn: "k8s-dev-worker-01.dev.k8s.sinlessgames.com"
+      ip: "10.10.20.21"
+      vmid: 310
+      target_node: "pve-04"
+      clone_template: "debian-13-template"
+    - name: "k8s-dev-worker-02"
+      hostname: "k8s-dev-worker-02"
+      fqdn: "k8s-dev-worker-02.dev.k8s.sinlessgames.com"
+      ip: "10.10.20.22"
+      vmid: 311
+      target_node: "pve-05"
+      clone_template: "debian-13-template"

@@ -3,6 +3,7 @@ kubernetes_role_phases:
   - configure
 
 kubernetes_role_generated_tf_file: "{{ kubernetes_terraform_dir }}/k8s-{{ kubernetes_environment }}-cluster.generated.tf"
+kubernetes_role_terraform_template: "{{ 'k8s-prod-cluster.tf.j2' if kubernetes_environment == 'prod' else 'k8s-dev-cluster.tf.j2' }}"
 kubernetes_role_generated_snippets_dir: "{{ kubernetes_generated_env_dir }}/cloud-init"
 kubernetes_role_generated_logs_dir: "{{ kubernetes_generated_env_dir }}/logs"
 kubernetes_role_local_kubeconfig_path: "{{ kubernetes_kubeconfig_local_path }}"

@@ -4,21 +4,21 @@ node-ip: "{{ ansible_host | default(ansible_default_ipv4.address) }}"
 node-name: "{{ inventory_hostname }}"
 selinux: {{ kubernetes_rke2_selinux | bool | lower }}
 pause-image: "{{ kubernetes_rke2_pause_image }}"
+{% set current_worker = (kubernetes_nodes.workers | default([]) | selectattr('name', 'equalto', inventory_hostname) | list | first) | default({}) %}
 node-label:
 {% for label in kubernetes_rke2_agent_node_labels %}
   - "{{ label }}"
 {% endfor %}
-{% if inventory_hostname == kubernetes_rke2_gpu_worker_name %}
-  - "accelerator.nvidia.com/gpu=true"
-  - "node.kubernetes.io/gpu=true"
-{% endif %}
+{% for label in current_worker.labels | default([]) %}
+  - "{{ label }}"
+{% endfor %}
 node-taint:
 {% for taint in kubernetes_rke2_agent_node_taints %}
   - "{{ taint }}"
 {% endfor %}
-{% if inventory_hostname == kubernetes_rke2_gpu_worker_name %}
-  - "nvidia.com/gpu=true:NoSchedule"
-{% endif %}
+{% for taint in current_worker.taints | default([]) %}
+  - "{{ taint }}"
+{% endfor %}
 kubelet-arg:
   - "cloud-provider=external"
   - "protect-kernel-defaults=true"

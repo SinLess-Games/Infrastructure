@@ -26,6 +26,14 @@
       - "kubernetes/staging/cluster"
 
   tasks:
+    - name: Cache Kubernetes staging operation flags
+      ansible.builtin.set_fact:
+        kubernetes_runtime_plan_only: "{{ kubernetes_plan_only | default(kubernetes_operation.plan_only) | bool }}"
+        kubernetes_runtime_destroy: "{{ kubernetes_destroy | default(kubernetes_operation.destroy) | bool }}"
+      tags:
+        - preflight
+        - deploy
+
     - name: Load Kubernetes staging secrets from Vault
       ansible.builtin.include_tasks: ../tasks/vault.yaml
       vars:
@@ -34,9 +42,11 @@
         vault_kv_paths: "{{ kubernetes_vault_kv_paths }}"
         vault_skip_verify: "{{ kubernetes_deploy_vault_skip_verify }}"
         vault_token: "{{ kubernetes_deploy_vault_token }}"
+        vault_token_file: "{{ kubernetes_deploy_vault_token_file }}"
       tags:
         - preflight
         - vault
+      when: not (kubernetes_runtime_destroy | bool)
 
     - name: Cache Vault documents and merged secrets for later plays
       ansible.builtin.set_fact:
@@ -46,6 +56,7 @@
       tags:
         - preflight
         - vault
+      when: not (kubernetes_runtime_destroy | bool)
 
     - name: Build runtime SSH key list from shared access document
       ansible.builtin.set_fact:
@@ -65,6 +76,7 @@
       tags:
         - preflight
         - vault
+      when: not (kubernetes_runtime_destroy | bool)
 
     - name: Build runtime bootstrap values from Vault
       ansible.builtin.set_fact:
@@ -77,6 +89,7 @@
       tags:
         - preflight
         - vault
+      when: not (kubernetes_runtime_destroy | bool)
 
     - name: Validate cached runtime values
       ansible.builtin.assert:
@@ -90,6 +103,17 @@
         - preflight
         - vault
         - validate
+      when: not (kubernetes_runtime_destroy | bool)
+
+    - name: Initialize empty runtime values for destroy-only runs
+      ansible.builtin.set_fact:
+        kubernetes_runtime_rke2_server_token: ""
+        kubernetes_runtime_ssh_keys: []
+      no_log: true
+      tags:
+        - preflight
+        - deploy
+      when: kubernetes_runtime_destroy | bool
 
     - name: Deploy Kubernetes staging infrastructure
       ansible.builtin.import_role:
@@ -98,6 +122,8 @@
         kubernetes_role_phases: ["deploy"]
         kubernetes_deploy_rke2_server_token: "{{ kubernetes_runtime_rke2_server_token }}"
         kubernetes_deploy_ssh_keys: "{{ kubernetes_runtime_ssh_keys }}"
+        kubernetes_destroy: "{{ kubernetes_runtime_destroy }}"
+        kubernetes_plan_only: "{{ kubernetes_runtime_plan_only }}"
       tags:
         - deploy
         - infrastructure
@@ -122,6 +148,10 @@
     - ../group_vars/kubernetes/staging/worker.yaml
 
   tasks:
+    - name: End wait play during destroy-only runs
+      ansible.builtin.meta: end_play
+      when: kubernetes_destroy | default(kubernetes_operation.destroy) | bool
+
     - name: Wait for SSH on Kubernetes nodes
       ansible.builtin.wait_for_connection:
         delay: 10
@@ -143,7 +173,7 @@
 # =============================================================================
 - name: Configure Kubernetes staging nodes
   hosts: kubernetes_staging
-  gather_facts: true
+  gather_facts: false
   any_errors_fatal: true
   vars_files:
     - ../group_vars/all/ansible.yaml
@@ -157,6 +187,16 @@
     - ../group_vars/kubernetes/staging/worker.yaml
 
   pre_tasks:
+    - name: End configure play during destroy-only runs
+      ansible.builtin.meta: end_play
+      when: kubernetes_destroy | default(kubernetes_operation.destroy) | bool
+
+    - name: Gather facts for node configuration
+      ansible.builtin.setup:
+      tags:
+        - configure
+        - kubernetes
+
     - name: Validate localhost runtime cache exists
       ansible.builtin.assert:
         that:

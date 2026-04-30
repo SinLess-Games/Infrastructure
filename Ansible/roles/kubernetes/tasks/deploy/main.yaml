@@ -12,6 +12,39 @@
   delegate_to: localhost
   run_once: true
 
+- name: Normalize Kubernetes operation flags from CLI aliases
+  ansible.builtin.set_fact:
+    kubernetes_operation: >-
+      {{
+        kubernetes_operation
+        | combine(
+            {
+              'plan_only': (kubernetes_plan_only | default(kubernetes_operation.plan_only) | bool),
+              'destroy': (kubernetes_destroy | default(kubernetes_operation.destroy) | bool)
+            },
+            recursive=True
+          )
+      }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Build Terraform module target arguments
+  ansible.builtin.set_fact:
+    kubernetes_role_terraform_target_args: >-
+      {{
+        [
+          '-target=module.kubernetes_prod_control_plane',
+          '-target=module.kubernetes_prod_workers'
+        ]
+        if kubernetes_environment == 'prod'
+        else [
+          '-target=module.kubernetes_' ~ (kubernetes_environment | replace('-', '_')) ~ '_master',
+          '-target=module.kubernetes_' ~ (kubernetes_environment | replace('-', '_')) ~ '_worker'
+        ]
+      }}
+  delegate_to: localhost
+  run_once: true
+
 - name: Render control plane cloud-init snippets
   ansible.builtin.template:
     src: "{{ kubernetes_templates_dir }}/cloud-init-master.yaml.j2"
@@ -38,9 +71,9 @@
   delegate_to: localhost
   run_once: true
 
-- name: Render production Terraform for Kubernetes cluster
+- name: Render Terraform for Kubernetes cluster
   ansible.builtin.template:
-    src: "{{ kubernetes_templates_dir }}/k8s-prod-cluster.tf.j2"
+    src: "{{ kubernetes_templates_dir }}/{{ kubernetes_role_terraform_template }}"
     dest: "{{ kubernetes_role_generated_tf_file }}"
     mode: "0644"
   delegate_to: localhost
@@ -116,11 +149,39 @@
       - kubernetes_terraform_proxmox_api_token_id | length > 0
       - kubernetes_terraform_proxmox_api_token_secret | length > 0
       - kubernetes_deploy_proxmox_api_url | length > 0
-      - kubernetes_deploy_ssh_keys | length > 0
+      - kubernetes_operation.destroy | bool or kubernetes_deploy_ssh_keys | length > 0
     fail_msg: "Terraform runtime credentials or SSH keys are incomplete for Kubernetes deployment."
   delegate_to: localhost
   run_once: true
   no_log: true
+
+- name: Upload cloud-init snippets to Proxmox local storage via API
+  ansible.builtin.uri:
+    url: "{{ kubernetes_proxmox.api_url | regex_replace('/+$', '') }}/nodes/{{ item.target_node }}/storage/local/upload"
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ kubernetes_terraform_proxmox_api_token_id }}={{ kubernetes_terraform_proxmox_api_token_secret }}
+    validate_certs: "{{ not (kubernetes_deploy_proxmox_tls_insecure | bool) }}"
+    body_format: form-multipart
+    body:
+      content: snippets
+      filename:
+        filename: "{{ kubernetes_role_generated_snippets_dir }}/{{ item.name }}-cloud-init.yaml"
+        mime_type: text/yaml
+    status_code: 200
+    return_content: true
+  loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+  no_log: true
+  when:
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+    - kubernetes_cicustom_user_snippet_enabled | default(false) | bool
 
 - name: Clear stale Proxmox VM locks before Terraform apply
   ansible.builtin.command:
@@ -242,14 +303,7 @@
 
 - name: Apply Terraform cluster plan
   ansible.builtin.command:
-    argv:
-      - terraform
-      - -chdir={{ kubernetes_terraform_dir }}
-      - apply
-      - -auto-approve
-      - -no-color
-      - -target=module.kubernetes_prod_control_plane
-      - -target=module.kubernetes_prod_workers
+    argv: "{{ ['terraform', '-chdir=' ~ kubernetes_terraform_dir, 'apply', '-auto-approve', '-no-color'] + kubernetes_role_terraform_target_args }}"
   delegate_to: localhost
   run_once: true
   async: 14400
@@ -266,14 +320,7 @@
 
 - name: Destroy Terraform cluster resources
   ansible.builtin.command:
-    argv:
-      - terraform
-      - -chdir={{ kubernetes_terraform_dir }}
-      - destroy
-      - -auto-approve
-      - -no-color
-      - -target=module.kubernetes_prod_control_plane
-      - -target=module.kubernetes_prod_workers
+    argv: "{{ ['terraform', '-chdir=' ~ kubernetes_terraform_dir, 'destroy', '-auto-approve', '-no-color'] + kubernetes_role_terraform_target_args }}"
   delegate_to: localhost
   run_once: true
   async: 14400

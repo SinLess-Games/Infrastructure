@@ -27,13 +27,15 @@ module "{{ master_module_name }}" {
   # --------------------------------------------------------------------------
   nodes = [
 {%- for i in range(kubernetes_deploy_master_count | int) %}
+{%- set target_node = kubernetes_deploy_master_target_nodes[i % (kubernetes_deploy_master_target_nodes | length)] %}
     {
       name        = "k8s-{{ kubernetes_deploy_environment }}-master-{{ '%02d' | format(i + 1) }}"
       vmid        = {{ kubernetes_deploy_master_vm_id_start | int + i }}
-      target_node = "{{ kubernetes_deploy_master_target_nodes[i % (kubernetes_deploy_master_target_nodes | length)] }}"
+      target_node = "{{ target_node }}"
       ip_address  = "{{ kubernetes_deploy_master_ip_addresses[i] }}"
       hostname    = "k8s-{{ kubernetes_deploy_environment }}-master-{{ '%02d' | format(i + 1) }}"
       fqdn        = "k8s-{{ kubernetes_deploy_environment }}-master-{{ '%02d' | format(i + 1) }}.{{ kubernetes_deploy_search_domain }}"
+      storage     = "{{ kubernetes_proxmox.storage_by_node[target_node] | default(kubernetes_proxmox.storage) }}"
     }{{ "," if not loop.last else "" }}
 {%- endfor %}
   ]
@@ -42,7 +44,7 @@ module "{{ master_module_name }}" {
   # Proxmox configuration
   # --------------------------------------------------------------------------
   clone_template = "{{ kubernetes_deploy_master_clone_template }}"
-  storage        = "{{ kubernetes_storage | default('VM_Disks') }}"
+  storage        = "{{ kubernetes_proxmox.storage }}"
 
   # --------------------------------------------------------------------------
   # Resource allocation
@@ -73,7 +75,7 @@ module "{{ master_module_name }}" {
 
   ssh_keys     = var.kubernetes_ssh_keys
   default_user = "{{ kubernetes_default_user | default('sinless777') }}"
-  cicustom_user_snippet_enabled = true
+  cicustom_user_snippet_enabled = false
 
   # --------------------------------------------------------------------------
   # Lifecycle
@@ -99,13 +101,15 @@ module "{{ worker_module_name }}" {
   # --------------------------------------------------------------------------
   nodes = [
 {%- for i in range(kubernetes_deploy_worker_count | int) %}
+{%- set target_node = kubernetes_deploy_worker_target_nodes[i % (kubernetes_deploy_worker_target_nodes | length)] %}
     {
       name        = "k8s-{{ kubernetes_deploy_environment }}-worker-{{ '%02d' | format(i + 1) }}"
       vmid        = {{ kubernetes_deploy_worker_vm_id_start | int + i }}
-      target_node = "{{ kubernetes_deploy_worker_target_nodes[i % (kubernetes_deploy_worker_target_nodes | length)] }}"
+      target_node = "{{ target_node }}"
       ip_address  = "{{ kubernetes_deploy_worker_ip_addresses[i] }}"
       hostname    = "k8s-{{ kubernetes_deploy_environment }}-worker-{{ '%02d' | format(i + 1) }}"
       fqdn        = "k8s-{{ kubernetes_deploy_environment }}-worker-{{ '%02d' | format(i + 1) }}.{{ kubernetes_deploy_search_domain }}"
+      storage     = "{{ kubernetes_proxmox.storage_by_node[target_node] | default(kubernetes_proxmox.storage) }}"
     }{{ "," if not loop.last else "" }}
 {%- endfor %}
   ]
@@ -114,7 +118,7 @@ module "{{ worker_module_name }}" {
   # Proxmox configuration
   # --------------------------------------------------------------------------
   clone_template = "{{ kubernetes_deploy_worker_clone_template }}"
-  storage        = "{{ kubernetes_storage | default('VM_Disks') }}"
+  storage        = "{{ kubernetes_proxmox.storage }}"
 
   # --------------------------------------------------------------------------
   # Resource allocation
@@ -145,7 +149,7 @@ module "{{ worker_module_name }}" {
 
   ssh_keys     = var.kubernetes_ssh_keys
   default_user = "{{ kubernetes_default_user | default('sinless777') }}"
-  cicustom_user_snippet_enabled = true
+  cicustom_user_snippet_enabled = false
 
   # --------------------------------------------------------------------------
   # Lifecycle

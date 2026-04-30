@@ -235,7 +235,7 @@ kubernetes_kube_vip:
   renew_deadline: 10
   retry_period: 2
 kubernetes_proxmox_gpu:
-  enabled: true
+  enabled: false
   host: "pve-01"
   vm_name: "{{ kubernetes_rke2_gpu_worker_name | default('rke2-prod-wk-01') }}"
   vmid: 410
