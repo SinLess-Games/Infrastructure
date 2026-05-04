@@ -42,7 +42,7 @@ collections:
   # - SSH keys
   # - PKI workflows
   - name: community.crypto
-    version: "2.22.3"
+    version: "2.26.7"
 
   # Docker / container runtime management
   - name: community.docker
@@ -50,7 +50,7 @@ collections:
 
   # PostgreSQL automation
   - name: community.postgresql
-    version: "3.6.0"
+    version: "3.14.3"
 
   # ---------------------------------------------------------------------------
   # Kubernetes
@@ -61,7 +61,7 @@ collections:
   # - Helm modules
   # - CRDs
   - name: kubernetes.core
-    version: "5.0.0"
+    version: "5.4.2"
 
   # Supplemental Kubernetes helpers
   # NOTE: Prefer kubernetes.core when possible
@@ -78,7 +78,7 @@ collections:
   # - server settings
   # - blocklists (depending on role capabilities)
   - name: effectivelywild.technitium_dns
-    version: "1.1.1"
+    version: "1.1.2"
 
   # ---------------------------------------------------------------------------
   # Hypervisor / Proxmox
@@ -87,7 +87,7 @@ collections:
   # Proxmox API modules (create/manage VMs, users, pools, etc.)
   # Best for day-2 operations and provisioning.
   - name: community.proxmox
-    version: "1.4.0"
+    version: "1.6.0"
 
   # ---------------------------------------------------------------------------
   # Cloudflare
@@ -98,7 +98,7 @@ collections:
   # - public DNS records
   # - internal automation around tunnels / DNS entries (depending on modules used)
   - name: linuxhq.cloudflare
-    version: "2.0.3"
+    version: "2.0.5"
 
 # =============================================================================
 # Roles
@@ -114,7 +114,7 @@ roles:
   # - staging clusters
   # - Proxmox-backed VMs or bare metal
   - name: lablabs.rke2
-    version: "1.50.1"
+    version: "1.51.0"
 
   # ---------------------------------------------------------------------------
   # Proxmox VE: node/cluster configuration (Day-0 / Day-1)
@@ -136,7 +136,7 @@ roles:
   - name: lae.proxmox
     src: git+https://github.com/lae/ansible-role-proxmox.git
     scm: git
-    version: "v1.9.0"
+    version: "v1.10.1"
 
 # =============================================================================
 # Notes / Python deps (install separately; you already do this via requirements.txt)
