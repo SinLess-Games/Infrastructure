@@ -2,7 +2,7 @@
 
 image:
   repository: wazuh/wazuh-agent
-  tag: "4.14.3"
+  tag: "4.14.5"
   pullPolicy: IfNotPresent
 
 daemonset:
