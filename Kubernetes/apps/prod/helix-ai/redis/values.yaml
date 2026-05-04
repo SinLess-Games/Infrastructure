@@ -1,7 +1,5 @@
 image:
-  # Pin this to an immutable Redis 8.x tag you have tested in your cluster.
-  # The Bitnami chart explicitly recommends immutable tags in production.
-  tag: "8.0.x"
+  tag: "8.0.3-debian-12-r0"
 
 architecture: replication
 

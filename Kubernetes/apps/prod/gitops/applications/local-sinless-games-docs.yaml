@@ -5,6 +5,7 @@ metadata:
   namespace: gitops
   annotations:
     argocd.argoproj.io/sync-wave: "18"
+    platform.sinlessgames.io/depends-on: "sinless-games-mesh,networking-config"
 spec:
   project: platform
   source:

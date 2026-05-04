@@ -3,5 +3,4 @@ kind: Kustomization
 resources:
   - destinationrule-argocd-ui.yaml
   - externalsecret-actions-runner-controller.yaml
-  - ingress-argocd-ui.yaml
   - virtualservice-argocd-ui.yaml

@@ -57,3 +57,30 @@ spec:
       ports:
         - protocol: TCP
           port: 15012
+
+    # Allow workloads that use in-cluster clients, such as Rancher and OpenCost,
+    # to reach the Kubernetes API service.
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.1/32
+      ports:
+        - protocol: TCP
+          port: 443
+
+    # Allow the translated RKE2 API endpoints as seen by Cilium after service DNAT.
+    - to:
+        - ipBlock:
+            cidr: 10.10.40.10/32
+        - ipBlock:
+            cidr: 10.10.40.11/32
+        - ipBlock:
+            cidr: 10.10.40.12/32
+        - ipBlock:
+            cidr: 10.10.40.13/32
+        - ipBlock:
+            cidr: 10.10.40.15/32
+        - ipBlock:
+            cidr: 10.10.40.16/32
+      ports:
+        - protocol: TCP
+          port: 6443

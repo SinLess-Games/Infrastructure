@@ -847,6 +847,7 @@
   when:
     - item.status == 404
       or (item.json.data.kubernetes_host | default('')) != vault_kubernetes_auth_cluster.server
+      or (item.json.data.kubernetes_ca_cert | default('')) != (vault_kubernetes_auth_cluster['certificate-authority-data'] | b64decode)
       or (item.json.data.disable_iss_validation | default(false) | bool) != (item.item.disable_iss_validation | default(true) | bool)
   no_log: true
 

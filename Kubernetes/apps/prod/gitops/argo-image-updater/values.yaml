@@ -1,6 +1,6 @@
 replicaCount: 1
 
-createClusterRoles: false
+createClusterRoles: true
 
 rbac:
   enabled: true
@@ -26,8 +26,6 @@ config:
 extraArgs:
   - --interval
   - 5m
-  - --application-namespace
-  - gitops
 
 podSecurityContext:
   runAsNonRoot: true

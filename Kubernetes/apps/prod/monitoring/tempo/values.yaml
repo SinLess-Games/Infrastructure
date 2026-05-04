@@ -9,7 +9,7 @@ storage:
       region: ${S3_REGION}
       access_key: ${S3_ACCESS_KEY_ID}
       secret_key: ${S3_SECRET_ACCESS_KEY}
-      insecure: false
+      insecure: true
       forcepathstyle: true
 
 traces:

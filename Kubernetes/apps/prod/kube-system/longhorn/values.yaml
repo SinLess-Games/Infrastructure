@@ -2,7 +2,7 @@
 
 defaultSettings:
   defaultDataPath: /var/lib/longhorn
-  defaultReplicaCount: 3
+  defaultReplicaCount: 1
 
   backupTarget: s3://k8s-prod-longhorn@us-east-1/
   backupTargetCredentialSecret: longhorn-backup-credentials
@@ -10,8 +10,9 @@ defaultSettings:
 
   createDefaultDiskLabeledNodes: false
 
-  storageOverProvisioningPercentage: 200
-  storageMinimalAvailablePercentage: 20
+  storageOverProvisioningPercentage: 500
+  storageMinimalAvailablePercentage: 5
+  storageReservedPercentageForDefaultDisk: 5
 
   replicaAutoBalance: best-effort
   replicaSoftAntiAffinity: false
@@ -38,16 +39,12 @@ longhornUI:
 
 persistence:
   defaultClass: true
-  defaultClassReplicaCount: 3
+  defaultClassReplicaCount: 1
   reclaimPolicy: Delete
   migratable: false
   recurringJobSelector:
     enable: true
-    jobList:
-      - name: daily-snapshot
-        isGroup: false
-      - name: daily-backup
-        isGroup: false
+    jobList: '[{"name":"daily-snapshot","isGroup":false},{"name":"daily-backup","isGroup":false}]'
 
 metrics:
   serviceMonitor:

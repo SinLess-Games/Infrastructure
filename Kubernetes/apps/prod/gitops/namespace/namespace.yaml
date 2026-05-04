@@ -3,7 +3,13 @@ kind: Namespace
 metadata:
   name: gitops
   labels:
-    istio-injection: enabled
+    kubernetes.io/metadata.name: gitops
+    istio-injection: disabled
+
+    # Allow hardened Prometheus selectors to discover GitOps monitors/rules here.
+    monitoring.sinlessgames.io/scrape: "true"
+    monitoring.sinlessgames.io/rules: "true"
+
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/audit: restricted

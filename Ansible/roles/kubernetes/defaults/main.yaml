@@ -34,6 +34,7 @@ kubernetes_role_kernel_modules:
   - iptable_nat
   - iptable_filter
   - nf_conntrack
+  - virtio_balloon
 kubernetes_role_sysctl:
   net.bridge.bridge-nf-call-iptables: 1
   net.bridge.bridge-nf-call-ip6tables: 1

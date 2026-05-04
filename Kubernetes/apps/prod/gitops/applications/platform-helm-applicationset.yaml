@@ -350,21 +350,18 @@ spec:
                 - blackcowmoo-googleanalytics-datasource
                 - grafana-googlesheets-datasource
                 - marcusolsson-calendar-panel
+              replicas: 1
+              affinity:
+                nodeAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    nodeSelectorTerms:
+                      - matchExpressions:
+                          - key: node-role.kubernetes.io/control-plane
+                            operator: DoesNotExist
               deploymentStrategy:
                 type: Recreate
               persistence:
                 enabled: false
-              env:
-                GF_DATABASE_TYPE: postgres
-                GF_DATABASE_HOST: 10.10.40.50:5432
-                GF_DATABASE_NAME: grafana
-                GF_DATABASE_USER: grafana
-                GF_DATABASE_SSL_MODE: disable
-              envValueFrom:
-                GF_DATABASE_PASSWORD:
-                  secretKeyRef:
-                    name: grafana-admin
-                    key: postgres_grafana_password
             syncWave: "23"
           - name: opentelemetry-operator
             namespace: monitoring
@@ -474,7 +471,7 @@ spec:
             namespace: helix-ai
             chartRepo: https://charts.bitnami.com/bitnami
             chart: redis
-            targetRevision: 20.11.3
+            targetRevision: 25.4.1
             valuesPath: Kubernetes/apps/prod/helix-ai/redis/values.yaml
             inlineValues: ""
             syncWave: "18"

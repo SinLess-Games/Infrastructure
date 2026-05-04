@@ -61,7 +61,7 @@ spec:
               mountPath: /agent
 
         - name: seed-ossec-tree
-          image: wazuh/wazuh-agent:4.11.2
+          image: wazuh/wazuh-agent:4.14.3
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
@@ -103,7 +103,7 @@ spec:
               value: "1515"
 
             - name: WAZUH_AGENT_GROUP
-              value: "rke2-prod"
+              value: "Production,Kubernetes"
 
             - name: WAZUH_AGENT_NAME_PREFIX
               value: "rke2-prod"
@@ -245,7 +245,7 @@ spec:
 
       containers:
         - name: wazuh-agent
-          image: wazuh/wazuh-agent:4.11.2
+          image: wazuh/wazuh-agent:4.14.3
           imagePullPolicy: IfNotPresent
 
           command:
@@ -275,7 +275,7 @@ spec:
               value: "1515"
 
             - name: WAZUH_AGENT_GROUP
-              value: "rke2-prod"
+              value: "Production,Kubernetes"
 
             - name: WAZUH_REGISTRATION_PASSWORD
               valueFrom:
@@ -289,7 +289,7 @@ spec:
                   fieldPath: spec.nodeName
 
             - name: WAZUH_AGENT_NAME
-              value: "rke2-prod-$(NODE_NAME)"
+              value: "production-$(NODE_NAME)"
 
           resources:
             requests:

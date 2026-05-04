@@ -23,14 +23,14 @@ variable "node_role" {
 variable "nodes" {
   description = "VM definitions"
   type = list(object({
-    name           = string
-    vmid           = number
-    target_node    = string
-    clone_template = optional(string)
-    ip_address     = string
-    hostname       = optional(string)
-    fqdn           = optional(string)
-    storage        = optional(string)
+    name                    = string
+    vmid                    = number
+    target_node             = string
+    clone_template          = optional(string)
+    ip_address              = string
+    hostname                = optional(string)
+    fqdn                    = optional(string)
+    storage                 = optional(string)
     gpu_passthrough_devices = optional(list(string), [])
   }))
 }
@@ -101,6 +101,12 @@ variable "cpu_sockets" {
   description = "CPU sockets"
   type        = number
   default     = 1
+}
+
+variable "cpu_type" {
+  description = "Proxmox CPU type exposed to the guest"
+  type        = string
+  default     = "host"
 }
 
 variable "memory_mb" {

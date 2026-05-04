@@ -23,6 +23,10 @@ metadata:
     app.kubernetes.io/part-of: sinless-games-platform
     app.kubernetes.io/managed-by: gitops
 
+    # Allow hardened Prometheus selectors to discover application monitors/rules here.
+    monitoring.sinlessgames.io/scrape: "true"
+    monitoring.sinlessgames.io/rules: "true"
+
     # Your security metadata.
     security.sinlessgames.io/istio-injection: enabled
     security.sinlessgames.io/mtls: strict

@@ -5,6 +5,7 @@ metadata:
   namespace: gitops
   annotations:
     argocd.argoproj.io/sync-wave: "13"
+    platform.sinlessgames.io/depends-on: "external-secrets-config,kube-prometheus-stack,longhorn"
 spec:
   project: platform
   source:

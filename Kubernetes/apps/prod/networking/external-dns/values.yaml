@@ -30,9 +30,6 @@ extraArgs:
   - --cloudflare-dns-records-per-page=5000
   - --cloudflare-proxied
   - --events
-  - --log-format=json
-  - --log-level=info
-  - --interval=1m
   - --txt-wildcard-replacement=wildcard
 
 serviceAccount:
@@ -53,7 +50,7 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-securityContext:
+podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
   runAsGroup: 65532

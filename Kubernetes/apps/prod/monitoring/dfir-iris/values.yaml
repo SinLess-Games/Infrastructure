@@ -1,0 +1,197 @@
+# Kubernetes/apps/prod/monitoring/dfir-iris/values.yaml
+#
+# DFIR-IRIS production values for the monitoring/security stack.
+#
+# Secrets must not be committed as real values.
+# Replace placeholder values through External Secrets, SOPS, or a chart patch
+# that supports envFrom/valueFrom before deploying this to production.
+
+global:
+  namespace: monitoring
+  environment: prod
+  cluster: rke2-prod
+
+rabbitmq:
+  app: dfir-iris-rabbitmq
+  name: dfir-iris-rabbitmq
+  image: rabbitmq
+  tag: 3-management-alpine
+  imagePullPolicy: IfNotPresent
+  replicaCount: 1
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  podSecurityContext:
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+postgres:
+  app: dfir-iris-postgres
+  name: dfir-iris-postgres
+  image: ghcr.io/dfir-iris/iriswebapp_db
+  tag: v2.4.27
+  imagePullPolicy: IfNotPresent
+  replicaCount: 1
+
+  service:
+    port: 5432
+
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: "__REPLACE_FROM_VAULT_DFIR_IRIS_POSTGRES_PASSWORD__"
+  POSTGRES_ADMIN_USER: raptor
+  POSTGRES_ADMIN_PASSWORD: "__REPLACE_FROM_VAULT_DFIR_IRIS_POSTGRES_ADMIN_PASSWORD__"
+  POSTGRES_DB: iris_db
+  POSTGRES_PORT: 5432
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+  podSecurityContext:
+    fsGroup: 999
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+irisapp:
+  app: dfir-iris-app
+  name: dfir-iris-app
+  image: ghcr.io/dfir-iris/iriswebapp_app
+  tag: v2.4.27
+  imagePullPolicy: IfNotPresent
+  replicaCount: 1
+
+  service:
+    port: 8000
+
+  type: ClusterIP
+
+  LOG_LEVEL: info
+  DOCKERIZED: "1"
+
+  POSTGRES_USER: raptor
+  POSTGRES_PASSWORD: "__REPLACE_FROM_VAULT_DFIR_IRIS_POSTGRES_ADMIN_PASSWORD__"
+  POSTGRES_ADMIN_USER: raptor
+  POSTGRES_ADMIN_PASSWORD: "__REPLACE_FROM_VAULT_DFIR_IRIS_POSTGRES_ADMIN_PASSWORD__"
+  POSTGRES_DB: iris_db
+  POSTGRES_PORT: 5432
+  POSTGRES_SERVER: dfir-iris-postgres.monitoring.svc.cluster.local
+
+  IRIS_SECRET_KEY: "__REPLACE_FROM_VAULT_DFIR_IRIS_SECRET_KEY__"
+  IRIS_SECURITY_PASSWORD_SALT: "__REPLACE_FROM_VAULT_DFIR_IRIS_SECURITY_PASSWORD_SALT__"
+
+  IRIS_AUTHENTICATION_TYPE: local
+  IRIS_ORGANISATION_NAME: SinLess Games LLC
+  IRIS_LOGIN_BANNER_TEXT: "Authorized DFIR and incident response use only."
+  IRIS_LOGIN_PTFM_CONTACT: "SinLess Games Security Operations"
+  IRIS_DEMO_ENABLED: "False"
+
+  IRIS_ADM_USERNAME: administrator
+  IRIS_ADM_EMAIL: admin@sinlessgames.com
+  IRIS_ADM_PASSWORD: "__REPLACE_FROM_VAULT_DFIR_IRIS_ADMIN_PASSWORD__"
+  IRIS_ADM_API_KEY: "__REPLACE_FROM_VAULT_DFIR_IRIS_ADMIN_API_KEY__"
+
+  CELERY_BROKER: amqp://dfir-iris-rabbitmq.monitoring.svc.cluster.local
+  DB_RETRY_COUNT: 30
+  DB_RETRY_DELAY: 5
+  INTERFACE_HTTPS_PORT: 443
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  podSecurityContext:
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+irisworker:
+  app: dfir-iris-worker
+  name: dfir-iris-worker
+  image: ghcr.io/dfir-iris/iriswebapp_app
+  tag: v2.4.27
+  imagePullPolicy: IfNotPresent
+  replicaCount: 1
+
+  LOG_LEVEL: info
+  DOCKERIZED: "1"
+  IRIS_WORKER: "true"
+
+  POSTGRES_USER: raptor
+  POSTGRES_PASSWORD: "__REPLACE_FROM_VAULT_DFIR_IRIS_POSTGRES_ADMIN_PASSWORD__"
+  POSTGRES_ADMIN_USER: raptor
+  POSTGRES_ADMIN_PASSWORD: "__REPLACE_FROM_VAULT_DFIR_IRIS_POSTGRES_ADMIN_PASSWORD__"
+  POSTGRES_DB: iris_db
+  POSTGRES_PORT: 5432
+  POSTGRES_SERVER: dfir-iris-postgres.monitoring.svc.cluster.local
+
+  IRIS_SECRET_KEY: "__REPLACE_FROM_VAULT_DFIR_IRIS_SECRET_KEY__"
+  IRIS_SECURITY_PASSWORD_SALT: "__REPLACE_FROM_VAULT_DFIR_IRIS_SECURITY_PASSWORD_SALT__"
+
+  CELERY_BROKER: amqp://dfir-iris-rabbitmq.monitoring.svc.cluster.local
+  DB_RETRY_COUNT: 30
+  DB_RETRY_DELAY: 5
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  podSecurityContext:
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+ingress:
+  enabled: false
+  name: dfir-iris
+  className: istio
+  annotations: {}
+  hosts:
+    - host: irm.sinlessgames.com
+      paths:
+        - path: /
+          pathType: Prefix
+          serviceName: dfir-iris-app
+          servicePort: 8000
+  tls:
+    - secretName: wildcard-sinlessgames-com
+      hosts:
+        - irm.sinlessgames.com

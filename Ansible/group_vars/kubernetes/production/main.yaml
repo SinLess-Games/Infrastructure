@@ -33,8 +33,9 @@ kubernetes_control_plane:
   name_prefix: "rke2-prod-cp"
   cpu_cores: 4
   cpu_sockets: 1
-  memory_mb: 8192
-  memory_balloon_mb: 4096
+  cpu_type: "host"
+  memory_mb: 16384
+  memory_balloon_mb: 8192
   disk_size: "150G"
   clone_template: "debian-13-template"
   target_nodes:
@@ -47,6 +48,7 @@ kubernetes_workers:
   name_prefix: "rke2-prod-wk"
   cpu_cores: 6
   cpu_sockets: 1
+  cpu_type: "host"
   memory_mb: 16384
   memory_balloon_mb: 8192
   disk_size: "150G"
@@ -162,6 +164,11 @@ kubernetes_nodes:
       clone_template: "debian-13-template-pve-01"
       gpu_passthrough_devices:
         - "Nvidia-3060"
+      labels:
+        - "accelerator.nvidia.com/gpu=true"
+        - "node.kubernetes.io/gpu=true"
+      taints:
+        - "nvidia.com/gpu=true:NoSchedule"
 
 kubernetes_platform:
   storage_class_default: "longhorn"

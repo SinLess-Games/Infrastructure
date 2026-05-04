@@ -2,7 +2,7 @@
 
 image:
   repository: wazuh/wazuh-agent
-  tag: "4.11.2"
+  tag: "4.14.3"
   pullPolicy: IfNotPresent
 
 daemonset:
@@ -22,7 +22,7 @@ wazuh:
     registrationPort: 1515
 
   agent:
-    group: rke2-prod
+    group: Production,Kubernetes
     namePrefix: rke2-prod
     stateHostPath: /var/lib/wazuh-agent
 
@@ -38,7 +38,7 @@ env:
   - name: WAZUH_REGISTRATION_PORT
     value: "1515"
   - name: WAZUH_AGENT_GROUP
-    value: "rke2-prod"
+    value: "Production,Kubernetes"
   - name: WAZUH_AGENT_NAME_PREFIX
     value: "rke2-prod"
 

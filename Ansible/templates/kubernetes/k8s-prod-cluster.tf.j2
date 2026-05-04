@@ -31,6 +31,7 @@ module "kubernetes_prod_control_plane" {
   resource_pool                 = "{{ kubernetes_resource_pool }}"
   cpu_cores                     = {{ kubernetes_control_plane.cpu_cores }}
   cpu_sockets                   = {{ kubernetes_control_plane.cpu_sockets }}
+  cpu_type                      = "{{ kubernetes_control_plane.cpu_type | default('host') }}"
   memory_mb                     = {{ kubernetes_control_plane.memory_mb }}
   memory_balloon_mb             = {{ kubernetes_control_plane.memory_balloon_mb | default('null') }}
   disk_size                     = "{{ kubernetes_control_plane.disk_size }}"
@@ -81,6 +82,7 @@ module "kubernetes_prod_workers" {
   resource_pool                 = "{{ kubernetes_resource_pool }}"
   cpu_cores                     = {{ kubernetes_workers.cpu_cores }}
   cpu_sockets                   = {{ kubernetes_workers.cpu_sockets }}
+  cpu_type                      = "{{ kubernetes_workers.cpu_type | default('host') }}"
   memory_mb                     = {{ kubernetes_workers.memory_mb }}
   memory_balloon_mb             = {{ kubernetes_workers.memory_balloon_mb | default('null') }}
   disk_size                     = "{{ kubernetes_workers.disk_size }}"

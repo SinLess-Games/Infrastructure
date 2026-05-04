@@ -133,7 +133,7 @@ front:
       type: RuntimeDefault
 
   containerSecurityContext:
-    enabled: true
+    enabled: false
     runAsUser: 1001
     runAsNonRoot: false
     allowPrivilegeEscalation: false
@@ -160,10 +160,25 @@ admin:
   updateStrategy:
     type: Recreate
 
+  # Mailu admin performs a DNSSEC validation check at startup. CoreDNS does not
+  # provide the AD flag here, so point only admin at validating resolvers.
+  dnsPolicy: None
+  dnsConfig:
+    nameservers:
+      - 1.1.1.1
+      - 1.0.0.1
+
+  extraEnvVars:
+    - name: REDIS_ADDRESS
+      value: 10.43.80.67
+    - name: RATELIMIT_STORAGE_URL
+      value: redis://10.43.80.67:6379/2
+    - name: QUOTA_STORAGE_URL
+      value: redis://10.43.80.67:6379/1
+
   podAnnotations:
-    sidecar.istio.io/inject: "true"
-    sidecar.istio.io/rewriteAppHTTPProbers: "true"
-    security.sinlessgames.io/mtls: istio-strict
+    sidecar.istio.io/inject: "false"
+    security.sinlessgames.io/istio-sidecar: "disabled-mail-admin"
 
   podSecurityContext:
     enabled: true
@@ -172,7 +187,7 @@ admin:
       type: RuntimeDefault
 
   containerSecurityContext:
-    enabled: true
+    enabled: false
     runAsUser: 1001
     runAsNonRoot: false
     allowPrivilegeEscalation: false
@@ -232,7 +247,7 @@ postfix:
       type: RuntimeDefault
 
   containerSecurityContext:
-    enabled: true
+    enabled: false
     runAsUser: 1001
     runAsNonRoot: false
     allowPrivilegeEscalation: false
@@ -268,7 +283,7 @@ dovecot:
       type: RuntimeDefault
 
   containerSecurityContext:
-    enabled: true
+    enabled: false
     runAsUser: 1001
     runAsNonRoot: false
     allowPrivilegeEscalation: false
@@ -304,7 +319,7 @@ rspamd:
       type: RuntimeDefault
 
   containerSecurityContext:
-    enabled: true
+    enabled: false
     runAsUser: 1001
     runAsNonRoot: false
     allowPrivilegeEscalation: false
@@ -328,13 +343,22 @@ clamav:
       type: RuntimeDefault
 
   containerSecurityContext:
-    enabled: true
+    enabled: false
     runAsUser: 1001
     runAsNonRoot: false
     allowPrivilegeEscalation: false
     capabilities:
       drop:
         - ALL
+
+  extraVolumeMounts:
+    - name: clamav-run
+      mountPath: /run/clamav
+
+  extraVolumes:
+    - name: clamav-run
+      emptyDir:
+        sizeLimit: 64Mi
 
   resources:
     requests:

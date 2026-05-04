@@ -3,6 +3,8 @@ kind: Kustomization
 resources:
   - storageclass-garage.yaml
   - externalsecret-garage.yaml
+  - serviceaccount-garage.yaml
+  - serviceaccount-garage-webui.yaml
   - serviceaccount-garage-bootstrap.yaml
   - role-garage-bootstrap.yaml
   - rolebinding-garage-bootstrap.yaml

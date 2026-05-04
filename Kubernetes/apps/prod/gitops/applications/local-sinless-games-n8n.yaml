@@ -5,6 +5,7 @@ metadata:
   namespace: gitops
   annotations:
     argocd.argoproj.io/sync-wave: "18"
+    platform.sinlessgames.io/depends-on: "external-secrets-config,longhorn,sinless-games-policies"
 spec:
   project: platform
   source:

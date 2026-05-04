@@ -35,6 +35,12 @@ additionalTrustedCAs: false
 # Rancher needs internal cluster ranges excluded from proxy behavior.
 noProxy: "127.0.0.0/8,10.42.0.0/16,10.43.0.0/16,10.10.0.0/16,.svc,.cluster.local"
 
+extraEnv:
+  - name: KUBERNETES_SERVICE_HOST
+    value: 10.10.40.10
+  - name: KUBERNETES_SERVICE_PORT
+    value: "6443"
+
 image:
   repository: rancher/rancher
   pullPolicy: IfNotPresent

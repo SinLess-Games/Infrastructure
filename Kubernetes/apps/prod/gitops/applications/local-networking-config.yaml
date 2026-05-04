@@ -5,6 +5,7 @@ metadata:
   namespace: gitops
   annotations:
     argocd.argoproj.io/sync-wave: "4"
+    platform.sinlessgames.io/depends-on: "cert-manager,external-secrets-config,istio-ingress"
 spec:
   project: platform
   source:

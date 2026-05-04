@@ -11,9 +11,7 @@ manager:
     repository: otel/opentelemetry-collector-k8s
 
   serviceMonitor:
-    enabled: true
-    additionalLabels:
-      release: kube-prometheus-stack
+    enabled: false
 
   resources:
     requests:

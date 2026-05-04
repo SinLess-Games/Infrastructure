@@ -77,10 +77,7 @@ networkPolicies:
       app.kubernetes.io/name: prometheus
 
 updateStrategy:
-  type: RollingUpdate
-  rollingUpdate:
-    maxSurge: 1
-    maxUnavailable: 0
+  type: Recreate
 
 pdb:
   enabled: true
@@ -96,6 +93,49 @@ extraVolumes:
   - name: opencost-ui-run
     emptyDir:
       sizeLimit: 64Mi
+  - name: opencost-ui-lib
+    emptyDir:
+      sizeLimit: 128Mi
+  - name: opencost-ui-assets
+    emptyDir:
+      sizeLimit: 512Mi
+  - name: opencost-ui-root-assets
+    emptyDir:
+      sizeLimit: 512Mi
+
+# The OpenCost chart renders top-level init containers into the pod.
+# Keep the UI asset directory writable before the UI entrypoint patches BASE_URL.
+extraInitContainers:
+  - name: prepare-opencost-ui-assets
+    image: ghcr.io/opencost/opencost-ui:1.120.0@sha256:2a2ed5d423402b1d3f104398971191618a91bfc293f53c704606bbbd39b2652c
+    command:
+      - sh
+      - -c
+      - cp -a /var/www/legacy/assets/. /ui-assets/ && cp -a /var/www/assets/. /ui-root-assets/ && chmod -R 0777 /ui-assets /ui-root-assets
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsNonRoot: false
+      runAsUser: 0
+      runAsGroup: 0
+      capabilities:
+        add:
+          - CHOWN
+          - SETGID
+          - SETUID
+        drop:
+          - ALL
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+    volumeMounts:
+      - name: opencost-ui-assets
+        mountPath: /ui-assets
+      - name: opencost-ui-root-assets
+        mountPath: /ui-root-assets
 
 opencost:
   prometheus:
@@ -137,6 +177,10 @@ opencost:
       size: 10Gi
       mountPath: /mnt/export
 
+    extraEnv:
+      KUBERNETES_SERVICE_HOST: 10.10.40.10
+      KUBERNETES_SERVICE_PORT: "6443"
+
     resources:
       requests:
         cpu: 100m
@@ -169,11 +213,16 @@ opencost:
     securityContext:
       allowPrivilegeEscalation: false
       privileged: false
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      runAsUser: 1000
-      runAsGroup: 1000
+      readOnlyRootFilesystem: false
+      # The upstream UI entrypoint patches generated assets in /var/www at start.
+      # Those files are image-owned by root, so the UI container must start as root
+      # even though the pod-level filesystem policy remains otherwise restricted.
+      runAsNonRoot: false
+      runAsUser: 0
+      runAsGroup: 0
       capabilities:
+        add:
+          - CHOWN
         drop:
           - ALL
       seccompProfile:
@@ -206,7 +255,9 @@ opencost:
   ui:
     enabled: true
     uiPort: 9090
-    useDefaultFqdn: true
+    # The UI and model run in the same pod; avoid DNS as a startup dependency.
+    modelFqdn: 127.0.0.1:9003
+    useDefaultFqdn: false
     useIPv6: false
 
     resources:
@@ -234,7 +285,7 @@ opencost:
     securityContext:
       allowPrivilegeEscalation: false
       privileged: false
-      readOnlyRootFilesystem: true
+      readOnlyRootFilesystem: false
       runAsNonRoot: true
       runAsUser: 1000
       runAsGroup: 1000
@@ -251,6 +302,12 @@ opencost:
         mountPath: /var/cache/nginx
       - name: opencost-ui-run
         mountPath: /var/run
+      - name: opencost-ui-lib
+        mountPath: /var/lib/nginx
+      - name: opencost-ui-assets
+        mountPath: /var/www/legacy/assets
+      - name: opencost-ui-root-assets
+        mountPath: /var/www/assets
 
     ingress:
       enabled: false

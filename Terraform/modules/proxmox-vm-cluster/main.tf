@@ -1,15 +1,15 @@
 locals {
   node_details = [
     for idx, node in var.nodes : {
-      index          = idx + 1
-      name           = node.name
-      vmid           = node.vmid
-      target_node    = node.target_node
-      clone_template = try(node.clone_template, null)
-      ip_address     = node.ip_address
-      hostname       = try(node.hostname, node.name)
-      fqdn           = try(node.fqdn, null)
-      storage        = try(node.storage, null)
+      index                   = idx + 1
+      name                    = node.name
+      vmid                    = node.vmid
+      target_node             = node.target_node
+      clone_template          = try(node.clone_template, null)
+      ip_address              = node.ip_address
+      hostname                = try(node.hostname, node.name)
+      fqdn                    = try(node.fqdn, null)
+      storage                 = try(node.storage, null)
       gpu_passthrough_devices = try(node.gpu_passthrough_devices, [])
     }
   ]
@@ -74,10 +74,11 @@ EOT
   agent   = var.agent_enabled ? 1 : 0
   os_type = "cloud-init"
 
-  cores   = var.cpu_cores
-  sockets = var.cpu_sockets
-  memory  = var.memory_mb
-  balloon = var.memory_balloon_mb
+  cores    = var.cpu_cores
+  sockets  = var.cpu_sockets
+  cpu_type = var.cpu_type
+  memory   = var.memory_mb
+  balloon  = var.memory_balloon_mb
 
   boot    = "order=virtio0;net0"
   scsihw  = "virtio-scsi-pci"

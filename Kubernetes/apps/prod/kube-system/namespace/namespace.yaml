@@ -9,6 +9,10 @@ metadata:
     # Never inject sidecars into kube-system.
     istio-injection: disabled
 
+    # Allow hardened Prometheus selectors to discover cluster-system monitors/rules here.
+    monitoring.sinlessgames.io/scrape: "true"
+    monitoring.sinlessgames.io/rules: "true"
+
     # Pod Security Admission
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/enforce-version: latest

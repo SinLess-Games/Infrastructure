@@ -5,6 +5,7 @@ metadata:
   namespace: gitops
   annotations:
     argocd.argoproj.io/sync-wave: "11"
+    platform.sinlessgames.io/depends-on: "external-secrets-config,kyverno"
 spec:
   project: platform
   source:

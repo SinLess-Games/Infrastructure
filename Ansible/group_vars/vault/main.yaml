@@ -52,7 +52,7 @@ vault_auth_methods:
 
 vault_kubernetes_auth_configs:
   - mount_path: "kubernetes"
-    kubeconfig_path: "{{ vault_repo_root }}/.outputs/kubernetes/prod/kubeconfig-prod"
+    kubeconfig_path: "{{ vault_repo_root }}/.outputs/kubernetes/prod/kubeconfig"
     disable_iss_validation: true
 
 vault_kubernetes_secret_engine_configs:
@@ -61,7 +61,7 @@ vault_kubernetes_secret_engine_configs:
   - mount_path: "kubernetes-staging"
     kubeconfig_path: "{{ vault_repo_root }}/.outputs/kubernetes/staging/kubeconfig-staging"
   - mount_path: "kubernetes-prod"
-    kubeconfig_path: "{{ vault_repo_root }}/.outputs/kubernetes/prod/kubeconfig-prod"
+    kubeconfig_path: "{{ vault_repo_root }}/.outputs/kubernetes/prod/kubeconfig"
 
 vault_kubernetes_auth_roles:
   - name: "eso-production"
