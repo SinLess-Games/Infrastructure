@@ -12,48 +12,75 @@ metadata:
     topology.kubernetes.io/environment: prod
     security.sinlessgames.io/gitops-project: platform
   annotations:
-    security.sinlessgames.io/purpose: "Restrict production platform GitOps sources, destinations, and resource kinds."
-    security.sinlessgames.io/cluster-admin-equivalent: "false"
+    security.sinlessgames.io/purpose: "Restrict production platform GitOps sources,
+      destinations, and resource kinds."
+    security.sinlessgames.io/cluster-admin-equivalent: "platform-bootstrap-restricted"
 spec:
-  description: Production platform workloads for the RKE2 cluster
+  description: Production platform workloads for the RKE2 production cluster
+
+  sourceNamespaces:
+    - gitops
 
   sourceRepos:
-    # Main infrastructure repository.
+    # Main infrastructure repositories.
     - https://github.com/SinLess-Games/Infrastructure.git
+    - https://github.com/Sinless777/Infrastructure.git
 
-    # Helm repositories used by platform child apps.
+    # Core networking.
     - https://helm.cilium.io
-    - https://charts.longhorn.io
-    - https://helm.ngc.nvidia.com/nvidia
     - https://istio-release.storage.googleapis.com/charts
     - https://charts.jetstack.io
     - https://kubernetes-sigs.github.io/external-dns/
+    - https://cloudflare.github.io/helm-charts
+
+    # GitOps / delivery / automation.
+    - https://argoproj.github.io/argo-helm
+    - https://actions-runner-controller.github.io/actions-runner-controller
+    - https://kedacore.github.io/charts
+    - https://raw.githubusercontent.com/karmada-io/karmada/master/charts
+
+    # Storage / registry / data.
+    - https://charts.longhorn.io
+    - https://helm.goharbor.io
+    - https://charts.bitnami.com/bitnami
+    - https://nats-io.github.io/k8s/helm/charts/
+    - https://qdrant.github.io/qdrant-helm
+    - https://charts.cockroachdb.com/
+
+    # GPU.
+    - https://helm.ngc.nvidia.com/nvidia
+
+    # Observability.
     - https://grafana.github.io/helm-charts
     - https://prometheus-community.github.io/helm-charts
     - https://open-telemetry.github.io/opentelemetry-helm-charts
     - https://kiali.org/helm-charts
+    - https://opencost.github.io/opencost-helm-chart
+
+    # Security.
     - https://charts.external-secrets.io
     - https://kyverno.github.io/kyverno
     - https://falcosecurity.github.io/charts
+    - https://aquasecurity.github.io/helm-charts
+    - https://crowdsecurity.github.io/helm-charts
+    - https://defectdojo.github.io/django-DefectDojo/charts
     - https://vmware-tanzu.github.io/helm-charts
-    - https://argoproj.github.io/argo-helm
-    - https://actions-runner-controller.github.io/actions-runner-controller
-    - https://charts.cockroachdb.com/
-    - https://charts.bitnami.com/bitnami
-    - https://nats-io.github.io/k8s/helm/charts/
-    - https://qdrant.github.io/qdrant-helm
-    - https://kedacore.github.io/charts
-    - https://raw.githubusercontent.com/karmada-io/karmada/master/charts
+    - https://wazuh.github.io/wazuh-kubernetes
+
+    # Platform / business applications.
     - https://releases.rancher.com/server-charts/stable
-    - https://opencost.github.io/opencost-helm-chart
+    - https://backstage.github.io/charts
     - https://mailu.github.io/helm-charts
+    - https://community-charts.github.io/helm-charts
+    - https://jameswynn.github.io/helm-charts
+    - https://kokuwaio.github.io/helm-charts
 
   destinations:
     # GitOps / Argo CD.
     - server: https://kubernetes.default.svc
       namespace: gitops
 
-    # Core platform namespaces.
+    # Core Kubernetes / networking.
     - server: https://kubernetes.default.svc
       namespace: kube-system
     - server: https://kubernetes.default.svc
@@ -66,34 +93,84 @@ spec:
       namespace: external-dns
     - server: https://kubernetes.default.svc
       namespace: external-secrets
+
+    # GitOps / automation.
+    - server: https://kubernetes.default.svc
+      namespace: argo-rollouts
+    - server: https://kubernetes.default.svc
+      namespace: argo-events
+    - server: https://kubernetes.default.svc
+      namespace: argo-workflows
+    - server: https://kubernetes.default.svc
+      namespace: actions-runner-system
+    - server: https://kubernetes.default.svc
+      namespace: keda
+    - server: https://kubernetes.default.svc
+      namespace: karmada-system
+
+    # Storage / registry / data.
     - server: https://kubernetes.default.svc
       namespace: longhorn-system
+    - server: https://kubernetes.default.svc
+      namespace: harbor
+    - server: https://kubernetes.default.svc
+      namespace: nats
+    - server: https://kubernetes.default.svc
+      namespace: redis
+    - server: https://kubernetes.default.svc
+      namespace: garage
+
+    # GPU.
+    - server: https://kubernetes.default.svc
+      namespace: nvidia-gpu-operator
 
     # Observability.
     - server: https://kubernetes.default.svc
       namespace: monitoring
     - server: https://kubernetes.default.svc
       namespace: kiali
+    - server: https://kubernetes.default.svc
+      namespace: opentelemetry-operator-system
+    - server: https://kubernetes.default.svc
+      namespace: opencost
 
-    # Security.
+    # Security / compliance.
     - server: https://kubernetes.default.svc
       namespace: security
     - server: https://kubernetes.default.svc
       namespace: kyverno
     - server: https://kubernetes.default.svc
       namespace: falco
+    - server: https://kubernetes.default.svc
+      namespace: trivy-system
+    - server: https://kubernetes.default.svc
+      namespace: crowdsec
+    - server: https://kubernetes.default.svc
+      namespace: defectdojo
+    - server: https://kubernetes.default.svc
+      namespace: dfir-iris
+    - server: https://kubernetes.default.svc
+      namespace: wazuh
+    - server: https://kubernetes.default.svc
+      namespace: velero
 
-    # Platform workloads.
+    # Management / developer platform.
+    - server: https://kubernetes.default.svc
+      namespace: cattle-system
+    - server: https://kubernetes.default.svc
+      namespace: backstage
+
+    # Business / user-facing apps.
     - server: https://kubernetes.default.svc
       namespace: sinless-games
     - server: https://kubernetes.default.svc
       namespace: helix-ai
     - server: https://kubernetes.default.svc
-      namespace: cattle-system
+      namespace: mailu
     - server: https://kubernetes.default.svc
-      namespace: actions-runner-system
+      namespace: n8n
     - server: https://kubernetes.default.svc
-      namespace: nvidia-gpu-operator
+      namespace: homepage
 
   clusterResourceWhitelist:
     # Namespaces.
@@ -125,8 +202,14 @@ spec:
       kind: StorageClass
     - group: storage.k8s.io
       kind: CSIDriver
+    - group: snapshot.storage.k8s.io
+      kind: VolumeSnapshotClass
+    - group: snapshot.storage.k8s.io
+      kind: VolumeSnapshotContent
     - group: scheduling.k8s.io
       kind: PriorityClass
+    - group: node.k8s.io
+      kind: RuntimeClass
 
     # Cert-manager.
     - group: cert-manager.io
@@ -135,31 +218,93 @@ spec:
     # External Secrets.
     - group: external-secrets.io
       kind: ClusterSecretStore
+    - group: external-secrets.io
+      kind: ClusterExternalSecret
+    - group: external-secrets.io
+      kind: ClusterPushSecret
+    - group: external-secrets.io
+      kind: ClusterGenerator
 
     # Kyverno.
     - group: kyverno.io
       kind: ClusterPolicy
     - group: kyverno.io
+      kind: ClusterCleanupPolicy
+    - group: kyverno.io
       kind: PolicyException
+    - group: kyverno.io
+      kind: GlobalContextEntry
 
-    # Cilium cluster-wide policy support.
+    # Cilium cluster-wide resources.
     - group: cilium.io
       kind: CiliumClusterwideNetworkPolicy
+    - group: cilium.io
+      kind: CiliumLoadBalancerIPPool
+    - group: cilium.io
+      kind: CiliumBGPClusterConfig
+    - group: cilium.io
+      kind: CiliumBGPAdvertisement
+    - group: cilium.io
+      kind: CiliumBGPNodeConfigOverride
+    - group: cilium.io
+      kind: CiliumNodeConfig
 
-    # KEDA cluster auth support.
+    # Gateway API.
+    - group: gateway.networking.k8s.io
+      kind: GatewayClass
+
+    # Argo Rollouts / Workflows.
+    - group: argoproj.io
+      kind: ClusterAnalysisTemplate
+    - group: argoproj.io
+      kind: ClusterWorkflowTemplate
+
+    # KEDA.
     - group: keda.sh
       kind: ClusterTriggerAuthentication
 
+    # NVIDIA GPU Operator.
+    - group: nvidia.com
+      kind: ClusterPolicy
+
+    # Karmada.
+    - group: cluster.karmada.io
+      kind: Cluster
+    - group: policy.karmada.io
+      kind: ClusterPropagationPolicy
+    - group: policy.karmada.io
+      kind: ClusterOverridePolicy
+    - group: config.karmada.io
+      kind: ResourceInterpreterWebhookConfiguration
+
+    # Trivy Operator cluster reports.
+    - group: aquasecurity.github.io
+      kind: ClusterVulnerabilityReport
+    - group: aquasecurity.github.io
+      kind: ClusterConfigAuditReport
+    - group: aquasecurity.github.io
+      kind: ClusterRbacAssessmentReport
+    - group: aquasecurity.github.io
+      kind: ClusterInfraAssessmentReport
+    - group: aquasecurity.github.io
+      kind: ClusterComplianceReport
+    - group: aquasecurity.github.io
+      kind: ClusterSbomReport
+
   namespaceResourceWhitelist:
-    # Core namespaced resources.
+    # Argo CD.
     - group: argoproj.io
       kind: Application
     - group: argoproj.io
       kind: ApplicationSet
+
+    # Core namespaced resources.
     - group: ""
       kind: ServiceAccount
     - group: ""
       kind: Service
+    - group: ""
+      kind: Endpoints
     - group: ""
       kind: ConfigMap
     - group: ""
@@ -168,6 +313,10 @@ spec:
       kind: PersistentVolumeClaim
     - group: ""
       kind: Pod
+    - group: ""
+      kind: LimitRange
+    - group: ""
+      kind: ResourceQuota
 
     # Workloads.
     - group: apps
@@ -185,7 +334,7 @@ spec:
     - group: batch
       kind: CronJob
 
-    # Autoscaling.
+    # Autoscaling / disruption control.
     - group: autoscaling
       kind: HorizontalPodAutoscaler
     - group: policy
@@ -203,7 +352,25 @@ spec:
     - group: networking.k8s.io
       kind: Ingress
 
-    # Istio.
+    # Gateway API.
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+    - group: gateway.networking.k8s.io
+      kind: HTTPSRoute
+    - group: gateway.networking.k8s.io
+      kind: TLSRoute
+    - group: gateway.networking.k8s.io
+      kind: TCPRoute
+    - group: gateway.networking.k8s.io
+      kind: UDPRoute
+    - group: gateway.networking.k8s.io
+      kind: GRPCRoute
+    - group: gateway.networking.k8s.io
+      kind: ReferenceGrant
+
+    # Istio networking / security / telemetry.
     - group: networking.istio.io
       kind: Gateway
     - group: networking.istio.io
@@ -214,12 +381,24 @@ spec:
       kind: ServiceEntry
     - group: networking.istio.io
       kind: Sidecar
+    - group: networking.istio.io
+      kind: EnvoyFilter
+    - group: networking.istio.io
+      kind: WorkloadEntry
+    - group: networking.istio.io
+      kind: WorkloadGroup
+    - group: networking.istio.io
+      kind: ProxyConfig
     - group: security.istio.io
       kind: PeerAuthentication
     - group: security.istio.io
       kind: AuthorizationPolicy
+    - group: security.istio.io
+      kind: RequestAuthentication
     - group: telemetry.istio.io
       kind: Telemetry
+    - group: extensions.istio.io
+      kind: WasmPlugin
 
     # Cert-manager.
     - group: cert-manager.io
@@ -232,56 +411,191 @@ spec:
       kind: ExternalSecret
     - group: external-secrets.io
       kind: SecretStore
+    - group: external-secrets.io
+      kind: PushSecret
 
-    # Monitoring.
+    # ExternalDNS CRD source support.
+    - group: externaldns.k8s.io
+      kind: DNSEndpoint
+
+    # Monitoring / Prometheus Operator.
     - group: monitoring.coreos.com
       kind: Alertmanager
+    - group: monitoring.coreos.com
+      kind: AlertmanagerConfig
     - group: monitoring.coreos.com
       kind: Prometheus
     - group: monitoring.coreos.com
       kind: PrometheusAgent
     - group: monitoring.coreos.com
-      kind: Probe
-    - group: monitoring.coreos.com
-      kind: ScrapeConfig
+      kind: PrometheusRule
     - group: monitoring.coreos.com
       kind: ServiceMonitor
     - group: monitoring.coreos.com
       kind: PodMonitor
     - group: monitoring.coreos.com
-      kind: PrometheusRule
+      kind: Probe
     - group: monitoring.coreos.com
-      kind: AlertmanagerConfig
+      kind: ScrapeConfig
     - group: monitoring.coreos.com
       kind: ThanosRuler
+
+    # OpenTelemetry.
+    - group: opentelemetry.io
+      kind: OpenTelemetryCollector
+    - group: opentelemetry.io
+      kind: Instrumentation
+    - group: opentelemetry.io
+      kind: OpAMPBridge
 
     # Kyverno namespaced policy.
     - group: kyverno.io
       kind: Policy
+    - group: kyverno.io
+      kind: CleanupPolicy
 
-    # Gateway API, if used.
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-    - group: gateway.networking.k8s.io
-      kind: TLSRoute
-    - group: gateway.networking.k8s.io
-      kind: TCPRoute
-
-    # Cilium namespaced policies.
+    # Cilium namespaced resources.
     - group: cilium.io
       kind: CiliumNetworkPolicy
+    - group: cilium.io
+      kind: CiliumEnvoyConfig
+    - group: cilium.io
+      kind: CiliumEgressGatewayPolicy
+    - group: cilium.io
+      kind: CiliumLocalRedirectPolicy
 
     # KEDA.
     - group: keda.sh
       kind: ScaledObject
     - group: keda.sh
+      kind: ScaledJob
+    - group: keda.sh
       kind: TriggerAuthentication
 
+    # Argo Rollouts.
+    - group: argoproj.io
+      kind: Rollout
+    - group: argoproj.io
+      kind: AnalysisTemplate
+    - group: argoproj.io
+      kind: AnalysisRun
+    - group: argoproj.io
+      kind: Experiment
+
+    # Argo Workflows.
+    - group: argoproj.io
+      kind: Workflow
+    - group: argoproj.io
+      kind: WorkflowTemplate
+    - group: argoproj.io
+      kind: CronWorkflow
+
+    # Argo Events.
+    - group: argoproj.io
+      kind: EventBus
+    - group: argoproj.io
+      kind: EventSource
+    - group: argoproj.io
+      kind: Sensor
+
+    # Longhorn.
+    - group: longhorn.io
+      kind: Volume
+    - group: longhorn.io
+      kind: Engine
+    - group: longhorn.io
+      kind: Replica
+    - group: longhorn.io
+      kind: EngineImage
+    - group: longhorn.io
+      kind: Node
+    - group: longhorn.io
+      kind: Setting
+    - group: longhorn.io
+      kind: InstanceManager
+    - group: longhorn.io
+      kind: ShareManager
+    - group: longhorn.io
+      kind: BackingImage
+    - group: longhorn.io
+      kind: BackingImageManager
+    - group: longhorn.io
+      kind: BackingImageDataSource
+    - group: longhorn.io
+      kind: BackupTarget
+    - group: longhorn.io
+      kind: BackupVolume
+    - group: longhorn.io
+      kind: Backup
+    - group: longhorn.io
+      kind: Snapshot
+    - group: longhorn.io
+      kind: RecurringJob
+    - group: longhorn.io
+      kind: Orphan
+    - group: longhorn.io
+      kind: SupportBundle
+    - group: longhorn.io
+      kind: SystemBackup
+    - group: longhorn.io
+      kind: SystemRestore
+
+    # Volume snapshots.
+    - group: snapshot.storage.k8s.io
+      kind: VolumeSnapshot
+    - group: snapshot.storage.k8s.io
+      kind: VolumeSnapshotClass
+    - group: snapshot.storage.k8s.io
+      kind: VolumeSnapshotContent
+
+    # Velero.
+    - group: velero.io
+      kind: BackupStorageLocation
+    - group: velero.io
+      kind: VolumeSnapshotLocation
+    - group: velero.io
+      kind: Schedule
+    - group: velero.io
+      kind: Backup
+    - group: velero.io
+      kind: Restore
+    - group: velero.io
+      kind: DeleteBackupRequest
+    - group: velero.io
+      kind: DownloadRequest
+    - group: velero.io
+      kind: PodVolumeBackup
+    - group: velero.io
+      kind: PodVolumeRestore
+    - group: velero.io
+      kind: ServerStatusRequest
+
+    # Trivy Operator namespaced reports.
+    - group: aquasecurity.github.io
+      kind: VulnerabilityReport
+    - group: aquasecurity.github.io
+      kind: ConfigAuditReport
+    - group: aquasecurity.github.io
+      kind: RbacAssessmentReport
+    - group: aquasecurity.github.io
+      kind: InfraAssessmentReport
+    - group: aquasecurity.github.io
+      kind: ExposedSecretReport
+    - group: aquasecurity.github.io
+      kind: SbomReport
+
+    # Karmada namespaced policy resources.
+    - group: policy.karmada.io
+      kind: PropagationPolicy
+    - group: policy.karmada.io
+      kind: OverridePolicy
+    - group: policy.karmada.io
+      kind: FederatedResourceQuota
+    - group: work.karmada.io
+      kind: ResourceBinding
+
   namespaceResourceBlacklist:
-    # Prevent Argo apps in this project from managing raw token Secrets directly.
-    # External Secrets should generate sensitive runtime Secrets instead.
+    # Raw ServiceAccount token artifacts should not be managed directly by GitOps.
     - group: ""
       kind: ServiceAccountToken
 

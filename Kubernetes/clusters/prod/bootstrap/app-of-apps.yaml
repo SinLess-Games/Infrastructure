@@ -13,16 +13,16 @@ metadata:
     topology.kubernetes.io/environment: prod
     security.sinlessgames.io/gitops-root: "true"
   annotations:
+    argocd.argoproj.io/sync-wave: "-100"
     security.sinlessgames.io/purpose: "Root Argo CD app-of-apps for the production platform."
     security.sinlessgames.io/repo: "SinLess-Games/Infrastructure"
     security.sinlessgames.io/branch: "main"
+    security.sinlessgames.io/path: "Kubernetes/apps/prod/gitops/applications"
     security.sinlessgames.io/prune-enabled: "true"
     security.sinlessgames.io/self-heal-enabled: "true"
-
-  # Keep this if you want deleting the root Application to delete all child apps/resources.
-  # Remove it if you want root app deletion to orphan managed resources instead.
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
+    security.sinlessgames.io/root-finalizer-enabled: "false"
+    security.sinlessgames.io/deletion-policy: "Deleting this root Application should
+      not directly cascade-delete all child resources."
 
 spec:
   project: platform
@@ -31,12 +31,14 @@ spec:
     repoURL: https://github.com/SinLess-Games/Infrastructure.git
     targetRevision: main
     path: Kubernetes/apps/prod/gitops/applications
+    directory:
+      recurse: true
 
   destination:
     server: https://kubernetes.default.svc
     namespace: gitops
 
-  revisionHistoryLimit: 5
+  revisionHistoryLimit: 10
 
   syncPolicy:
     automated:
@@ -45,23 +47,28 @@ spec:
       allowEmpty: false
 
     retry:
-      limit: 5
+      limit: 6
       backoff:
         duration: 10s
         factor: 2
-        maxDuration: 3m
+        maxDuration: 5m
 
     syncOptions:
-      # Namespaces should be explicit manifests with labels/security controls.
+      # Namespaces should be explicit manifests with labels, quotas, and policy controls.
       - CreateNamespace=false
 
-      # Safer pruning behavior.
+      # Production-safe pruning behavior.
       - PrunePropagationPolicy=foreground
       - PruneLast=true
+      - Delete=false
 
       # Cleaner sync behavior.
       - ApplyOutOfSyncOnly=true
       - RespectIgnoreDifferences=true
 
-      # Useful for modern CRDs and larger objects.
+      # Safer apply behavior for large CRDs and modern Kubernetes resources.
       - ServerSideApply=true
+      - Validate=true
+
+      # Avoid shared-resource ownership conflicts between root and child apps.
+      - FailOnSharedResource=true

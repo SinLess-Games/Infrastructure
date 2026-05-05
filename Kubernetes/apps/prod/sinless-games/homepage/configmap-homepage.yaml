@@ -70,9 +70,16 @@ data:
 
   bookmarks.yaml: |
     - Anime:
-        - 9Anime:
-            - abbr: 9A
-              href: https://9animetv.to/
+        - aniwave:
+            - abbr: AW
+              href: https://aniwaves.ru
+        - Kiss Anime:
+            - abbr: KA
+              href: https://kissanime.com.ru
+        - gogoanime:
+            - abbr: GGA
+              href: https://gogoanimes.cv
+
         - Livechart:
             - abbr: LC
               href: https://www.livechart.me/
@@ -85,9 +92,7 @@ data:
         - Crunchyroll:
             - abbr: CR
               href: https://crunchyroll.com
-        - Kiss Anime:
-            - abbr: KA
-              href: https://kissanime.com.ru
+
 
     - Ai:
         - ChatGPT:
