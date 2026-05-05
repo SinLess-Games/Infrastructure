@@ -1,15 +1,151 @@
 ---
 # =============================================================================
 # Technitium DNS - Cluster Configuration
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Configure Technitium DNS Server clustering for the technitium Ansible group.
+#
+# Design:
+#   - dns-01 is the primary cluster node.
+#   - dns-pi is intentionally excluded from clustering.
+#   - All other hosts in the technitium inventory group are treated as
+#     secondary nodes unless explicitly excluded.
+#
+# Important:
+#   - Technitium clustering uses a Primary / Secondary design.
+#   - The cluster domain cannot be changed after initialization.
+#   - DHCP scopes are not currently clustered; keep DHCP automation separate.
+#   - Cluster node-to-node communication should use the Technitium HTTPS web
+#     service directly, not an HTTP reverse proxy.
 # =============================================================================
 
+# -----------------------------------------------------------------------------
+# Cluster state
+# -----------------------------------------------------------------------------
+
 technitium_cluster_enabled: true
+
+# This becomes the Technitium cluster domain.
+# Do not change this after cluster initialization without rebuilding the cluster.
 technitium_cluster_domain: "local.sinlessgames.com"
 
-# Primary node is the existing Raspberry Pi DNS server
-technitium_cluster_primary_host: "dns-pi"
-technitium_cluster_primary_ip: "10.10.10.12"
-technitium_cluster_primary_url: "http://{{ technitium_cluster_primary_ip }}:5380/"
+# -----------------------------------------------------------------------------
+# Primary node
+# -----------------------------------------------------------------------------
 
-# Use a public resolver-friendly hostname for join since Technitium resolves via DNS.
-technitium_cluster_primary_join_host: "{{ technitium_cluster_primary_ip | replace('.', '-') }}.nip.io"
+technitium_cluster_primary_host: "dns-01"
+technitium_cluster_primary_ip: "10.10.10.9"
+technitium_cluster_primary_fqdn: "{{ technitium_cluster_primary_host }}.{{ technitium_cluster_domain }}"
+
+# Technitium web/API ports.
+# 5380 is the normal HTTP admin/API port.
+# 53443 is the HTTPS web service port commonly used by Technitium clustering.
+technitium_web_http_port: 5380
+technitium_web_https_port: 53443
+
+# Local admin/API URL used by Ansible for initial login, health checks, and
+# pre-cluster operations.
+technitium_cluster_primary_admin_url: "http://{{ technitium_cluster_primary_ip }}:{{ technitium_web_http_port }}/"
+
+# HTTPS cluster URL advertised to secondary nodes.
+# Keep this as the node FQDN, not nip.io.
+technitium_cluster_primary_url: "https://{{ technitium_cluster_primary_fqdn }}:{{ technitium_web_https_port }}/"
+
+# Join parameters used by secondary nodes.
+# Technitium can receive the primary URL and primary IP separately, which avoids
+# depending on public helper DNS names for local infrastructure.
+technitium_cluster_primary_join_url: "{{ technitium_cluster_primary_url }}"
+technitium_cluster_primary_join_ip: "{{ technitium_cluster_primary_ip }}"
+technitium_cluster_primary_ip_addresses:
+  - "{{ technitium_cluster_primary_ip }}"
+
+# -----------------------------------------------------------------------------
+# Cluster membership
+# -----------------------------------------------------------------------------
+
+# Nodes intentionally excluded from cluster deployment.
+technitium_cluster_excluded_nodes:
+  - "dns-pi"
+
+# Inventory-derived members.
+# This assumes your inventory group is named "technitium".
+technitium_cluster_member_hosts: >-
+  {{
+    groups.get('technitium', [])
+    | difference(technitium_cluster_excluded_nodes)
+    | list
+  }}
+
+technitium_cluster_secondary_hosts: >-
+  {{
+    technitium_cluster_member_hosts
+    | difference([technitium_cluster_primary_host])
+    | list
+  }}
+
+# -----------------------------------------------------------------------------
+# Current-node derived values
+# -----------------------------------------------------------------------------
+
+technitium_cluster_node_host: "{{ inventory_hostname }}"
+technitium_cluster_node_ip: >-
+  {{
+    hostvars[inventory_hostname].ansible_host
+    | default(hostvars[inventory_hostname].ansible_default_ipv4.address | default(''))
+  }}
+technitium_cluster_node_fqdn: "{{ technitium_cluster_node_host }}.{{ technitium_cluster_domain }}"
+technitium_cluster_node_url: "https://{{ technitium_cluster_node_fqdn }}:{{ technitium_web_https_port }}/"
+technitium_cluster_node_ip_addresses:
+  - "{{ technitium_cluster_node_ip }}"
+
+technitium_cluster_node_is_excluded: "{{ inventory_hostname in technitium_cluster_excluded_nodes }}"
+technitium_cluster_node_is_primary: "{{ inventory_hostname == technitium_cluster_primary_host }}"
+technitium_cluster_node_is_secondary: >-
+  {{
+    technitium_cluster_enabled
+    and not technitium_cluster_node_is_primary
+    and not technitium_cluster_node_is_excluded
+  }}
+technitium_cluster_should_manage_node: >-
+  {{
+    technitium_cluster_enabled
+    and not technitium_cluster_node_is_excluded
+  }}
+
+# -----------------------------------------------------------------------------
+# TLS behavior
+# -----------------------------------------------------------------------------
+# Technitium may enable HTTPS automatically with a self-signed certificate during
+# cluster initialization. Keep this false until you deploy trusted certificates.
+# In Ansible uri tasks, map this to validate_certs.
+# -----------------------------------------------------------------------------
+
+technitium_cluster_validate_certs: false
+technitium_cluster_ignore_certificate_errors: "{{ not technitium_cluster_validate_certs }}"
+
+# -----------------------------------------------------------------------------
+# Cluster timing defaults
+# -----------------------------------------------------------------------------
+# These mirror Technitium's common cluster defaults and are useful for role
+# validation, retries, and wait loops.
+# -----------------------------------------------------------------------------
+
+technitium_cluster_heartbeat_refresh_interval_seconds: 30
+technitium_cluster_heartbeat_retry_interval_seconds: 10
+technitium_cluster_config_refresh_interval_seconds: 900
+technitium_cluster_config_retry_interval_seconds: 60
+
+# -----------------------------------------------------------------------------
+# API behavior
+# -----------------------------------------------------------------------------
+
+technitium_cluster_api_timeout: 30
+technitium_cluster_api_retries: 5
+technitium_cluster_api_delay: 5
+
+# Used by tasks that should not overwrite secondary configuration unless the
+# operator has explicitly allowed cluster joining.
+technitium_cluster_allow_secondary_join: true
+
+# Used by destructive operations such as deleting/reinitializing cluster state.
+technitium_cluster_allow_destructive_actions: false

@@ -1,0 +1,227 @@
+---
+# =============================================================================
+# Playbook: Deploy and Configure Technitium DNS
+# -----------------------------------------------------------------------------
+# Purpose:
+#   1. Deploy Technitium DNS VMs through Terraform.
+#   2. Prepare the new DNS hosts.
+#   3. Install Technitium DNS Server.
+#   4. Configure server settings, zones, records, reverse zones, block lists,
+#      clustering, and firewall policy.
+#
+# Execution model:
+#   - Play 1 runs on localhost only and performs Terraform deployment.
+#   - Play 2 runs against DNS hosts and configures the appliances.
+#   - Technitium clustering and primary-only DNS writes are handled inside the
+#     technitium role.
+#
+# Example:
+#   ansible-playbook -i Ansible/inventory Ansible/playbooks/deploy-technitium.yaml
+#
+# Phase-only examples:
+#   ansible-playbook -i Ansible/inventory Ansible/playbooks/deploy-technitium.yaml --tags technitium-deploy
+#   ansible-playbook -i Ansible/inventory Ansible/playbooks/deploy-technitium.yaml --tags technitium-configure
+# =============================================================================
+
+# =============================================================================
+# Play 1: Deploy VMs
+# =============================================================================
+
+- name: Deploy Technitium DNS VMs via Terraform
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  any_errors_fatal: true
+
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/technitium/main.yaml
+    - ../group_vars/technitium/cluster.yaml
+    - ../group_vars/technitium/technitium-vms.yaml
+
+  roles:
+    - role: technitium
+      vars:
+        technitium_role_phases:
+          - deploy
+      tags:
+        - technitium
+        - technitium-deploy
+        - deploy
+
+# =============================================================================
+# Play 2: Configure VMs
+# =============================================================================
+
+- name: Configure Technitium DNS appliances
+  hosts: dns
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  strategy: linear
+  timeout: 300
+
+  vars:
+    ansible_timeout: 300
+    ansible_connection_timeout: 30
+
+    # Base host package groups.
+    packages_enabled_groups:
+      - production
+      - shell
+
+    # Technitium API timing.
+    technitium_api_timeout: 90
+    technitium_api_delay: 5
+    technitium_api_retries: 12
+
+    # Optional base-role toggles.
+    technitium_apply_packages_role: true
+    technitium_apply_users_role: true
+    technitium_apply_ssh_role: true
+    technitium_apply_shell_config_role: true
+
+    # The Technitium role owns resolver changes for DNS appliances.
+    # Leave this disabled unless you intentionally want the dns-resolver role
+    # to run before Technitium.
+    technitium_apply_dns_resolver_role: false
+
+  vars_files:
+    # -------------------------------------------------------------------------
+    # Shared vars
+    # -------------------------------------------------------------------------
+    - ../group_vars/all/packages.yaml
+    - ../group_vars/all/users.yaml
+    - ../group_vars/all/ssh.yaml
+    - ../group_vars/all/zsh.yaml
+
+    # -------------------------------------------------------------------------
+    # Technitium vars
+    # -------------------------------------------------------------------------
+    - ../group_vars/technitium/main.yaml
+    - ../group_vars/technitium/block-lists.yaml
+    - ../group_vars/technitium/cluster.yaml
+    - ../group_vars/technitium/domains.yaml
+    - ../group_vars/technitium/domain-records.yaml
+    - ../group_vars/technitium/firewall.yaml
+    - ../group_vars/technitium/reverse-zones.yaml
+    - ../group_vars/technitium/technitium-vms.yaml
+
+  pre_tasks:
+    - name: Preflight | Wait for Technitium hosts to become reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+        delay: 5
+        sleep: 5
+      tags:
+        - always
+        - technitium
+        - technitium-preflight
+
+    - name: Preflight | Gather facts
+      ansible.builtin.setup:
+        gather_timeout: 30
+      tags:
+        - always
+        - technitium
+        - technitium-preflight
+
+    - name: Preflight | Show configure target summary
+      ansible.builtin.debug:
+        msg:
+          - "Configuring Technitium DNS host."
+          - "Host: {{ inventory_hostname }}"
+          - "Address: {{ ansible_host | default(ansible_default_ipv4.address | default('unknown')) }}"
+          - "Cluster enabled: {{ technitium_cluster_enabled | default(false) | bool }}"
+          - "Cluster primary: {{ technitium_cluster_primary_host | default('standalone') }}"
+      when: technitium_playbook_show_preflight_summary | default(true)
+      tags:
+        - always
+        - technitium
+        - technitium-preflight
+
+  tasks:
+    # -------------------------------------------------------------------------
+    # Optional base host roles
+    # -------------------------------------------------------------------------
+
+    - name: Base | Apply package baseline
+      ansible.builtin.import_role:
+        name: packages
+      vars:
+        packages_role_catalog: "{{ apt_packages }}"
+        packages_enabled_groups:
+          - production
+          - shell
+      when: technitium_apply_packages_role | default(true) | bool
+      tags:
+        - packages
+        - base
+        - technitium-base
+
+    - name: Base | Apply users role
+      ansible.builtin.import_role:
+        name: users
+      when: technitium_apply_users_role | default(true) | bool
+      tags:
+        - users
+        - base
+        - technitium-base
+
+    - name: Base | Apply SSH role
+      ansible.builtin.import_role:
+        name: ssh
+      when: technitium_apply_ssh_role | default(true) | bool
+      tags:
+        - ssh
+        - base
+        - technitium-base
+
+    - name: Base | Apply shell configuration role
+      ansible.builtin.import_role:
+        name: shell-config
+      when: technitium_apply_shell_config_role | default(true) | bool
+      tags:
+        - shell
+        - base
+        - technitium-base
+
+    - name: Base | Apply DNS resolver role when explicitly enabled
+      ansible.builtin.import_role:
+        name: dns-resolver
+      when: technitium_apply_dns_resolver_role | default(false) | bool
+      tags:
+        - dns
+        - base
+        - technitium-base
+
+    # -------------------------------------------------------------------------
+    # Technitium
+    # -------------------------------------------------------------------------
+
+    - name: Technitium | Apply configure phase
+      ansible.builtin.import_role:
+        name: technitium
+      vars:
+        technitium_role_phases:
+          - configure
+      tags:
+        - technitium
+        - technitium-configure
+        - configure
+        - cluster
+
+  post_tasks:
+    - name: Summary | Show Technitium playbook completion
+      ansible.builtin.debug:
+        msg:
+          - "Technitium deployment/configuration playbook complete."
+          - "Host: {{ inventory_hostname }}"
+          - "Cluster enabled: {{ technitium_cluster_enabled | default(false) | bool }}"
+          - "Primary host: {{ technitium_cluster_primary_host | default('standalone') }}"
+          - "API URL: {{ technitium_api_url | default('not-set') }}"
+      when: technitium_playbook_show_completion_summary | default(true)
+      tags:
+        - always
+        - technitium
+        - technitium-summary

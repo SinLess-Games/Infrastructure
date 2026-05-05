@@ -1,78 +1,432 @@
 ---
 # =============================================================================
 # SSH Role Defaults
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Default values for the SSH role.
+#
+# Responsibilities:
+#   - Generate user SSH key material on the controller.
+#   - Generate and manage the SSH user CA.
+#   - Sign user SSH certificates.
+#   - Install trusted user CA keys on managed hosts.
+#   - Render authorized principals files.
+#   - Harden sshd configuration.
+#   - Optionally render SSH client configuration.
+#
+# Security model:
+#   - CA-backed SSH authentication is preferred.
+#   - Password authentication is disabled by default.
+#   - Generated private material is written under .outputs/, which should remain
+#     gitignored.
 # =============================================================================
 
+# =============================================================================
+# Input sources
+# =============================================================================
+
+# User source fallback order:
+#   1. ssh.users
+#   2. users
+#   3. empty list
 ssh_role_users: "{{ ssh.users | default(users | default([]), true) }}"
+
 ssh_role_manage_user_materials: true
-
-# ---------------------------------------------------------------------------
-# User SSH key settings
-# ---------------------------------------------------------------------------
-ssh_key_type: ed25519
-ssh_key_comment_suffix: "@sinlessgames"
-ssh_key_bits: 4096                 # Only used for RSA
-ssh_key_mode_private: "0600"
-ssh_key_mode_public: "0644"
-ssh_force_regenerate: false
-ssh_outputs_persist: true
-
+ssh_role_manage_ca: true
+ssh_role_manage_certificates: true
+ssh_role_manage_server: true
+ssh_role_manage_client_config: true
+ssh_role_manage_known_hosts: true
+ssh_role_manage_authorized_keys_fallback: true
+ssh_role_manage_principals: true
 
 # =============================================================================
-# Persistent SSH Output Paths (Repo Root Anchored)
+# Controller / output paths
 # =============================================================================
 
-# Absolute path to repo root (git-based, execution-safe)
-ssh_repo_root: "{{ lookup('ansible.builtin.pipe', 'git rev-parse --show-toplevel') | trim }}"
+# Prefer an explicitly provided repo root from group_vars. Fall back to git.
+ssh_repo_root: >-
+  {{
+    ssh_controller_repo_root
+    | default(lookup('ansible.builtin.pipe', 'git rev-parse --show-toplevel') | trim)
+  }}
 
-# Persistent outputs directory (gitignored)
-ssh_output_root: "{{ ssh_repo_root }}/.outputs"
-ssh_output_base: "{{ ssh_output_root }}/ssh"
-ssh_ca_output_dir: "{{ ssh_output_root }}/ssh_ca"
+ssh_output_root: "{{ ssh_controller_outputs_dir | default(ssh_repo_root ~ '/.outputs') }}"
+ssh_output_base: "{{ ssh_controller_ssh_output_dir | default(ssh_output_root ~ '/ssh') }}"
+ssh_ca_output_dir: "{{ ssh_ca_output_dir | default(ssh_output_root ~ '/ssh_ca') }}"
+
+ssh_user_materials_output_dir: "{{ ssh_output_base }}/users"
+ssh_host_materials_output_dir: "{{ ssh_output_base }}/hosts"
+ssh_root_materials_output_dir: "{{ ssh_controller_root_materials_dir | default(ssh_output_base ~ '/root') }}"
+
 ssh_controller_local_user: "{{ lookup('ansible.builtin.pipe', 'id -un') | trim }}"
 ssh_controller_local_group: "{{ lookup('ansible.builtin.pipe', 'id -gn') | trim }}"
 
+ssh_outputs_persist: true
+ssh_outputs_owner: "{{ ssh_controller_local_user }}"
+ssh_outputs_group: "{{ ssh_controller_local_group }}"
+ssh_outputs_dir_mode: "0700"
 
-# ---------------------------------------------------------------------------
-# Supported key types
-# ---------------------------------------------------------------------------
+# =============================================================================
+# Key generation defaults
+# =============================================================================
+
+ssh_key_type: ed25519
+ssh_key_bits: 4096
+ssh_key_comment_suffix: "@sinlessgames"
+
+ssh_key_mode_private: "0600"
+ssh_key_mode_public: "0644"
+ssh_key_mode_certificate: "0644"
+
+ssh_force_regenerate: false
+
 ssh_supported_key_types:
   - ed25519
   - rsa
   - ecdsa
 
-# ---------------------------------------------------------------------------
-# SSH Certificate Authority (CA) settings
-# ---------------------------------------------------------------------------
+# =============================================================================
+# SSH Certificate Authority defaults
+# =============================================================================
+
 ssh_ca_enabled: true
 
 ssh_ca_key_type: ed25519
-ssh_ca_key_bits: 4096              # Only used if ssh_ca_key_type == rsa
+ssh_ca_key_bits: 4096
 ssh_ca_comment: "sinlessgames-ssh-ca"
+
+ssh_ca_private_key_path: "{{ ssh_ca_output_dir }}/ssh_ca"
+ssh_ca_public_key_path: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
 
 ssh_ca_force_regenerate: false
 
 ssh_ca_key_mode_private: "0600"
 ssh_ca_key_mode_public: "0644"
 
-
-# Certificate validity period (ssh-keygen -V)
-# Examples: 52w, 180d, 24h, +8h
+# Certificate validity period passed to ssh-keygen -V.
+# Examples:
+#   +8h
+#   +30d
+#   +52w
+#   20260504:20270504
 ssh_ca_cert_validity: "+52w"
 
-# SSH certificate principals
-# Defaults to username unless overridden per-user
+# Serial handling.
+ssh_ca_serial_file: "{{ ssh_ca_output_dir }}/serial"
+ssh_ca_default_serial: 1
+
+# Defaults to username unless overridden by:
+#   - user.ssh_principals
+#   - ssh.principals.<username>
 ssh_ca_default_principals: []
 
-# SSH certificate extensions
+# Conservative default certificate extensions.
+# Additional privilege should be granted intentionally per environment.
 ssh_ca_cert_extensions:
   - permit-pty
   - permit-user-rc
-  - permit-X11-forwarding
-  - permit-agent-forwarding
-  - permit-port-forwarding
 
-# Force re-signing of user certificates even if a valid cert already exists
+ssh_ca_cert_critical_options: []
+
+# Force re-signing user certificates even when a cert exists.
 ssh_ca_force_resign: false
 
+# =============================================================================
+# SSH principals
+# =============================================================================
+
+ssh_principals: "{{ ssh.principals | default({}) }}"
+
+ssh_authorized_principals_dir: "{{ ssh_authorized_principals_dir | default('/etc/ssh/auth_principals') }}"
+ssh_authorized_principals_file: "{{ ssh_authorized_principals_file |
+  default(ssh_authorized_principals_dir ~ '/%u') }}"
+
+ssh_authorized_principals_owner: root
+ssh_authorized_principals_group: root
+ssh_authorized_principals_dir_mode: "0755"
+ssh_authorized_principals_file_mode: "0644"
+
+# When true, users without explicit ssh_principals get their username as the
+# only allowed principal.
+ssh_principals_default_to_username: true
+
+# =============================================================================
+# Managed-node CA trust
+# =============================================================================
+
+ssh_trusted_user_ca_keys_path: "{{ ssh_server_trusted_user_ca_keys | default('/etc/ssh/ca/ssh_ca.pub') }}"
+ssh_trusted_user_ca_keys_owner: root
+ssh_trusted_user_ca_keys_group: root
+ssh_trusted_user_ca_keys_dir_mode: "0755"
+ssh_trusted_user_ca_keys_mode: "0644"
+
+ssh_controller_ca_pub_candidates:
+  - "{{ ssh_ca_public_key_path }}"
+
+# =============================================================================
+# Host certificate defaults
+# =============================================================================
+
+ssh_host_certificates_enabled: "{{ ssh.server.enable_host_certificate |
+  default(true) if ssh is defined and ssh.server is defined else true }}"
+ssh_host_key_type: ed25519
+
+ssh_host_private_key_path: "/etc/ssh/ssh_host_{{ ssh_host_key_type }}_key"
+ssh_host_public_key_path: "{{ ssh_host_private_key_path }}.pub"
+ssh_host_certificate_path: "{{ ssh_server_host_certificate_path |
+  default('/etc/ssh/ssh_host_ed25519_key-cert.pub') }}"
+
+ssh_host_certificate_validity: "+52w"
+ssh_host_certificate_principals:
+  - "{{ inventory_hostname }}"
+  - "{{ ansible_hostname | default(inventory_hostname) }}"
+  - "{{ ansible_fqdn | default(inventory_hostname) }}"
+
+ssh_host_certificate_force_resign: false
+
+# =============================================================================
+# Root client material
+# =============================================================================
+
+ssh_root_identity_file: "{{ ssh.root_client.identity_file |
+  default('/root/.ssh/id_ed25519') if ssh is defined and ssh.root_client is
+  defined else '/root/.ssh/id_ed25519' }}"
+ssh_root_certificate_file: "{{ ssh.root_client.certificate_file |
+  default('/root/.ssh/id_ed25519-cert.pub') if ssh is defined and
+  ssh.root_client is defined else '/root/.ssh/id_ed25519-cert.pub' }}"
+
+ssh_root_client_enabled: "{{ ssh.root_client.enabled | default(true) if ssh is
+  defined and ssh.root_client is defined else true }}"
+ssh_root_client_identity_type: ed25519
+ssh_root_client_identity_comment: "root@{{ inventory_hostname }}"
+ssh_root_client_force_regenerate: false
+
+# =============================================================================
+# Authorized keys fallback
+# =============================================================================
+
+ssh_authorized_keys_fallback_enabled: true
+
+ssh_authorized_keys_default_exclusive: false
+ssh_authorized_keys_owner_mode: "0700"
+ssh_authorized_keys_file_mode: "0600"
+
+ssh_authorized_keys: "{{ ssh.authorized_keys | default({}) if ssh is defined else {} }}"
+
+# =============================================================================
+# SSH server defaults
+# =============================================================================
+
 ssh_disable_password_auth: true
+
+ssh_server_enabled: "{{ ssh.server.enabled | default(true) if ssh is defined and
+  ssh.server is defined else true }}"
+
+ssh_server_port: "{{ ssh.server.port | default(22) if ssh is defined and
+  ssh.server is defined else 22 }}"
+ssh_server_listen_addresses: "{{ ssh.server.listen_addresses |
+  default(['0.0.0.0']) if ssh is defined and ssh.server is defined else
+  ['0.0.0.0'] }}"
+ssh_server_address_family: "{{ ssh.server.address_family | default('any') if ssh
+  is defined and ssh.server is defined else 'any' }}"
+
+ssh_server_pubkey_authentication: "{{ ssh.server.pubkey_authentication |
+  default(true) if ssh is defined and ssh.server is defined else true }}"
+ssh_server_password_authentication: "{{ ssh.server.password_authentication |
+  default(false) if ssh is defined and ssh.server is defined else false }}"
+ssh_server_kbd_interactive_authentication: "{{
+  ssh.server.kbd_interactive_authentication | default(false) if ssh is defined
+  and ssh.server is defined else false }}"
+ssh_server_keyboard_interactive_authentication: "{{
+  ssh.server.keyboard_interactive_authentication | default(false) if ssh is
+  defined and ssh.server is defined else false }}"
+ssh_server_challenge_response_authentication: "{{
+  ssh.server.challenge_response_authentication | default(false) if ssh is
+  defined and ssh.server is defined else false }}"
+ssh_server_permit_empty_passwords: "{{ ssh.server.permit_empty_passwords |
+  default(false) if ssh is defined and ssh.server is defined else false }}"
+
+ssh_server_authentication_methods: "{{ ssh.server.authentication_methods |
+  default('publickey') if ssh is defined and ssh.server is defined else
+  'publickey' }}"
+ssh_server_permit_root_login: "{{ ssh.server.permit_root_login |
+  default('prohibit-password') if ssh is defined and ssh.server is defined else
+  'prohibit-password' }}"
+ssh_server_use_pam: "{{ ssh.server.use_pam | default(true) if ssh is defined and
+  ssh.server is defined else true }}"
+
+ssh_server_trusted_user_ca_keys: "{{ ssh.trusted_user_ca_keys |
+  default(ssh_trusted_user_ca_keys_path) if ssh is defined and
+  ssh.trusted_user_ca_keys is defined else ssh_trusted_user_ca_keys_path }}"
+ssh_server_authorized_principals_file: "{{ ssh.authorized_principals_file |
+  default(ssh_authorized_principals_file) if ssh is defined and
+  ssh.authorized_principals_file is defined else ssh_authorized_principals_file
+  }}"
+
+ssh_server_x11_forwarding: "{{ ssh.server.x11_forwarding | default(false) if ssh
+  is defined and ssh.server is defined else false }}"
+ssh_server_allow_agent_forwarding: "{{ ssh.server.allow_agent_forwarding |
+  default(false) if ssh is defined and ssh.server is defined else false }}"
+ssh_server_allow_tcp_forwarding: "{{ ssh.server.allow_tcp_forwarding |
+  default(false) if ssh is defined and ssh.server is defined else false }}"
+ssh_server_gateway_ports: "{{ ssh.server.gateway_ports | default('no') if ssh is
+  defined and ssh.server is defined else 'no' }}"
+ssh_server_permit_tunnel: "{{ ssh.server.permit_tunnel | default('no') if ssh is
+  defined and ssh.server is defined else 'no' }}"
+ssh_server_permit_user_environment: "{{ ssh.server.permit_user_environment |
+  default(false) if ssh is defined and ssh.server is defined else false }}"
+ssh_server_permit_user_rc: "{{ ssh.server.permit_user_rc | default(true) if ssh
+  is defined and ssh.server is defined else true }}"
+ssh_server_compression: "{{ ssh.server.compression | default('delayed') if ssh
+  is defined and ssh.server is defined else 'delayed' }}"
+
+ssh_server_tcp_keep_alive: "{{ ssh.server.tcp_keep_alive | default(true) if ssh
+  is defined and ssh.server is defined else true }}"
+ssh_server_client_alive_interval: "{{ ssh.server.client_alive_interval |
+  default(300) if ssh is defined and ssh.server is defined else 300 }}"
+ssh_server_client_alive_count_max: "{{ ssh.server.client_alive_count_max |
+  default(2) if ssh is defined and ssh.server is defined else 2 }}"
+ssh_server_login_grace_time: "{{ ssh.server.login_grace_time | default(30) if
+  ssh is defined and ssh.server is defined else 30 }}"
+ssh_server_max_auth_tries: "{{ ssh.server.max_auth_tries | default(6) if ssh is
+  defined and ssh.server is defined else 6 }}"
+ssh_server_max_sessions: "{{ ssh.server.max_sessions | default(10) if ssh is
+  defined and ssh.server is defined else 10 }}"
+ssh_server_max_startups: "{{ ssh.server.max_startups | default('10:30:60') if
+  ssh is defined and ssh.server is defined else '10:30:60' }}"
+
+ssh_server_use_dns: "{{ ssh.server.use_dns | default(false) if ssh is defined
+  and ssh.server is defined else false }}"
+ssh_server_log_level: "{{ ssh.server.log_level | default('VERBOSE') if ssh is
+  defined and ssh.server is defined else 'VERBOSE' }}"
+ssh_server_syslog_facility: "{{ ssh.server.syslog_facility | default('AUTH') if
+  ssh is defined and ssh.server is defined else 'AUTH' }}"
+
+ssh_server_sftp_enabled: "{{ ssh.server.sftp_enabled | default(true) if ssh is
+  defined and ssh.server is defined else true }}"
+ssh_server_sftp_subsystem: "{{ ssh.server.sftp_subsystem |
+  default('internal-sftp') if ssh is defined and ssh.server is defined else
+  'internal-sftp' }}"
+
+ssh_server_allow_users: "{{ ssh.server.allow_users | default([]) if ssh is
+  defined and ssh.server is defined else [] }}"
+ssh_server_allow_groups: "{{ ssh.server.allow_groups | default([]) if ssh is
+  defined and ssh.server is defined else [] }}"
+
+# =============================================================================
+# SSH login banner
+# =============================================================================
+
+ssh_server_banner_enabled: "{{ ssh.server.banner_enabled | default(true) if ssh
+  is defined and ssh.server is defined else true }}"
+ssh_server_banner_path: "{{ ssh.server.banner_path | default('/etc/issue.net')
+  if ssh is defined and ssh.server is defined else '/etc/issue.net' }}"
+ssh_server_banner_content: "{{ ssh.server.banner_content | default('AUTHORIZED
+  USE ONLY
+
+  ') if ssh is defined and ssh.server is defined else 'AUTHORIZED USE ONLY
+
+  ' }}"
+
+# =============================================================================
+# SSH client config defaults
+# =============================================================================
+
+ssh_client_config_enabled: "{{ ssh.client_config.enabled | default(true) if ssh
+  is defined and ssh.client_config is defined else true }}"
+
+ssh_client_config_path: "~/.ssh/config"
+ssh_client_config_mode: "0600"
+
+ssh_client_identity_file: "{{ ssh.client_config.identity_file |
+  default('~/.ssh/id_ed25519') if ssh is defined and ssh.client_config is
+  defined else '~/.ssh/id_ed25519' }}"
+ssh_client_certificate_file: "{{ ssh.client_config.certificate_file |
+  default('~/.ssh/id_ed25519-cert.pub') if ssh is defined and ssh.client_config
+  is defined else '~/.ssh/id_ed25519-cert.pub' }}"
+
+ssh_client_identities_only: "{{ ssh.client_config.identities_only |
+  default(true) if ssh is defined and ssh.client_config is defined else true }}"
+ssh_client_strict_host_key_checking: "{{
+  ssh.client_config.strict_host_key_checking | default('accept-new') if ssh is
+  defined and ssh.client_config is defined else 'accept-new' }}"
+ssh_client_pubkey_authentication: "{{ ssh.client_config.pubkey_authentication |
+  default(true) if ssh is defined and ssh.client_config is defined else true }}"
+ssh_client_password_authentication: "{{
+  ssh.client_config.password_authentication | default(false) if ssh is defined
+  and ssh.client_config is defined else false }}"
+
+ssh_client_server_alive_interval: "{{ ssh.client_config.server_alive_interval |
+  default(30) if ssh is defined and ssh.client_config is defined else 30 }}"
+ssh_client_server_alive_count_max: "{{ ssh.client_config.server_alive_count_max
+  | default(3) if ssh is defined and ssh.client_config is defined else 3 }}"
+ssh_client_connect_timeout: "{{ ssh.client_config.connect_timeout | default(10)
+  if ssh is defined and ssh.client_config is defined else 10 }}"
+
+ssh_client_user_known_hosts_file: "{{ ssh.client_config.user_known_hosts_file |
+  default('~/.ssh/known_hosts') if ssh is defined and ssh.client_config is
+  defined else '~/.ssh/known_hosts' }}"
+ssh_client_hosts: "{{ ssh.client_config.hosts | default([]) if ssh is defined
+  and ssh.client_config is defined else [] }}"
+
+# =============================================================================
+# Known hosts / host CA trust
+# =============================================================================
+
+ssh_known_hosts_enabled: "{{ ssh.known_hosts.enabled | default(true) if ssh is
+  defined and ssh.known_hosts is defined else true }}"
+ssh_known_hosts_file: "{{ ssh.known_hosts.managed_known_hosts_file |
+  default('~/.ssh/known_hosts') if ssh is defined and ssh.known_hosts is defined
+  else '~/.ssh/known_hosts' }}"
+ssh_known_hosts_cert_authority_patterns: "{{
+  ssh.known_hosts.cert_authority_patterns | default([]) if ssh is defined and
+  ssh.known_hosts is defined else [] }}"
+ssh_known_hosts_strict_host_key_checking: "{{
+  ssh.known_hosts.strict_host_key_checking | default('accept-new') if ssh is
+  defined and ssh.known_hosts is defined else 'accept-new' }}"
+
+# =============================================================================
+# Validation / behavior flags
+# =============================================================================
+
+ssh_role_validate_inputs: true
+ssh_role_show_summary: true
+ssh_role_no_log: false
+
+ssh_role_restart_sshd: true
+ssh_role_reload_sshd: true
+
+ssh_sshd_service_name: ssh
+ssh_sshd_config_path: /etc/ssh/sshd_config
+ssh_sshd_config_dir: /etc/ssh/sshd_config.d
+ssh_sshd_managed_config_path: "{{ ssh_sshd_config_dir }}/99-sinless-games.conf"
+
+ssh_sshd_validate_command: "sshd -t -f %s"
+
+ssh_policy: "{{ ssh.policy | default({}) if ssh is defined else {} }}"
+
+ssh_policy_defaults:
+  require_ca_backed_auth: true
+  require_password_authentication_disabled: true
+  require_keyboard_interactive_disabled: true
+  require_root_password_login_disabled: true
+  require_banner: true
+  require_strict_host_key_checking: true
+
+  allowed_strict_host_key_checking_values:
+    - "yes"
+    - "accept-new"
+
+  protected_users:
+    - root
+    - sinless777
+    - ansible
+    - breakglass
+
+  managed_certificate_users:
+    - root
+    - sinless777
+    - ansible
+    - automation
+    - breakglass

@@ -1,15 +1,149 @@
 ---
 # =============================================================================
 # Users Role Defaults
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Default values for the users role.
+#
+# Design:
+#   - Inventory/group_vars should define users.
+#   - This role should safely handle an empty user list.
+#   - Password hashes are supported through password_hash only.
+#   - Plaintext password fields should be rejected by validation.
+# =============================================================================
+
+# =============================================================================
+# Input sources
 # =============================================================================
 
 users: []
+
+# Primary role input. Falls back to global users.
 users_role_entries: "{{ users | default([]) }}"
 
-users_manage_home: true
-users_create_home: true
+# Optional defaults merged/used by role tasks.
+users_role_defaults: "{{ users_defaults | default({}) }}"
 
+# =============================================================================
+# Account defaults
+# =============================================================================
+
+users_manage_users: true
+users_manage_groups: true
+users_manage_home: true
+users_manage_home_permissions: true
+users_manage_sudoers: true
+
+users_create_home: true
 users_default_shell: /bin/bash
+users_default_state: present
+users_default_system: false
+users_default_password_lock: true
+users_default_append_groups: true
+
+# Home directory permissions for interactive users.
+users_default_home_mode: "0750"
+
+# =============================================================================
+# Group defaults
+# =============================================================================
 
 users_sudo_group: sudo
+
+# Whether groups referenced by user definitions should be created automatically.
+users_create_referenced_groups: true
+
+# Default system flag for auto-created supplementary groups.
+users_default_group_system: true
+
+# =============================================================================
+# Sudoers defaults
+# =============================================================================
+
 users_sudoers_dir: /etc/sudoers.d
+users_visudo_path: /usr/sbin/visudo
+
+users_default_sudo: false
+users_default_sudo_nopasswd: false
+users_default_sudo_runas: "ALL:ALL"
+users_default_sudo_commands:
+  - ALL
+
+# Remove sudoers files when a user is absent or sudo=false.
+users_remove_unmanaged_sudoers: true
+
+# =============================================================================
+# Validation defaults
+# =============================================================================
+
+users_validate_inputs: true
+
+users_role_show_validation_summary: true
+users_role_show_summary: true
+
+# Hide task output only when password_hash exists unless overridden.
+users_role_no_log: false
+
+# =============================================================================
+# Safety policy
+# =============================================================================
+
+users_policy_defaults:
+  require_unique_names: true
+  require_no_plaintext_passwords: true
+  require_snake_case_keys: true
+  require_explicit_state: false
+  require_explicit_shell: false
+  require_explicit_password_lock: false
+  require_explicit_sudo_policy: false
+
+  allowed_interactive_shells:
+    - /bin/bash
+    - /usr/bin/bash
+    - /bin/zsh
+    - /usr/bin/zsh
+
+  allowed_noninteractive_shells:
+    - /usr/sbin/nologin
+    - /sbin/nologin
+    - /bin/false
+    - /usr/bin/false
+
+  protected_users:
+    - root
+
+  locked_by_default: []
+
+  passwordless_sudo_users: []
+
+# =============================================================================
+# SSH / certificate metadata defaults
+# -----------------------------------------------------------------------------
+# These are not directly acted on by every users task, but are kept here so the
+# role can validate or pass metadata to SSH/certificate tasks later.
+# =============================================================================
+
+users_manage_ssh_metadata: true
+
+users_default_manage_ssh: true
+users_default_manage_sudoers: true
+
+users_default_ssh_principals: []
+users_default_shared_certs: []
+
+# =============================================================================
+# Removal defaults
+# =============================================================================
+
+# When state=absent, do not delete home directories unless explicitly requested
+# by a user entry using remove: true.
+users_default_remove: false
+
+# =============================================================================
+# Compatibility aliases
+# -----------------------------------------------------------------------------
+# Older tasks/templates may still reference these names.
+# =============================================================================
+
+users_default_create_home: "{{ users_create_home }}"
+users_default_manage_home: "{{ users_manage_home }}"

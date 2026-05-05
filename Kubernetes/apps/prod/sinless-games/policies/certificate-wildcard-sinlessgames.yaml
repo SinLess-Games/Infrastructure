@@ -9,11 +9,53 @@ metadata:
     app.kubernetes.io/component: tls-certificate
     app.kubernetes.io/part-of: sinless-games-platform
     app.kubernetes.io/managed-by: gitops
+    security.sinlessgames.io/tls-scope: wildcard
+    security.sinlessgames.io/certificate-provider: letsencrypt
+    topology.kubernetes.io/environment: prod
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+    security.sinlessgames.io/description: "Wildcard TLS certificate for sinlessgames.com workloads."
+    security.sinlessgames.io/dns-provider: cloudflare
+    security.sinlessgames.io/rotation-managed-by: cert-manager
 spec:
   secretName: wildcard-sinlessgames-com
+
   issuerRef:
+    group: cert-manager.io
     kind: ClusterIssuer
     name: letsencrypt-cloudflare
+
+  commonName: sinlessgames.com
+
   dnsNames:
     - sinlessgames.com
     - "*.sinlessgames.com"
+
+  duration: 2160h # 90 days
+  renewBefore: 360h # 15 days
+
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    encoding: PKCS1
+    rotationPolicy: Always
+
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+
+  secretTemplate:
+    labels:
+      app.kubernetes.io/name: wildcard-sinlessgames-com
+      app.kubernetes.io/component: tls-secret
+      app.kubernetes.io/part-of: sinless-games-platform
+      app.kubernetes.io/managed-by: cert-manager
+      security.sinlessgames.io/tls-scope: wildcard
+      security.sinlessgames.io/certificate-provider: letsencrypt
+      topology.kubernetes.io/environment: prod
+    annotations:
+      security.sinlessgames.io/description: "Wildcard TLS secret for sinlessgames.com workloads."
+      security.sinlessgames.io/dns-provider: cloudflare
+      security.sinlessgames.io/rotation-managed-by: cert-manager
+      security.sinlessgames.io/secret-type: tls

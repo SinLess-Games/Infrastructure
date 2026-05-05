@@ -1,0 +1,327 @@
+# Generated Packer HCL for {{ distro }}
+# Ansible/templates/packer/vm.pkr.hcl.j2
+#
+# This template is rendered by Ansible into:
+#   Packer/<distro>/<distro>.pkr.hcl
+#
+# Supported installer flows:
+#   - Debian: preseed
+#   - Ubuntu live-server: autoinstall / NoCloud
+
+packer {
+  required_plugins {
+    proxmox = {
+      version = ">= 1.1.2"
+      source  = "github.com/hashicorp/proxmox"
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Proxmox connection
+# -----------------------------------------------------------------------------
+
+variable "proxmox_endpoint" {
+  type = string
+}
+
+variable "proxmox_api_token_id" {
+  type      = string
+  sensitive = true
+}
+
+variable "proxmox_api_token_secret" {
+  type      = string
+  sensitive = true
+}
+
+variable "proxmox_node" {
+  type = string
+}
+
+variable "proxmox_insecure_skip_tls_verify" {
+  type    = bool
+  default = true
+}
+
+# -----------------------------------------------------------------------------
+# Proxmox storage
+# -----------------------------------------------------------------------------
+
+variable "proxmox_iso_storage" {
+  type    = string
+  default = "local"
+}
+
+variable "proxmox_vm_storage" {
+  type    = string
+  default = "local-lvm"
+}
+
+# -----------------------------------------------------------------------------
+# VM template identity
+# -----------------------------------------------------------------------------
+
+variable "vm_name" {
+  type    = string
+  default = "{{ vm_name }}"
+}
+
+variable "vm_id" {
+  type    = number
+  default = {{ vm_id }}
+}
+
+variable "template_description" {
+  type    = string
+  default = "{{ distro_display_name | default(distro) }} template built by Packer for {{ node }}"
+}
+
+# -----------------------------------------------------------------------------
+# VM hardware
+# -----------------------------------------------------------------------------
+
+variable "vm_memory" {
+  type    = number
+  default = {{ distro_item.vm_memory | default(packer_vm_memory | default(2048)) }}
+}
+
+variable "vm_cores" {
+  type    = number
+  default = {{ distro_item.vm_cores | default(packer_vm_cores | default(2)) }}
+}
+
+variable "vm_sockets" {
+  type    = number
+  default = {{ distro_item.vm_sockets | default(packer_vm_sockets | default(1)) }}
+}
+
+variable "vm_disk_size" {
+  type    = string
+  default = "{{ distro_item.vm_disk_size | default(packer_vm_disk_size | default('20G')) }}"
+}
+
+variable "vm_bridge" {
+  type    = string
+  default = "{{ distro_item.vm_bridge | default(packer_vm_bridge | default('vmbr0')) }}"
+}
+
+variable "disable_kvm" {
+  type    = bool
+  default = {{ distro_item.disable_kvm | default(packer_disable_kvm | default(false)) | bool | lower }}
+}
+
+# -----------------------------------------------------------------------------
+# ISO / distro metadata
+# -----------------------------------------------------------------------------
+
+variable "iso_filename" {
+  type    = string
+  default = "{{ iso_filename }}"
+}
+
+variable "iso_url" {
+  type    = string
+  default = "{{ iso_url }}"
+}
+
+variable "distro" {
+  type    = string
+  default = "{{ distro }}"
+}
+
+variable "distro_family" {
+  type    = string
+  default = "{{ distro_family | default('debian') }}"
+}
+
+variable "installer_type" {
+  type    = string
+  default = "{{ installer_type | default('preseed') }}"
+}
+
+variable "debian_version" {
+  type    = string
+  default = "{{ debian_version | default('') }}"
+}
+
+# -----------------------------------------------------------------------------
+# SSH used by Packer after install
+# -----------------------------------------------------------------------------
+
+variable "ssh_username" {
+  type = string
+{% if installer_type | default('preseed') == 'autoinstall' or distro_family | default('debian') == 'ubuntu' %}
+  default = "{{ packer_ssh_username | default('packer') }}"
+{% else %}
+  default = "{{ packer_ssh_username | default('root') }}"
+{% endif %}
+}
+
+variable "ssh_password" {
+  type      = string
+  sensitive = true
+  default   = "{{ packer_ssh_password | default(packer_preseed_root_password | default('packer')) }}"
+}
+
+variable "ssh_timeout" {
+  type    = string
+  default = "{{ distro_item.ssh_timeout | default(packer_ssh_timeout | default('60m')) }}"
+}
+
+variable "ssh_handshake_attempts" {
+  type    = number
+  default = {{ distro_item.ssh_handshake_attempts | default(packer_ssh_handshake_attempts | default(300)) }}
+}
+
+# -----------------------------------------------------------------------------
+# Proxmox ISO builder
+# -----------------------------------------------------------------------------
+
+source "proxmox-iso" "vm_template" {
+  proxmox_url              = var.proxmox_endpoint
+  username                 = var.proxmox_api_token_id
+  token                    = var.proxmox_api_token_secret
+  node                     = var.proxmox_node
+  insecure_skip_tls_verify = var.proxmox_insecure_skip_tls_verify
+
+  vm_id   = var.vm_id
+  vm_name = var.vm_name
+
+  memory  = var.vm_memory
+  cores   = var.vm_cores
+  sockets = var.vm_sockets
+
+  scsi_controller = "virtio-scsi-pci"
+
+  disks {
+    type         = "virtio"
+    disk_size    = var.vm_disk_size
+    storage_pool = var.proxmox_vm_storage
+    format       = "raw"
+  }
+
+  cloud_init              = true
+  cloud_init_storage_pool = var.proxmox_vm_storage
+
+  network_adapters {
+    model  = "virtio"
+    bridge = var.vm_bridge
+  }
+
+  vga {
+    type   = "std"
+    memory = 16
+  }
+
+  boot_iso {
+    type     = "scsi"
+    iso_file = "${var.proxmox_iso_storage}:iso/${var.iso_filename}"
+    unmount  = true
+  }
+
+  bios      = "seabios"
+  boot_wait = "{{ distro_item.boot_wait | default(packer_boot_wait | default('15s')) }}"
+
+{% if installer_type | default('preseed') == 'autoinstall' or distro_family | default('debian') == 'ubuntu' %}
+  # Ubuntu live-server / Subiquity autoinstall.
+  #
+  # This enters the GRUB command line and boots the live-server kernel directly.
+  # The escaped semicolon in ds=nocloud-net\;s= is required.
+  #
+  # HTTP server content expected:
+  #   http/user-data
+  #   http/meta-data
+  #   http/vendor-data
+  boot_command = [
+    "<wait5>",
+    "c<wait>",
+    "linux /casper/vmlinuz autoinstall ip=dhcp ds=nocloud-net\\;s=http://{{ '{{ .HTTPIP }}' }}:{{ '{{ .HTTPPort }}' }}/ ---<enter><wait>",
+    "initrd /casper/initrd<enter><wait>",
+    "boot<enter>"
+  ]
+{% else %}
+  # Debian installer / preseed.
+  boot_command = [
+    "<esc><wait>",
+    "auto ",
+    "priority=critical ",
+    "preseed/url=http://{{ '{{ .HTTPIP }}' }}:{{ '{{ .HTTPPort }}' }}/preseed.cfg ",
+    "debian-installer/locale=en_US.UTF-8 ",
+    "keyboard-configuration/xkb-keymap=us ",
+    "netcfg/choose_interface=auto ",
+    "hostname={{ vm_name }} ",
+    "domain={{ packer_preseed_domain | default('local.sinlessgamesllc.com') }} ",
+    "fb=false ",
+    "debconf/frontend=noninteractive ",
+    "--- <enter>"
+  ]
+{% endif %}
+
+  http_directory = "${path.root}/http"
+  http_port_min  = {{ distro_item.http_port_min | default(packer_http_port_min | default(8802)) }}
+  http_port_max  = {{ distro_item.http_port_max | default(packer_http_port_max | default(8820)) }}
+
+  ssh_username           = var.ssh_username
+  ssh_password           = var.ssh_password
+  ssh_timeout            = var.ssh_timeout
+  ssh_wait_timeout       = var.ssh_timeout
+  ssh_handshake_attempts = var.ssh_handshake_attempts
+
+  disable_kvm = var.disable_kvm
+
+  template_name        = var.vm_name
+  template_description = var.template_description
+}
+
+# -----------------------------------------------------------------------------
+# Build
+# -----------------------------------------------------------------------------
+
+build {
+  name    = "{{ distro }}-{{ node }}"
+  sources = ["source.proxmox-iso.vm_template"]
+
+  provisioner "shell" {
+    inline = [
+      "echo 'Waiting for system to stabilize before provisioning...'"
+    ]
+    pause_before = "30s"
+  }
+
+  provisioner "shell" {
+    script = "${path.root}/scripts/update-system.sh"
+{% if installer_type | default('preseed') == 'autoinstall' or distro_family | default('debian') == 'ubuntu' %}
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash '{{ '{{ .Path }}' }}'"
+{% endif %}
+  }
+
+  provisioner "shell" {
+    script = "${path.root}/scripts/install-cloud-init.sh"
+{% if installer_type | default('preseed') == 'autoinstall' or distro_family | default('debian') == 'ubuntu' %}
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash '{{ '{{ .Path }}' }}'"
+{% endif %}
+  }
+
+  provisioner "shell" {
+    script = "${path.root}/scripts/cleanup.sh"
+{% if installer_type | default('preseed') == 'autoinstall' or distro_family | default('debian') == 'ubuntu' %}
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash '{{ '{{ .Path }}' }}'"
+{% endif %}
+  }
+
+  provisioner "shell" {
+{% if installer_type | default('preseed') == 'autoinstall' or distro_family | default('debian') == 'ubuntu' %}
+    inline = [
+      "echo '${var.ssh_password}' | sudo -S shutdown -P now"
+    ]
+{% else %}
+    inline = [
+      "shutdown -P now"
+    ]
+{% endif %}
+    expect_disconnect = true
+    timeout           = "5m"
+    skip_clean        = true
+  }
+}

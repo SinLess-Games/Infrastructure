@@ -1,114 +1,935 @@
 ---
 # =============================================================================
-# Technitium DNS – Local Domain Records
+# Technitium DNS - Local Domain Records
 # -----------------------------------------------------------------------------
-# This file defines DNS records for your local domains. Records are grouped
-# by domain, and each entry includes a list of hostnames with their IPs.
+# Purpose:
+#   Defines local DNS records managed by the Technitium Ansible role.
 #
-# Usage:
-#   - The Ansible role will loop through these and create DNS A records.
-#   - You can expand this structure later with:
-#       * AAAA records
-#       * CNAMEs
-#       * SRV records
-#       * TXT records
-#   - Join this with the "technitium_domains" list defined in
-#     group_vars/technitium/domains.yaml
+# Primary local zones:
+#   - local.sinlessgames.com
+#   - local.helixaibot.com
+#
+# Removed zones:
+#   - local.sinlessgamesllc.com
+#
+# Design rules:
+#   - Infrastructure records only.
+#   - Kubernetes records include cluster nodes and VIPs only.
+#   - Application-level DNS records are intentionally not listed here.
+#   - MinIO has been replaced with Garage.
+#   - Production records prefer stable service aliases backed by explicit nodes.
+#
+# Record schema:
+#   - name: Relative record name inside the zone.
+#   - type: DNS record type.
+#   - value: Record value.
+#   - ttl: Record TTL in seconds.
+#   - comment: Human-readable purpose.
+#
+# Supported record styles used here:
+#   - A      value: "10.10.10.10"
+#   - CNAME  value: "target.local.sinlessgames.com."
+#   - NS     value: "dns-01.local.sinlessgames.com."
+#   - SRV    value: "priority weight port target."
+#   - TXT    value: "\"text value\""
+#   - CAA    value: "0 issue \";\""
+# =============================================================================
+
+# =============================================================================
+# TTL Defaults
+# -----------------------------------------------------------------------------
+# Short TTLs are used for VIPs and movable infrastructure endpoints.
+# Longer TTLs are used for stable node records.
+# =============================================================================
+
+technitium_ttl_defaults:
+  zone: 3600
+  node: 900
+  service: 300
+  vip: 120
+  metadata: 3600
+
+technitium_default_record_ttl: "{{ technitium_ttl_defaults.service }}"
+
+# =============================================================================
+# Service Ports
+# =============================================================================
+
+technitium_service_ports:
+  dns: 53
+  technitium_http: 5380
+  technitium_https: 53443
+  proxmox_https: 8006
+  vault_api: 8200
+  kubernetes_api: 6443
+  garage_s3: 3900
+  garage_web: 3902
+  garage_admin: 3903
+
+# =============================================================================
+# Shared Infrastructure IPs
+# =============================================================================
+
+technitium_infra_ips:
+  dev_01: "10.10.10.10"
+  pxe: "10.10.10.10"
+
+  pi_dns: "10.10.10.12"
+
+  dns_01: "10.10.10.20"
+  dns_02: "10.10.10.21"
+  dns_03: "10.10.10.22"
+
+  pve_01: "10.10.10.14"
+  pve_02: "10.10.10.15"
+  pve_03: "10.10.10.16"
+  pve_04: "10.10.10.17"
+  pve_05: "10.10.10.18"
+
+  vault_vip: "10.10.10.180"
+
+  garage_vip: "10.10.40.100"
+
+# =============================================================================
+# Kubernetes Infrastructure IPs
+# -----------------------------------------------------------------------------
+# These records intentionally define only cluster infrastructure:
+#   - API VIPs
+#   - ingress / gateway VIPs
+#   - control-plane nodes
+#   - worker nodes
+#
+# No workload/application records belong here.
+# =============================================================================
+
+technitium_kubernetes_ips:
+  staging:
+    api_vip: "10.10.30.10"
+    ingress_vip: "10.10.30.20"
+
+    control_plane:
+      k8s_staging_cp_01: "10.10.30.11"
+      k8s_staging_cp_02: "10.10.30.12"
+      k8s_staging_cp_03: "10.10.30.13"
+
+    workers:
+      k8s_staging_worker_01: "10.10.30.21"
+      k8s_staging_worker_02: "10.10.30.22"
+      k8s_staging_worker_03: "10.10.30.23"
+
+  prod:
+    api_vip: "10.10.40.10"
+    ingress_vip: "10.10.40.20"
+
+    control_plane:
+      k8s_prod_cp_01: "10.10.40.11"
+      k8s_prod_cp_02: "10.10.40.12"
+      k8s_prod_cp_03: "10.10.40.13"
+
+    workers:
+      k8s_prod_worker_01: "10.10.40.21"
+      k8s_prod_worker_02: "10.10.40.22"
+      k8s_prod_worker_03: "10.10.40.23"
+      k8s_prod_worker_04: "10.10.40.24"
+      k8s_prod_worker_05: "10.10.40.25"
+      k8s_prod_worker_06: "10.10.40.26"
+      k8s_prod_worker_07: "10.10.40.27"
+      k8s_prod_worker_08: "10.10.40.28"
+
+# =============================================================================
+# Domain Records
 # =============================================================================
 
 technitium_domain_records:
-
   # ---------------------------------------------------------------------------
   # Zone: local.sinlessgames.com
   # ---------------------------------------------------------------------------
   local.sinlessgames.com:
     records:
-      # PXE boot host (shared IP with dev-01)
-      - name: "pxe"
-        type: "A"
-        value: "10.10.10.10"
-        ttl: 300
-      # dev-01 host
+      # -----------------------------------------------------------------------
+      # Zone authority
+      # -----------------------------------------------------------------------
+
+      - name: "@"
+        type: "NS"
+        value: "dns-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Primary authoritative DNS server for the local.sinlessgames.com zone."
+
+      - name: "@"
+        type: "NS"
+        value: "dns-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Secondary authoritative DNS server for the local.sinlessgames.com zone."
+
+      - name: "@"
+        type: "NS"
+        value: "dns-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Secondary authoritative DNS server for the local.sinlessgames.com zone."
+
+      - name: "@"
+        type: "CAA"
+        value: "0 issue \";\""
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Deny public CA issuance for this internal local zone."
+
+      - name: "@"
+        type: "CAA"
+        value: "0 issuewild \";\""
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Deny wildcard public CA issuance for this internal local zone."
+
+      - name: "_managed-by"
+        type: "TXT"
+        value: "\"ansible:technitium\""
+        ttl: "{{ technitium_ttl_defaults.metadata }}"
+        comment: "Marks this zone as managed by the Technitium Ansible role."
+
+      - name: "_environment"
+        type: "TXT"
+        value: "\"homelab-prod\""
+        ttl: "{{ technitium_ttl_defaults.metadata }}"
+        comment: "Environment metadata for automation and inventory discovery."
+
+      - name: "_owner"
+        type: "TXT"
+        value: "\"SinLess Games LLC\""
+        ttl: "{{ technitium_ttl_defaults.metadata }}"
+        comment: "Administrative owner metadata."
+
+      - name: "_record-policy"
+        type: "TXT"
+        value: "\"infrastructure-only; no application records\""
+        ttl: "{{ technitium_ttl_defaults.metadata }}"
+        comment: "Documents the DNS boundary for this local infrastructure zone."
+
+      # -----------------------------------------------------------------------
+      # Workstations / bootstrap services
+      # -----------------------------------------------------------------------
+
       - name: "dev-01"
         type: "A"
-        value: "10.10.10.10"
-        ttl: 300
-      # DNS servers (cluster nodes)
+        value: "{{ technitium_infra_ips.dev_01 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Primary development workstation."
+
+      - name: "pxe"
+        type: "A"
+        value: "{{ technitium_infra_ips.pxe }}"
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "PXE / netboot.xyz host; currently shared with dev-01."
+
+      - name: "netboot"
+        type: "CNAME"
+        value: "pxe.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Friendly alias for PXE boot services."
+
+      - name: "netbootxyz"
+        type: "CNAME"
+        value: "pxe.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Explicit netboot.xyz service alias."
+
+      # -----------------------------------------------------------------------
+      # DNS infrastructure
+      # -----------------------------------------------------------------------
+
       - name: "pi-dns"
         type: "A"
-        value: "10.10.10.12"
-        ttl: 300
+        value: "{{ technitium_infra_ips.pi_dns }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Standalone DNS Pi; intentionally excluded from Technitium clustering."
+
+      - name: "dns-pi"
+        type: "CNAME"
+        value: "pi-dns.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Alternate name for the standalone DNS Pi."
+
       - name: "dns-01"
         type: "A"
-        value: "10.10.10.13"
-        ttl: 300
+        value: "{{ technitium_infra_ips.dns_01 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Technitium DNS cluster node 1 / primary node."
+
       - name: "dns-02"
         type: "A"
-        value: "10.10.10.9"
-        ttl: 300
+        value: "{{ technitium_infra_ips.dns_02 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Technitium DNS cluster node 2 / secondary node."
+
       - name: "dns-03"
         type: "A"
-        value: "10.10.10.20"
-        ttl: 300
-      # Proxmox VE cluster nodes
+        value: "{{ technitium_infra_ips.dns_03 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Technitium DNS cluster node 3 / secondary node."
+
+      - name: "dns"
+        type: "A"
+        value: "{{ technitium_infra_ips.dns_01 }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Round-robin DNS service endpoint."
+
+      - name: "dns"
+        type: "A"
+        value: "{{ technitium_infra_ips.dns_02 }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Round-robin DNS service endpoint."
+
+      - name: "dns"
+        type: "A"
+        value: "{{ technitium_infra_ips.dns_03 }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Round-robin DNS service endpoint."
+
+      - name: "technitium"
+        type: "CNAME"
+        value: "dns-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Technitium admin/API primary endpoint."
+
+      - name: "technitium-primary"
+        type: "CNAME"
+        value: "dns-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Explicit Technitium primary-node alias."
+
+      - name: "technitium-secondary-01"
+        type: "CNAME"
+        value: "dns-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Explicit Technitium secondary-node alias."
+
+      - name: "technitium-secondary-02"
+        type: "CNAME"
+        value: "dns-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Explicit Technitium secondary-node alias."
+
+      - name: "_dns._udp"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.dns }} dns-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "DNS UDP service discovery endpoint."
+
+      - name: "_dns._udp"
+        type: "SRV"
+        value: "20 100 {{ technitium_service_ports.dns }} dns-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "DNS UDP service discovery endpoint."
+
+      - name: "_dns._udp"
+        type: "SRV"
+        value: "20 100 {{ technitium_service_ports.dns }} dns-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "DNS UDP service discovery endpoint."
+
+      - name: "_dns._tcp"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.dns }} dns-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "DNS TCP service discovery endpoint."
+
+      - name: "_dns._tcp"
+        type: "SRV"
+        value: "20 100 {{ technitium_service_ports.dns }} dns-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "DNS TCP service discovery endpoint."
+
+      - name: "_dns._tcp"
+        type: "SRV"
+        value: "20 100 {{ technitium_service_ports.dns }} dns-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "DNS TCP service discovery endpoint."
+
+      - name: "_http._tcp.technitium"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.technitium_http }} dns-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Technitium HTTP admin/API service discovery endpoint."
+
+      - name: "_https._tcp.technitium"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.technitium_https }} dns-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Technitium HTTPS cluster/admin service discovery endpoint."
+
+      # -----------------------------------------------------------------------
+      # Proxmox VE cluster
+      # -----------------------------------------------------------------------
+
       - name: "pve-01"
         type: "A"
-        value: "10.10.10.15"
-        ttl: 300
+        value: "{{ technitium_infra_ips.pve_01 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Proxmox VE node 1."
+
       - name: "pve-02"
         type: "A"
-        value: "10.10.10.16"
-        ttl: 300
+        value: "{{ technitium_infra_ips.pve_02 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Proxmox VE node 2."
+
       - name: "pve-03"
         type: "A"
-        value: "10.10.10.17"
-        ttl: 300
+        value: "{{ technitium_infra_ips.pve_03 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Proxmox VE node 3."
+
       - name: "pve-04"
         type: "A"
-        value: "10.10.10.18"
-        ttl: 300
+        value: "{{ technitium_infra_ips.pve_04 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Proxmox VE node 4."
+
       - name: "pve-05"
         type: "A"
-        value: "10.10.10.19"
-        ttl: 300
+        value: "{{ technitium_infra_ips.pve_05 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Proxmox VE node 5."
+
       - name: "proxmox"
+        type: "CNAME"
+        value: "pve-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Primary Proxmox UI/API convenience endpoint."
+
+      - name: "proxmox-primary"
+        type: "CNAME"
+        value: "pve-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Explicit Proxmox primary UI/API endpoint."
+
+      - name: "proxmox-cluster"
         type: "A"
-        value: "10.10.10.14"
-        ttl: 300
-      # Vault API (HA VIP)
+        value: "{{ technitium_infra_ips.pve_01 }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Round-robin Proxmox cluster endpoint."
+
+      - name: "proxmox-cluster"
+        type: "A"
+        value: "{{ technitium_infra_ips.pve_02 }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Round-robin Proxmox cluster endpoint."
+
+      - name: "proxmox-cluster"
+        type: "A"
+        value: "{{ technitium_infra_ips.pve_03 }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Round-robin Proxmox cluster endpoint."
+
+      - name: "proxmox-cluster"
+        type: "A"
+        value: "{{ technitium_infra_ips.pve_04 }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Round-robin Proxmox cluster endpoint."
+
+      - name: "proxmox-cluster"
+        type: "A"
+        value: "{{ technitium_infra_ips.pve_05 }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Round-robin Proxmox cluster endpoint."
+
+      - name: "_https._tcp.proxmox"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.proxmox_https }} pve-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Proxmox HTTPS UI/API service discovery endpoint."
+
+      - name: "_https._tcp.proxmox"
+        type: "SRV"
+        value: "20 100 {{ technitium_service_ports.proxmox_https }} pve-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Proxmox HTTPS UI/API service discovery endpoint."
+
+      - name: "_https._tcp.proxmox"
+        type: "SRV"
+        value: "20 100 {{ technitium_service_ports.proxmox_https }} pve-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Proxmox HTTPS UI/API service discovery endpoint."
+
+      - name: "_https._tcp.proxmox"
+        type: "SRV"
+        value: "20 100 {{ technitium_service_ports.proxmox_https }} pve-04.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Proxmox HTTPS UI/API service discovery endpoint."
+
+      - name: "_https._tcp.proxmox"
+        type: "SRV"
+        value: "20 100 {{ technitium_service_ports.proxmox_https }} pve-05.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Proxmox HTTPS UI/API service discovery endpoint."
+
+      # -----------------------------------------------------------------------
+      # Vault
+      # -----------------------------------------------------------------------
+
       - name: "vault"
         type: "A"
-        value: "10.10.10.180"
-        ttl: 300
-      # MinIO API and Console (HA VIP)
-      - name: "minio"
-        type: "A"
-        value: "10.10.40.100"
-        ttl: 300
-      - name: "minio-console"
-        type: "A"
-        value: "10.10.40.100"
-        ttl: 300
+        value: "{{ technitium_infra_ips.vault_vip }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Vault HA API VIP."
 
-  # ---------------------------------------------------------------------------
-  # Zone: local.sinlessgamesllc.com
-  # ---------------------------------------------------------------------------
-  local.sinlessgamesllc.com:
-    records: []
+      - name: "vault-api"
+        type: "CNAME"
+        value: "vault.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Vault API alias."
+
+      - name: "_https._tcp.vault"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.vault_api }} vault.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Vault API service discovery endpoint."
+
+      # -----------------------------------------------------------------------
+      # Garage object storage
+      # -----------------------------------------------------------------------
+
+      - name: "garage"
+        type: "A"
+        value: "{{ technitium_infra_ips.garage_vip }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Garage S3-compatible object storage VIP."
+
+      - name: "garage-s3"
+        type: "CNAME"
+        value: "garage.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Garage S3 API endpoint alias."
+
+      - name: "garage-web"
+        type: "CNAME"
+        value: "garage.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Garage static web endpoint alias."
+
+      - name: "garage-admin"
+        type: "CNAME"
+        value: "garage.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Garage admin endpoint alias."
+
+      - name: "s3"
+        type: "CNAME"
+        value: "garage-s3.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Internal S3-compatible object storage alias backed by Garage."
+
+      - name: "_s3._tcp.garage"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.garage_s3 }} garage.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Garage S3 API service discovery endpoint."
+
+      - name: "_https._tcp.garage-web"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.garage_web }} garage.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Garage web endpoint service discovery record."
+
+      - name: "_https._tcp.garage-admin"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.garage_admin }} garage.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Garage admin endpoint service discovery record."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes staging cluster - VIPs
+      # -----------------------------------------------------------------------
+
+      - name: "k8s-staging-api"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.staging.api_vip }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Kubernetes staging API server VIP."
+
+      - name: "api.staging.k8s"
+        type: "CNAME"
+        value: "k8s-staging-api.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes staging API server alias."
+
+      - name: "staging-api.k8s"
+        type: "CNAME"
+        value: "k8s-staging-api.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes staging API server compatibility alias."
+
+      - name: "k8s-staging-ingress"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.staging.ingress_vip }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Kubernetes staging ingress / gateway VIP."
+
+      - name: "ingress.staging.k8s"
+        type: "CNAME"
+        value: "k8s-staging-ingress.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes staging ingress / gateway alias."
+
+      - name: "staging-ingress.k8s"
+        type: "CNAME"
+        value: "k8s-staging-ingress.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes staging ingress / gateway compatibility alias."
+
+      - name: "_kubernetes._tcp.staging.k8s"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.kubernetes_api }} k8s-staging-api.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes staging API service discovery record."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes staging cluster - control-plane nodes
+      # -----------------------------------------------------------------------
+
+      - name: "k8s-staging-cp-01"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.staging.control_plane.k8s_staging_cp_01 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes staging control-plane node 1."
+
+      - name: "k8s-staging-cp-02"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.staging.control_plane.k8s_staging_cp_02 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes staging control-plane node 2."
+
+      - name: "k8s-staging-cp-03"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.staging.control_plane.k8s_staging_cp_03 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes staging control-plane node 3."
+
+      - name: "cp-01.staging.k8s"
+        type: "CNAME"
+        value: "k8s-staging-cp-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes staging control-plane alias."
+
+      - name: "cp-02.staging.k8s"
+        type: "CNAME"
+        value: "k8s-staging-cp-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes staging control-plane alias."
+
+      - name: "cp-03.staging.k8s"
+        type: "CNAME"
+        value: "k8s-staging-cp-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes staging control-plane alias."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes staging cluster - worker nodes
+      # -----------------------------------------------------------------------
+
+      - name: "k8s-staging-worker-01"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.staging.workers.k8s_staging_worker_01 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes staging worker node 1."
+
+      - name: "k8s-staging-worker-02"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.staging.workers.k8s_staging_worker_02 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes staging worker node 2."
+
+      - name: "k8s-staging-worker-03"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.staging.workers.k8s_staging_worker_03 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes staging worker node 3."
+
+      - name: "worker-01.staging.k8s"
+        type: "CNAME"
+        value: "k8s-staging-worker-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes staging worker alias."
+
+      - name: "worker-02.staging.k8s"
+        type: "CNAME"
+        value: "k8s-staging-worker-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes staging worker alias."
+
+      - name: "worker-03.staging.k8s"
+        type: "CNAME"
+        value: "k8s-staging-worker-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes staging worker alias."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes production cluster - VIPs
+      # -----------------------------------------------------------------------
+
+      - name: "k8s-prod-api"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.api_vip }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Kubernetes production API server VIP."
+
+      - name: "api.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-api.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes production API server alias."
+
+      - name: "prod-api.k8s"
+        type: "CNAME"
+        value: "k8s-prod-api.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes production API server compatibility alias."
+
+      - name: "rke2-prod-api"
+        type: "CNAME"
+        value: "k8s-prod-api.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "RKE2 production API compatibility alias."
+
+      - name: "k8s-prod-ingress"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.ingress_vip }}"
+        ttl: "{{ technitium_ttl_defaults.vip }}"
+        comment: "Kubernetes production ingress / gateway VIP."
+
+      - name: "ingress.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-ingress.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes production ingress / gateway alias."
+
+      - name: "prod-ingress.k8s"
+        type: "CNAME"
+        value: "k8s-prod-ingress.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes production ingress / gateway compatibility alias."
+
+      - name: "rke2-prod-ingress"
+        type: "CNAME"
+        value: "k8s-prod-ingress.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "RKE2 production ingress compatibility alias."
+
+      - name: "_kubernetes._tcp.prod.k8s"
+        type: "SRV"
+        value: "10 100 {{ technitium_service_ports.kubernetes_api }} k8s-prod-api.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Kubernetes production API service discovery record."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes production cluster - control-plane nodes
+      # -----------------------------------------------------------------------
+
+      - name: "k8s-prod-cp-01"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.control_plane.k8s_prod_cp_01 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production control-plane node 1."
+
+      - name: "k8s-prod-cp-02"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.control_plane.k8s_prod_cp_02 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production control-plane node 2."
+
+      - name: "k8s-prod-cp-03"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.control_plane.k8s_prod_cp_03 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production control-plane node 3."
+
+      - name: "cp-01.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-cp-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production control-plane alias."
+
+      - name: "cp-02.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-cp-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production control-plane alias."
+
+      - name: "cp-03.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-cp-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production control-plane alias."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes production cluster - worker nodes
+      # -----------------------------------------------------------------------
+
+      - name: "k8s-prod-worker-01"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.workers.k8s_prod_worker_01 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production worker node 1."
+
+      - name: "k8s-prod-worker-02"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.workers.k8s_prod_worker_02 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production worker node 2."
+
+      - name: "k8s-prod-worker-03"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.workers.k8s_prod_worker_03 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production worker node 3."
+
+      - name: "k8s-prod-worker-04"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.workers.k8s_prod_worker_04 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production worker node 4."
+
+      - name: "k8s-prod-worker-05"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.workers.k8s_prod_worker_05 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production worker node 5."
+
+      - name: "k8s-prod-worker-06"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.workers.k8s_prod_worker_06 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production worker node 6."
+
+      - name: "k8s-prod-worker-07"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.workers.k8s_prod_worker_07 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production worker node 7."
+
+      - name: "k8s-prod-worker-08"
+        type: "A"
+        value: "{{ technitium_kubernetes_ips.prod.workers.k8s_prod_worker_08 }}"
+        ttl: "{{ technitium_ttl_defaults.node }}"
+        comment: "Kubernetes production worker node 8."
+
+      - name: "worker-01.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-worker-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production worker alias."
+
+      - name: "worker-02.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-worker-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production worker alias."
+
+      - name: "worker-03.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-worker-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production worker alias."
+
+      - name: "worker-04.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-worker-04.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production worker alias."
+
+      - name: "worker-05.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-worker-05.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production worker alias."
+
+      - name: "worker-06.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-worker-06.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production worker alias."
+
+      - name: "worker-07.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-worker-07.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production worker alias."
+
+      - name: "worker-08.prod.k8s"
+        type: "CNAME"
+        value: "k8s-prod-worker-08.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.service }}"
+        comment: "Short Kubernetes production worker alias."
 
   # ---------------------------------------------------------------------------
   # Zone: local.helixaibot.com
   # ---------------------------------------------------------------------------
   local.helixaibot.com:
-    records: []
+    records:
+      # -----------------------------------------------------------------------
+      # Zone authority
+      # -----------------------------------------------------------------------
+
+      - name: "@"
+        type: "NS"
+        value: "dns-01.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Primary authoritative DNS server for the local.helixaibot.com zone."
+
+      - name: "@"
+        type: "NS"
+        value: "dns-02.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Secondary authoritative DNS server for the local.helixaibot.com zone."
+
+      - name: "@"
+        type: "NS"
+        value: "dns-03.local.sinlessgames.com."
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Secondary authoritative DNS server for the local.helixaibot.com zone."
+
+      - name: "@"
+        type: "CAA"
+        value: "0 issue \";\""
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Deny public CA issuance for this internal local zone."
+
+      - name: "@"
+        type: "CAA"
+        value: "0 issuewild \";\""
+        ttl: "{{ technitium_ttl_defaults.zone }}"
+        comment: "Deny wildcard public CA issuance for this internal local zone."
+
+      - name: "_managed-by"
+        type: "TXT"
+        value: "\"ansible:technitium\""
+        ttl: "{{ technitium_ttl_defaults.metadata }}"
+        comment: "Marks this zone as managed by the Technitium Ansible role."
+
+      - name: "_environment"
+        type: "TXT"
+        value: "\"homelab-prod\""
+        ttl: "{{ technitium_ttl_defaults.metadata }}"
+        comment: "Environment metadata for automation and inventory discovery."
+
+      - name: "_owner"
+        type: "TXT"
+        value: "\"SinLess Games LLC\""
+        ttl: "{{ technitium_ttl_defaults.metadata }}"
+        comment: "Administrative owner metadata."
+
+      - name: "_record-policy"
+        type: "TXT"
+        value: "\"reserved-for-helix-ai-local-infrastructure\""
+        ttl: "{{ technitium_ttl_defaults.metadata }}"
+        comment: "Documents the DNS boundary for this local Helix AI infrastructure zone."
 
 # =============================================================================
 # Notes
-#
-# - You can add more records like:
-#     - CNAME (type: "CNAME", value: "<target>")
-#     - TXT  (type: "TXT",  value: "<text>")
-#     - SRV  (type: "SRV",  value: "<service> <proto> <priority> <weight> <port> <target>")
-# - TTL defaults are set to 300 but can be customized per record.
-# - Reverse DNS (PTR) can be generated later when you choose to enable reverse zones.
+# -----------------------------------------------------------------------------
+# - local.sinlessgamesllc.com was intentionally removed.
+# - Garage replaces MinIO for local object-storage DNS records.
+# - Kubernetes app records should live in their own app/platform DNS file later.
+# - Production Kubernetes worker records now include 8 total workers.
+# - PTR / reverse DNS can be generated from these A records in a later role phase.
+# - Wildcard application records are intentionally excluded from this file.
 # =============================================================================

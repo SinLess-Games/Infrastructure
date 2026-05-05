@@ -12,3 +12,4 @@ resources:
   - peerauthentication-default.yaml
   - authorizationpolicy-opencost-monitoring.yaml
   - authorizationpolicy-require-mtls.yaml
+  - dnsendpoint-mailu-mx.yaml

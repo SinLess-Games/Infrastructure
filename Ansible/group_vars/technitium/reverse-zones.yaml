@@ -1,41 +1,355 @@
 ---
 # =============================================================================
-# Technitium DNS – Reverse Zones PTR definitions
+# Technitium DNS - Reverse Zones PTR Definitions
 # -----------------------------------------------------------------------------
-# This file defines which IPv4 reverse zones should be present, and which
-# PTR records exist in each.
+# Purpose:
+#   Defines IPv4 reverse DNS zones and PTR records managed by Technitium.
+#
+# Design:
+#   - One canonical PTR record per IP address.
+#   - Service aliases such as pxe, dns, technitium, s3, garage-s3, and k8s API
+#     aliases should remain forward records only.
+#   - PTR records should point to real hosts or stable VIP names.
+#   - Reverse zones should match the authoritative zones declared in:
+#       Ansible/group_vars/technitium/domains.yaml
+#
+# Active reverse zones:
+#   - 10.10.10.0/24 -> 10.10.10.in-addr.arpa
+#   - 10.10.30.0/24 -> 30.10.10.in-addr.arpa
+#   - 10.10.40.0/24 -> 40.10.10.in-addr.arpa
+#
+# Notes:
+#   - dev-01 and pxe share 10.10.10.10. The PTR is canonicalized to dev-01.
+#   - Garage replaces MinIO.
+#   - Production Kubernetes has 8 worker nodes.
 # =============================================================================
 
+technitium_reverse_zone_defaults:
+  enabled: true
+  type: "primary"
+  ttl: 300
+  managed_by: "ansible"
+  owner: "SinLess Games LLC"
+
+technitium_reverse_ptr_ttl:
+  node: 900
+  service: 300
+  vip: 120
+
 technitium_reverse_zones:
-  # For 10.10.10.0/24
+  # ---------------------------------------------------------------------------
+  # Reverse Zone: 10.10.10.0/24
+  # ---------------------------------------------------------------------------
+  # Infrastructure / management network.
+  # ---------------------------------------------------------------------------
+
   - zone: "10.10.10.in-addr.arpa"
+    enabled: true
+    type: "primary"
+    network: "10.10.10.0/24"
+    vlan_id: 10
+    environment: "prod"
+    description: "Reverse DNS zone for the infrastructure and management network."
     ptr_records:
-      # pxe -> 10.10.10.10
-      - ip_last_octet: 10
-        hostname: "pxe.local.sinlessgames.com"
-        ttl: 300
+      # -----------------------------------------------------------------------
+      # Workstations / bootstrap services
+      # -----------------------------------------------------------------------
 
-      # pi-dns -> 10.10.10.12
-      - ip_last_octet: 12
-        hostname: "pi-dns.local.sinlessgames.com"
-        ttl: 300
-
-      # dns-01 -> 10.10.10.13
-      - ip_last_octet: 13
-        hostname: "dns-01.local.sinlessgames.com"
-        ttl: 300
-
-      # dns-02 -> 10.10.10.9
-      - ip_last_octet: 9
-        hostname: "dns-02.local.sinlessgames.com"
-        ttl: 300
-
-      # dns-03 -> 10.10.10.20
-      - ip_last_octet: 20
-        hostname: "dns-03.local.sinlessgames.com"
-        ttl: 300
-
-      # dev-01 -> 10.10.10.10 (same as pxe)
       - ip_last_octet: 10
         hostname: "dev-01.local.sinlessgames.com"
-        ttl: 300
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Primary development workstation. Also hosts PXE/netboot services."
+
+      # -----------------------------------------------------------------------
+      # DNS infrastructure
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 12
+        hostname: "pi-dns.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Standalone DNS Pi; intentionally excluded from Technitium clustering."
+
+      - ip_last_octet: 20
+        hostname: "dns-01.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Technitium DNS cluster node 1 / primary node."
+
+      - ip_last_octet: 21
+        hostname: "dns-02.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Technitium DNS cluster node 2 / secondary node."
+
+      - ip_last_octet: 22
+        hostname: "dns-03.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Technitium DNS cluster node 3 / secondary node."
+
+      # -----------------------------------------------------------------------
+      # Proxmox VE cluster
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 14
+        hostname: "pve-01.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Proxmox VE node 1."
+
+      - ip_last_octet: 15
+        hostname: "pve-02.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Proxmox VE node 2."
+
+      - ip_last_octet: 16
+        hostname: "pve-03.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Proxmox VE node 3."
+
+      - ip_last_octet: 17
+        hostname: "pve-04.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Proxmox VE node 4."
+
+      - ip_last_octet: 18
+        hostname: "pve-05.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Proxmox VE node 5."
+
+      # -----------------------------------------------------------------------
+      # Infrastructure VIPs
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 180
+        hostname: "vault.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.vip }}"
+        comment: "Vault HA API VIP."
+
+  # ---------------------------------------------------------------------------
+  # Reverse Zone: 10.10.30.0/24
+  # ---------------------------------------------------------------------------
+  # Kubernetes staging network.
+  # ---------------------------------------------------------------------------
+
+  - zone: "30.10.10.in-addr.arpa"
+    enabled: true
+    type: "primary"
+    network: "10.10.30.0/24"
+    vlan_id: 30
+    environment: "staging"
+    description: "Reverse DNS zone for the Kubernetes staging network."
+    ptr_records:
+      # -----------------------------------------------------------------------
+      # Kubernetes staging VIPs
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 10
+        hostname: "k8s-staging-api.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.vip }}"
+        comment: "Kubernetes staging API server VIP."
+
+      - ip_last_octet: 20
+        hostname: "k8s-staging-ingress.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.vip }}"
+        comment: "Kubernetes staging ingress / gateway VIP."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes staging control-plane nodes
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 11
+        hostname: "k8s-staging-cp-01.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes staging control-plane node 1."
+
+      - ip_last_octet: 12
+        hostname: "k8s-staging-cp-02.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes staging control-plane node 2."
+
+      - ip_last_octet: 13
+        hostname: "k8s-staging-cp-03.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes staging control-plane node 3."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes staging worker nodes
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 21
+        hostname: "k8s-staging-worker-01.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes staging worker node 1."
+
+      - ip_last_octet: 22
+        hostname: "k8s-staging-worker-02.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes staging worker node 2."
+
+      - ip_last_octet: 23
+        hostname: "k8s-staging-worker-03.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes staging worker node 3."
+
+  # ---------------------------------------------------------------------------
+  # Reverse Zone: 10.10.40.0/24
+  # ---------------------------------------------------------------------------
+  # Kubernetes production network.
+  # ---------------------------------------------------------------------------
+
+  - zone: "40.10.10.in-addr.arpa"
+    enabled: true
+    type: "primary"
+    network: "10.10.40.0/24"
+    vlan_id: 40
+    environment: "prod"
+    description: "Reverse DNS zone for the Kubernetes production network."
+    ptr_records:
+      # -----------------------------------------------------------------------
+      # Kubernetes production VIPs
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 10
+        hostname: "k8s-prod-api.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.vip }}"
+        comment: "Kubernetes production API server VIP."
+
+      - ip_last_octet: 20
+        hostname: "k8s-prod-ingress.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.vip }}"
+        comment: "Kubernetes production ingress / gateway VIP."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes production control-plane nodes
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 11
+        hostname: "k8s-prod-cp-01.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production control-plane node 1."
+
+      - ip_last_octet: 12
+        hostname: "k8s-prod-cp-02.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production control-plane node 2."
+
+      - ip_last_octet: 13
+        hostname: "k8s-prod-cp-03.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production control-plane node 3."
+
+      # -----------------------------------------------------------------------
+      # Kubernetes production worker nodes
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 21
+        hostname: "k8s-prod-worker-01.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production worker node 1."
+
+      - ip_last_octet: 22
+        hostname: "k8s-prod-worker-02.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production worker node 2."
+
+      - ip_last_octet: 23
+        hostname: "k8s-prod-worker-03.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production worker node 3."
+
+      - ip_last_octet: 24
+        hostname: "k8s-prod-worker-04.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production worker node 4."
+
+      - ip_last_octet: 25
+        hostname: "k8s-prod-worker-05.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production worker node 5."
+
+      - ip_last_octet: 26
+        hostname: "k8s-prod-worker-06.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production worker node 6."
+
+      - ip_last_octet: 27
+        hostname: "k8s-prod-worker-07.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production worker node 7."
+
+      - ip_last_octet: 28
+        hostname: "k8s-prod-worker-08.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.node }}"
+        comment: "Kubernetes production worker node 8."
+
+      # -----------------------------------------------------------------------
+      # Production storage VIPs
+      # -----------------------------------------------------------------------
+
+      - ip_last_octet: 100
+        hostname: "garage.local.sinlessgames.com"
+        ttl: "{{ technitium_reverse_ptr_ttl.vip }}"
+        comment: "Garage S3-compatible object storage VIP."
+
+# =============================================================================
+# Reserved / Future Reverse Zones
+# -----------------------------------------------------------------------------
+# These networks are allowed by firewall policy but do not currently have
+# authoritative PTR records declared in the active reverse zone list above.
+# Enable later when those networks have stable host inventory.
+# =============================================================================
+
+technitium_reserved_reverse_zones:
+  - zone: "20.10.10.in-addr.arpa"
+    enabled: false
+    type: "primary"
+    network: "10.10.20.0/24"
+    vlan_id: 20
+    environment: "dev"
+    description: "Reserved reverse DNS zone for the development network."
+    ptr_records: []
+
+  - zone: "50.10.10.in-addr.arpa"
+    enabled: false
+    type: "primary"
+    network: "10.10.50.0/24"
+    vlan_id: 50
+    environment: "dmz"
+    description: "Reserved reverse DNS zone for the DMZ network."
+    ptr_records: []
+
+# =============================================================================
+# Validation Expectations
+# =============================================================================
+
+technitium_reverse_zone_validation:
+  require_unique_ptr_per_ip: true
+  require_fqdn_hostnames: true
+  require_matching_forward_records: true
+  require_no_service_alias_ptrs: true
+  require_no_duplicate_last_octets_per_zone: true
+
+  canonical_shared_ip_records:
+    - ip: "10.10.10.10"
+      ptr: "dev-01.local.sinlessgames.com"
+      aliases:
+        - "pxe.local.sinlessgames.com"
+        - "netboot.local.sinlessgames.com"
+        - "netbootxyz.local.sinlessgames.com"
+
+  required_reverse_zones:
+    - "10.10.10.in-addr.arpa"
+    - "30.10.10.in-addr.arpa"
+    - "40.10.10.in-addr.arpa"
+
+  denied_ptr_hostnames:
+    - "minio.local.sinlessgames.com"
+    - "minio-console.local.sinlessgames.com"
+
+# =============================================================================
+# Notes
+# -----------------------------------------------------------------------------
+# - PTR records should identify the canonical owner of an IP address.
+# - CNAME/service aliases should not normally receive separate PTR records.
+# - 10.10.10.10 is shared by dev-01 and PXE; dev-01 is canonical.
+# - 10.10.40.100 is Garage and replaces any previous MinIO PTR usage.
+# - Production Kubernetes workers are defined as k8s-prod-worker-01 through
+#   k8s-prod-worker-08.
+# =============================================================================

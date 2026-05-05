@@ -1,80 +1,232 @@
 ---
 # =============================================================================
-# Configure SSH Daemon to Trust User CA
+# SSH Role - Configure OpenSSH Server
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Configures managed hosts to trust the SSH User CA, use authorized principals,
+#   apply hardened sshd settings, install the login banner, and verify the
+#   effective sshd configuration.
+#
+# Design:
+#   - Reads CA public key from the controller.
+#   - Refuses symlinked CA public keys to avoid loops/stale trust material.
+#   - Installs TrustedUserCAKeys on the managed host.
+#   - Creates authorized principals directory.
+#   - Ensures sshd_config includes sshd_config.d drop-ins.
+#   - Renders the managed sshd drop-in.
+#   - Validates sshd syntax before reload/restart.
+#   - Uses reload first to avoid dropping active SSH sessions.
+#   - Verifies effective sshd settings with sshd -T.
 # =============================================================================
 
-- name: Ensure SSH CA is enabled
+# -----------------------------------------------------------------------------
+# Preconditions
+# -----------------------------------------------------------------------------
+
+- name: SSH | Configure | Assert SSH CA is enabled
   ansible.builtin.assert:
     that:
       - ssh_ca_enabled | bool
-    fail_msg: "SSH CA configuration requested but ssh_ca_enabled is false"
+    fail_msg: "SSH CA configuration requested but ssh_ca_enabled is false."
+    success_msg: "SSH CA is enabled."
+  when: ssh_role_manage_ca | default(true) | bool
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
 
-# -----------------------------------------------------------------------------
-# Resolve controller CA paths (SINGLE CA: .outputs/ssh_ca)
-# -----------------------------------------------------------------------------
-
-- name: Resolve controller SSH CA directory (canonical)
+- name: SSH | Configure | Normalize configure variables
   ansible.builtin.set_fact:
-    ssh_controller_ca_dir_effective: "{{ ssh_ca_output_dir }}"
-    ssh_controller_ca_pub_path: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
-  changed_when: false
+    ssh_configure_ca_candidates_effective: >-
+      {{
+        ssh_controller_ca_pub_candidates
+        | default([ssh_ca_public_key_path | default(ssh_ca_output_dir ~ '/ssh_ca.pub')])
+      }}
+    ssh_configure_trusted_user_ca_keys_path: "{{ ssh_trusted_user_ca_keys_path |
+      default(ssh_server_trusted_user_ca_keys |
+      default('/etc/ssh/ca/ssh_ca.pub')) }}"
+    ssh_configure_authorized_principals_dir: "{{ ssh_authorized_principals_dir | default('/etc/ssh/auth_principals') }}"
+    ssh_configure_authorized_principals_file: "{{ ssh_authorized_principals_file |
+      default('/etc/ssh/auth_principals/%u') }}"
+    ssh_configure_sshd_config_path: "{{ ssh_sshd_config_path | default('/etc/ssh/sshd_config') }}"
+    ssh_configure_sshd_config_dir: "{{ ssh_sshd_config_dir | default('/etc/ssh/sshd_config.d') }}"
+    ssh_configure_managed_config_path: "{{ ssh_sshd_managed_config_path |
+      default('/etc/ssh/sshd_config.d/99-sinless-games.conf') }}"
+    ssh_configure_sshd_service_name: >-
+      {{
+        ssh_sshd_service_name
+        | default(
+            'sshd'
+            if (ansible_facts.os_family | default('')) in ['RedHat', 'Rocky', 'AlmaLinux', 'Suse']
+            else 'ssh'
+          )
+      }}
+    ssh_configure_banner_enabled: "{{ ssh_server_banner_enabled |
+      default(ssh.server.banner_enabled | default(false) if ssh is defined and
+      ssh.server is defined else false) }}"
+    ssh_configure_banner_path: "{{ ssh_server_banner_path |
+      default(ssh.server.banner_path | default('/etc/issue.net') if ssh is
+      defined and ssh.server is defined else '/etc/issue.net') }}"
+    ssh_configure_banner_content: "{{ ssh_server_banner_content |
+      default(ssh.server.banner_content | default('AUTHORIZED USE ONLY
 
-- name: Stat SSH CA public key on controller (no-follow)
+      ') if ssh is defined and ssh.server is defined else 'AUTHORIZED USE ONLY
+
+      ') }}"
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-configure
+
+# -----------------------------------------------------------------------------
+# Resolve controller CA public key
+# -----------------------------------------------------------------------------
+
+- name: SSH | Configure | Stat candidate SSH CA public keys on controller
   ansible.builtin.stat:
-    path: "{{ ssh_controller_ca_pub_path }}"
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ ssh_configure_ca_candidates_effective }}"
+  loop_control:
+    label: "{{ item }}"
+  delegate_to: localhost
+  register: ssh_configure_ca_pub_candidate_stats
+  changed_when: false
+  become: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
+
+- name: SSH | Configure | Select controller SSH CA public key
+  ansible.builtin.set_fact:
+    ssh_configure_ca_pub_path: >-
+      {{
+        (
+          ssh_configure_ca_pub_candidate_stats.results
+          | selectattr('stat.exists', 'equalto', true)
+          | map(attribute='item')
+          | list
+          | first
+        )
+        | default('')
+      }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
+
+- name: SSH | Configure | Assert controller SSH CA public key exists
+  ansible.builtin.assert:
+    that:
+      - ssh_configure_ca_pub_path is defined
+      - ssh_configure_ca_pub_path | length > 0
+    fail_msg: >-
+      SSH User CA public key was not found on the controller. Checked: {{
+      ssh_configure_ca_candidates_effective | join(', ') }}
+    success_msg: "Controller SSH User CA public key was found."
+  delegate_to: localhost
+  become: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
+
+- name: SSH | Configure | Stat selected SSH CA public key on controller
+  ansible.builtin.stat:
+    path: "{{ ssh_configure_ca_pub_path }}"
     follow: false
   delegate_to: localhost
-  register: ssh_ca_pub_stat
+  register: ssh_configure_ca_pub_stat
   changed_when: false
+  become: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
 
-- name: Fail if SSH CA public key is missing on controller
+- name: SSH | Configure | Refuse symlinked SSH CA public key
   ansible.builtin.fail:
     msg: >-
-      SSH User CA public key not found on controller:
-      {{ ssh_controller_ca_pub_path }}
-      Expected SINGLE CA location: {{ ssh_ca_output_dir }}
-  when: not ssh_ca_pub_stat.stat.exists
+      SSH User CA public key is a symlink: {{ ssh_configure_ca_pub_path }}
+      Refusing to follow symlinks to avoid ELOOP or stale CA trust.
+  when: ssh_configure_ca_pub_stat.stat.islnk | default(false) | bool
   delegate_to: localhost
+  become: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
 
-- name: Fail if SSH CA public key is a symlink (avoid ELOOP)
-  ansible.builtin.fail:
-    msg: >-
-      SSH User CA public key is a symlink:
-      {{ ssh_controller_ca_pub_path }}
-      Refusing to follow symlinks to avoid ELOOP.
-  when: ssh_ca_pub_stat.stat.islnk | default(false) | bool
-  delegate_to: localhost
-
-- name: Read SSH CA public key from controller
+- name: SSH | Configure | Read SSH CA public key from controller
   ansible.builtin.slurp:
-    src: "{{ ssh_controller_ca_pub_path }}"
+    src: "{{ ssh_configure_ca_pub_path }}"
   delegate_to: localhost
-  register: ssh_ca_pub_slurp
+  register: ssh_configure_ca_pub_slurp
   changed_when: false
+  become: false
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
+
+- name: SSH | Configure | Decode SSH CA public key
+  ansible.builtin.set_fact:
+    ssh_configure_ca_public_key_content: "{{ ssh_configure_ca_pub_slurp.content | b64decode | trim }}"
+  changed_when: false
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
+
+- name: SSH | Configure | Assert decoded SSH CA public key looks valid
+  ansible.builtin.assert:
+    that:
+      - ssh_configure_ca_public_key_content is
+        match('^ssh-(ed25519|rsa)|^ecdsa-sha2-')
+      - ssh_configure_ca_public_key_content.split() | length >= 2
+    fail_msg: "Decoded SSH CA public key does not look like a valid OpenSSH public key."
+    success_msg: "Decoded SSH CA public key looks valid."
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
 
 # -----------------------------------------------------------------------------
-# Install CA public key on target
+# Managed-node directories
 # -----------------------------------------------------------------------------
 
-- name: Ensure SSH CA directory exists
+- name: SSH | Configure | Ensure SSH CA directory exists
   ansible.builtin.file:
-    path: /etc/ssh/ca
+    path: "{{ ssh_configure_trusted_user_ca_keys_path | dirname }}"
     state: directory
-    owner: root
-    group: root
-    mode: "0755"
+    owner: "{{ ssh_trusted_user_ca_keys_owner | default('root') }}"
+    group: "{{ ssh_trusted_user_ca_keys_group | default('root') }}"
+    mode: "{{ ssh_trusted_user_ca_keys_dir_mode | default('0755') }}"
   become: true
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
 
-- name: Install SSH User CA public key
-  ansible.builtin.copy:
-    content: "{{ ssh_ca_pub_slurp.content | b64decode }}"
-    dest: "{{ ssh_trusted_user_ca_keys_path | default('/etc/ssh/ca/ssh_ca.pub') }}"
-    owner: root
-    group: root
-    mode: "0644"
+- name: SSH | Configure | Ensure authorized principals directory exists
+  ansible.builtin.file:
+    path: "{{ ssh_configure_authorized_principals_dir }}"
+    state: directory
+    owner: "{{ ssh_authorized_principals_owner | default('root') }}"
+    group: "{{ ssh_authorized_principals_group | default('root') }}"
+    mode: "{{ ssh_authorized_principals_dir_mode | default('0755') }}"
   become: true
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-principals
 
-- name: Ensure sshd runtime directory exists (required on some distros)
+- name: SSH | Configure | Ensure sshd runtime directory exists
   ansible.builtin.file:
     path: /run/sshd
     state: directory
@@ -82,92 +234,377 @@
     group: root
     mode: "0755"
   become: true
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
 
-- name: Ensure sshd_config.d directory exists
+- name: SSH | Configure | Ensure sshd_config.d directory exists
   ansible.builtin.file:
-    path: /etc/ssh/sshd_config.d
+    path: "{{ ssh_configure_sshd_config_dir }}"
     state: directory
     owner: root
     group: root
     mode: "0755"
   become: true
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
 
-- name: Deploy SSH login banner
+# -----------------------------------------------------------------------------
+# Install CA trust and banner
+# -----------------------------------------------------------------------------
+
+- name: SSH | Configure | Install SSH User CA public key
   ansible.builtin.copy:
-    content: "{{ ssh.server.banner_content }}"
-    dest: "{{ ssh.server.banner_path | default('/etc/issue.net') }}"
+    content: "{{ ssh_configure_ca_public_key_content ~ '
+
+      ' }}"
+    dest: "{{ ssh_configure_trusted_user_ca_keys_path }}"
+    owner: "{{ ssh_trusted_user_ca_keys_owner | default('root') }}"
+    group: "{{ ssh_trusted_user_ca_keys_group | default('root') }}"
+    mode: "{{ ssh_trusted_user_ca_keys_mode | default('0644') }}"
+  register: ssh_configure_ca_install_result
+  become: true
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-ca
+
+- name: SSH | Configure | Deploy SSH login banner
+  ansible.builtin.copy:
+    content: "{{ ssh_configure_banner_content }}"
+    dest: "{{ ssh_configure_banner_path }}"
     owner: root
     group: root
     mode: "0644"
-  register: ssh__banner_result
+  register: ssh_configure_banner_result
   become: true
-  when: ssh.server.banner_enabled | default(false)
+  when: ssh_configure_banner_enabled | bool
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-banner
 
-- name: Ensure sshd_config includes drop-in directory
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    insertafter: BOF
-    regexp: '^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf\s*$'
-    line: 'Include /etc/ssh/sshd_config.d/*.conf'
-    state: present
-  register: ssh__sshd_include_result
+- name: SSH | Configure | Remove SSH login banner when disabled
+  ansible.builtin.file:
+    path: "{{ ssh_configure_banner_path }}"
+    state: absent
+  register: ssh_configure_banner_remove_result
   become: true
-
-- name: Deploy managed sshd configuration drop-in
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/ssh/sshd_config.j2"
-    dest: /etc/ssh/sshd_config.d/50-ansible-ssh.conf
-    owner: root
-    group: root
-    mode: "0644"
-  register: ssh__sshd_dropin_result
-  become: true
-  vars:
-    ansible_template_src: "templates/ssh/sshd_config.j2"
-
-- name: Validate sshd configuration syntax
-  ansible.builtin.command: sshd -t
-  changed_when: false
-  become: true
-
-- name: Restart SSH service after sshd config changes
-  ansible.builtin.service:
-    name: "{{ 'sshd' if (ansible_facts.os_family | default('')) in ['RedHat', 'Rocky', 'AlmaLinux', 'Suse'] else 'ssh' }}"
-    state: restarted
   when:
-    - not ('proxmox' in group_names)
-    - (ssh__sshd_include_result is changed) or (ssh__sshd_dropin_result is changed) or ((ssh__banner_result is defined) and (ssh__banner_result is changed))
-  become: true
+    - not (ssh_configure_banner_enabled | bool)
+    - ssh_remove_disabled_banner | default(false) | bool
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-banner
 
-- name: Read effective sshd configuration
-  ansible.builtin.command: sshd -T
-  register: sshd_effective
+# -----------------------------------------------------------------------------
+# Resolve sshd template source
+# -----------------------------------------------------------------------------
+
+- name: SSH | Configure | Check role-local sshd template
+  ansible.builtin.stat:
+    path: "{{ role_path }}/templates/sshd_config.j2"
+  delegate_to: localhost
+  register: ssh_configure_role_template_stat
   changed_when: false
-  become: true
+  become: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
 
-- name: Compute expected CA directives
+- name: SSH | Configure | Check legacy playbook sshd template
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../templates/ssh/sshd_config.j2"
+  delegate_to: localhost
+  register: ssh_configure_legacy_template_stat
+  changed_when: false
+  become: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
+
+- name: SSH | Configure | Select sshd template source
   ansible.builtin.set_fact:
-    expected_trustedusercakeys: >-
-      trustedusercakeys {{ (ssh.server.trusted_user_ca_keys | default('/etc/ssh/ca/ssh_ca.pub')) | lower }}
-    expected_authorizedprincipalsfile: >-
-      authorizedprincipalsfile {{ (ssh.server.authorized_principals_file | default('/etc/ssh/auth_principals/%u')) | lower }}
-    expected_passwordauthentication: >-
-      passwordauthentication {{ 'yes' if (ssh.server.password_authentication | default(false)) else 'no' }}
+    ssh_configure_sshd_template_src: >-
+      {{
+        ssh_sshd_template_src
+        | default(
+            (role_path ~ '/templates/sshd_config.j2')
+            if ssh_configure_role_template_stat.stat.exists | default(false)
+            else (playbook_dir ~ '/../templates/ssh/sshd_config.j2')
+          )
+      }}
   changed_when: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
 
-- name: Assert managed sshd configuration is active
+- name: SSH | Configure | Assert selected sshd template exists
   ansible.builtin.assert:
     that:
-      - expected_trustedusercakeys in (sshd_effective.stdout | lower)
-      - expected_authorizedprincipalsfile in (sshd_effective.stdout | lower)
-      - expected_passwordauthentication in (sshd_effective.stdout | lower)
+      - >-
+        ssh_sshd_template_src is defined or
+        ssh_configure_role_template_stat.stat.exists | default(false) or
+        ssh_configure_legacy_template_stat.stat.exists | default(false)
+    fail_msg: >-
+      No sshd_config.j2 template was found. Expected one of: - {{ role_path
+      }}/templates/sshd_config.j2 - {{ playbook_dir
+      }}/../templates/ssh/sshd_config.j2 Or set ssh_sshd_template_src to a valid
+      template path.
+    success_msg: "sshd template source is available."
+  delegate_to: localhost
+  become: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
+
+# -----------------------------------------------------------------------------
+# Configure sshd
+# -----------------------------------------------------------------------------
+
+- name: SSH | Configure | Ensure sshd_config includes drop-in directory
+  ansible.builtin.lineinfile:
+    path: "{{ ssh_configure_sshd_config_path }}"
+    insertafter: BOF
+    regexp: "^\\s*Include\\s+{{ ssh_configure_sshd_config_dir | regex_escape
+      }}/\\*\\.conf\\s*$"
+    line: "Include {{ ssh_configure_sshd_config_dir }}/*.conf"
+    state: present
+    owner: root
+    group: root
+    mode: "0644"
+    backup: "{{ ssh_sshd_config_backup | default(true) }}"
+  register: ssh_configure_sshd_include_result
+  become: true
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
+
+- name: SSH | Configure | Deploy managed sshd configuration drop-in
+  ansible.builtin.template:
+    src: "{{ ssh_configure_sshd_template_src }}"
+    dest: "{{ ssh_configure_managed_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: "{{ ssh_sshd_config_backup | default(true) }}"
+  register: ssh_configure_sshd_dropin_result
+  become: true
+  vars:
+    ansible_template_src: "{{ ssh_configure_sshd_template_src }}"
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
+
+- name: SSH | Configure | Validate sshd configuration syntax
+  ansible.builtin.command:
+    cmd: "sshd -t -f {{ ssh_configure_sshd_config_path }}"
+  register: ssh_configure_sshd_validate_result
+  changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
+
+# -----------------------------------------------------------------------------
+# Reload / restart sshd
+# -----------------------------------------------------------------------------
+
+- name: SSH | Configure | Determine whether sshd reload is required
+  ansible.builtin.set_fact:
+    ssh_configure_sshd_changed: >-
+      {{
+        ssh_configure_ca_install_result is changed
+        or ssh_configure_sshd_include_result is changed
+        or ssh_configure_sshd_dropin_result is changed
+        or (
+          ssh_configure_banner_result is defined
+          and ssh_configure_banner_result is changed
+        )
+        or (
+          ssh_configure_banner_remove_result is defined
+          and ssh_configure_banner_remove_result is changed
+        )
+      }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
+
+- name: SSH | Configure | Reload SSH service after configuration changes
+  ansible.builtin.service:
+    name: "{{ ssh_configure_sshd_service_name }}"
+    state: reloaded
+  register: ssh_configure_sshd_reload_result
+  failed_when: false
+  become: true
+  when:
+    - ssh_configure_sshd_changed | bool
+    - ssh_role_reload_sshd | default(true) | bool
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
+
+- name: SSH | Configure | Restart SSH service when reload is unavailable
+  ansible.builtin.service:
+    name: "{{ ssh_configure_sshd_service_name }}"
+    state: restarted
+  become: true
+  when:
+    - ssh_configure_sshd_changed | bool
+    - ssh_role_restart_sshd | default(true) | bool
+    - >-
+      ssh_configure_sshd_reload_result is not defined or
+      ssh_configure_sshd_reload_result is failed or
+      ssh_configure_sshd_reload_result.rc | default(0) != 0
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
+
+# -----------------------------------------------------------------------------
+# Effective configuration verification
+# -----------------------------------------------------------------------------
+
+- name: SSH | Configure | Read effective sshd configuration
+  ansible.builtin.command:
+    cmd: "sshd -T -f {{ ssh_configure_sshd_config_path }}"
+  register: ssh_configure_sshd_effective
+  changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-verify
+
+- name: SSH | Configure | Compute expected sshd directives
+  ansible.builtin.set_fact:
+    ssh_configure_expected_trustedusercakeys: >-
+      trustedusercakeys {{ ssh_configure_trusted_user_ca_keys_path | lower }}
+    ssh_configure_expected_authorizedprincipalsfile: >-
+      authorizedprincipalsfile {{ ssh_configure_authorized_principals_file |
+      lower }}
+    ssh_configure_expected_pubkeyauthentication: >-
+      pubkeyauthentication {{ 'yes' if ssh_server_pubkey_authentication |
+      default(true) | bool else 'no' }}
+    ssh_configure_expected_passwordauthentication: >-
+      passwordauthentication {{ 'yes' if ssh_server_password_authentication |
+      default(false) | bool else 'no' }}
+    ssh_configure_expected_kbdinteractiveauthentication: >-
+      kbdinteractiveauthentication {{ 'yes' if
+      ssh_server_kbd_interactive_authentication | default(false) | bool else
+      'no' }}
+    ssh_configure_expected_permitrootlogin: >-
+      permitrootlogin {{ ssh_server_permit_root_login |
+      default('prohibit-password') | lower }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-verify
+
+- name: SSH | Configure | Assert managed sshd configuration is active
+  ansible.builtin.assert:
+    that:
+      - ssh_configure_expected_trustedusercakeys in
+        (ssh_configure_sshd_effective.stdout | lower)
+      - ssh_configure_expected_authorizedprincipalsfile in
+        (ssh_configure_sshd_effective.stdout | lower)
+      - ssh_configure_expected_pubkeyauthentication in
+        (ssh_configure_sshd_effective.stdout | lower)
+      - ssh_configure_expected_passwordauthentication in
+        (ssh_configure_sshd_effective.stdout | lower)
+      - ssh_configure_expected_permitrootlogin in
+        (ssh_configure_sshd_effective.stdout | lower)
     fail_msg: |
       Managed SSH daemon configuration is not active.
+
       Expected:
-        - {{ expected_trustedusercakeys }}
-        - {{ expected_authorizedprincipalsfile }}
-        - {{ expected_passwordauthentication }}
-      Got:
-        {{ (sshd_effective.stdout_lines
-            | select('match', '^(trustedusercakeys|authorizedprincipalsfile|passwordauthentication)\\s')
-            | list) | to_nice_yaml }}
+        - {{ ssh_configure_expected_trustedusercakeys }}
+        - {{ ssh_configure_expected_authorizedprincipalsfile }}
+        - {{ ssh_configure_expected_pubkeyauthentication }}
+        - {{ ssh_configure_expected_passwordauthentication }}
+        - {{ ssh_configure_expected_permitrootlogin }}
+
+      Effective matching directives:
+      {{
+        (
+          ssh_configure_sshd_effective.stdout_lines
+          | select('match', '^(trustedusercakeys|authorizedprincipalsfile|pubkeyauthentication|passwordauthentication|kbdinteractiveauthentication|keyboardinteractiveauthentication|permitrootlogin)\\s')
+          | list
+        )
+        | to_nice_yaml
+      }}
+    success_msg: "Managed SSH daemon configuration is active."
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-verify
+
+- name: SSH | Configure | Assert keyboard-interactive authentication is disabled
+    when required
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (ssh_policy_defaults.require_keyboard_interactive_disabled |
+        default(true) | bool) or
+        ssh_configure_expected_kbdinteractiveauthentication in
+        (ssh_configure_sshd_effective.stdout | lower)
+    fail_msg: |
+      Keyboard-interactive SSH authentication policy was not verified.
+
+      Expected:
+        - {{ ssh_configure_expected_kbdinteractiveauthentication }}
+
+      Effective matching directives:
+      {{
+        (
+          ssh_configure_sshd_effective.stdout_lines
+          | select('match', '^(kbdinteractiveauthentication|keyboardinteractiveauthentication)\\s')
+          | list
+        )
+        | to_nice_yaml
+      }}
+    success_msg: "Keyboard-interactive SSH authentication policy is active."
+  when: ssh_server_kbd_interactive_authentication is defined
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Configure | Show SSH server configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "SSH server configuration complete."
+      - "Host: {{ inventory_hostname }}"
+      - "Service: {{ ssh_configure_sshd_service_name }}"
+      - "CA public key source: {{ ssh_configure_ca_pub_path }}"
+      - "TrustedUserCAKeys: {{ ssh_configure_trusted_user_ca_keys_path }}"
+      - "AuthorizedPrincipalsFile: {{ ssh_configure_authorized_principals_file
+        }}"
+      - "Managed sshd drop-in: {{ ssh_configure_managed_config_path }}"
+      - "Banner enabled: {{ ssh_configure_banner_enabled | bool }}"
+      - "sshd changed: {{ ssh_configure_sshd_changed | bool }}"
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-summary

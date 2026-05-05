@@ -1,20 +1,103 @@
 ---
 # =============================================================================
 # packages — main
+# -----------------------------------------------------------------------------
+# Orchestrates package installation for managed hosts.
+#
+# Phases:
+#   1. Validate role inputs
+#   2. Install/remove APT packages
+#   3. Bootstrap/configure Homebrew/Linuxbrew
+#   4. Install requested Homebrew formulae
+#
+# Notes:
+#   - APT package installation is controlled by packages_manage_apt.
+#   - Homebrew installation is controlled by packages_install_homebrew.
+#   - Homebrew formula installation is handled separately by
+#     install-brew-packages.yaml.
 # =============================================================================
 
-- name: Validate package configuration
+# -----------------------------------------------------------------------------
+# Normalize role controls
+# -----------------------------------------------------------------------------
+
+- name: Packages | Main | Normalize role controls
+  ansible.builtin.set_fact:
+    packages_main_validate_inputs: "{{ packages_validate_inputs | default(true) | bool }}"
+    packages_main_manage_apt: "{{ packages_manage_apt | default(true) | bool }}"
+    packages_main_install_homebrew: "{{ packages_install_homebrew | default(false) | bool }}"
+    packages_main_install_homebrew_packages: >-
+      {{
+        packages_install_homebrew | default(false) | bool
+        and (packages_role_brew_packages | default([]) | length > 0)
+      }}
+    packages_main_show_summary: "{{ packages_show_summary | default(true) | bool }}"
+  changed_when: false
+  tags:
+    - packages
+    - packages-main
+
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
+
+- name: Packages | Main | Validate package configuration
   ansible.builtin.import_tasks: validate.yaml
+  when: packages_main_validate_inputs | bool
+  tags:
+    - packages
+    - packages-validate
 
-- name: Install packages
+# -----------------------------------------------------------------------------
+# APT packages
+# -----------------------------------------------------------------------------
+
+- name: Packages | Main | Install APT packages
   ansible.builtin.import_tasks: install.yaml
+  when: packages_main_manage_apt | bool
+  tags:
+    - packages
+    - packages-apt
 
-- name: Install Homebrew (Linuxbrew)
+# -----------------------------------------------------------------------------
+# Homebrew / Linuxbrew bootstrap
+# -----------------------------------------------------------------------------
+
+- name: Packages | Main | Install and configure Homebrew
   ansible.builtin.import_tasks: install-homebrew.yaml
-  when: packages_install_homebrew | default(false)
+  when: packages_main_install_homebrew | bool
+  tags:
+    - packages
+    - packages-homebrew
 
-- name: Install Homebrew packages
+# -----------------------------------------------------------------------------
+# Homebrew formulae
+# -----------------------------------------------------------------------------
+
+- name: Packages | Main | Install Homebrew formulae
   ansible.builtin.import_tasks: install-brew-packages.yaml
-  when:
-    - packages_install_homebrew | default(false)
-    - (packages_role_brew_packages | default([])) | length > 0
+  when: packages_main_install_homebrew_packages | bool
+  tags:
+    - packages
+    - packages-homebrew
+    - packages-brew-packages
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Packages | Main | Show package role summary
+  ansible.builtin.debug:
+    msg:
+      - "Package role orchestration complete."
+      - "Host: {{ inventory_hostname }}"
+      - "APT managed: {{ packages_main_manage_apt | bool }}"
+      - "APT groups: {{ packages_role_groups | default([]) | join(', ') if
+        packages_role_groups | default([]) | length > 0 else 'none' }}"
+      - "Homebrew enabled: {{ packages_main_install_homebrew | bool }}"
+      - "Homebrew packages requested: {{ packages_role_brew_packages |
+        default([]) | length }}"
+  when: packages_main_show_summary | bool
+  tags:
+    - packages
+    - packages-summary

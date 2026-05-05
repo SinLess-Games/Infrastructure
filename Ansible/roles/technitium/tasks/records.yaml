@@ -1,198 +1,701 @@
 ---
 # =============================================================================
-# Technitium DNS – Records (Idempotent)
-# - Ensures zones exist
-# - Applies records using delete -> add
-# - Treats "record already exists" as a no-op (safe re-run)
+# Technitium DNS - Records
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Apply DNS records declared in Ansible group_vars.
+#   - Manage forward records from domain-records.yaml.
+#   - Manage PTR records from reverse-zones.yaml.
+#   - Support production DNS record types used by infrastructure zones.
 #
-# Technitium API examples show add/delete as separate operations (no true upsert). :contentReference[oaicite:1]{index=1}
+# Design:
+#   - zones.yaml owns authoritative zone creation.
+#   - records.yaml owns record application.
+#   - Uses Authorization: Bearer for current Technitium API behavior.
+#   - Also includes token in the form body for backward compatibility.
+#   - Preserves multi-value RRsets:
+#       * First record for a zone/domain/type uses overwrite=true.
+#       * Additional records for the same zone/domain/type use overwrite=false.
+#   - Does not loosely delete records by default.
+#
+# Supported record types:
+#   - A
+#   - AAAA
+#   - NS
+#   - CNAME
+#   - PTR
+#   - MX
+#   - TXT
+#   - SRV
+#   - DNAME
+#   - DS
+#   - SSHFP
+#   - TLSA
+#   - SVCB
+#   - HTTPS
+#   - URI
+#   - CAA
+#   - ANAME
+#   - FWD
+#   - APP
+#   - RDATA
+#
+# Companion vars:
+#   - technitium_api_url
+#   - technitium_api_token or technitium_session_token
+#   - technitium_domain_records
+#   - technitium_reverse_zones
+#   - technitium_record_default_ttl
 # =============================================================================
 
-- name: "Technitium | Assert required variables exist"
+# -----------------------------------------------------------------------------
+# Preconditions
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Assert required variables exist
   ansible.builtin.assert:
     that:
       - technitium_api_url is defined
-      - technitium_api_token is defined
-      - technitium_domain_records is defined
+      - technitium_api_url | length > 0
+      - technitium_api_token is defined or technitium_session_token is defined
+      - technitium_domain_records is defined or technitium_dns_zone_records is defined
     fail_msg: >-
-      Missing required vars. Ensure you set:
-      technitium_api_url, technitium_api_token, technitium_domain_records
-
-# -----------------------------------------------------------------------------
-# Ensure zones exist
-# -----------------------------------------------------------------------------
-- name: "Technitium | Ensure zones exist (Primary)"
-  ansible.builtin.uri:
-    url: "{{ technitium_api_url.rstrip('/') }}/api/zones/create"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      token: "{{ technitium_api_token }}"
-      zone: "{{ item.key }}"
-      type: "Primary"
-    return_content: true
-    status_code: [200]
-  loop: "{{ technitium_domain_records | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
-  register: technitium_zone_create
-  no_log: true
-  failed_when: false
-  changed_when: false
-
-- name: "Technitium | Assert zone create calls succeeded (allow already-exists)"
-  ansible.builtin.assert:
-    that:
-      - (item.json.status | default('')) in ['ok', 'error']
-      - >
-        (item.json.status | default('')) == 'ok'
-        or
-        (
-          (item.json.status | default('')) == 'error'
-          and
-          (item.json.errorMessage | default('') | lower) is search('zone already exists')
-        )
-    fail_msg: >-
-      Zone create failed unexpectedly. Response: {{ item.content | default('') }}
-  loop: "{{ technitium_zone_create.results | default([]) }}"
-  loop_control:
-    label: "{{ item.item.key | default('unknown-zone') }}"
+      Missing required Technitium record variables. Expected technitium_api_url,
+      technitium_api_token or technitium_session_token, and technitium_domain_records
+      or technitium_dns_zone_records.
+    success_msg: "Technitium record variables passed validation."
   no_log: true
 
-# -----------------------------------------------------------------------------
-# Build flattened record jobs
-# -----------------------------------------------------------------------------
-- name: "Technitium | Build flattened record jobs"
+- name: Technitium Records | Normalize API and record source variables
   ansible.builtin.set_fact:
-    technitium_record_jobs: "{{ (technitium_record_jobs | default([])) + [ job ] }}"
-  vars:
-    zone_name: "{{ item.0.key }}"
-    rec: "{{ item.1 }}"
-    fqdn: >-
-      {{
-        (
-          ((rec.name | default('') | string) in ['@', ''])
-          | ternary(zone_name, (rec.name ~ '.' ~ zone_name))
-        )
-      }}
-    ttl_val: "{{ rec.ttl | default(technitium_default_ttl | default(300)) }}"
-    job:
-      zone: "{{ zone_name }}"
-      domain: "{{ fqdn }}"
-      type: "{{ rec.type }}"
-      ttl: "{{ ttl_val }}"
-      value: "{{ rec.value }}"
-  loop: "{{ technitium_domain_records | dict2items | subelements('value.records', skip_missing=True) }}"
-  loop_control:
-    label: "{{ item.0.key }} -> {{ item.1.name }} ({{ item.1.type }})"
+    technitium_records_api_base: "{{ technitium_api_url | regex_replace('/+$', '') }}"
+    technitium_records_api_token: "{{ technitium_api_token | default(technitium_session_token) }}"
+    technitium_records_forward_map: "{{ technitium_dns_zone_records | default(technitium_domain_records | default({})) }}"
+    technitium_records_reverse_zones: "{{ technitium_dns_reverse_zones | default(technitium_reverse_zones | default([])) }}"
+    technitium_records_default_ttl: "{{ technitium_record_default_ttl | default(300) }}"
+    technitium_records_no_log: "{{ technitium_no_log | default(true) }}"
+  no_log: true
 
-- name: "Technitium | Validate record types are supported"
+- name: Technitium Records | Assert API token is usable
   ansible.builtin.assert:
     that:
-      - item.type in ['A', 'AAAA', 'CNAME', 'TXT']
-    fail_msg: "Unsupported record type '{{ item.type }}' for {{ item.domain }}"
-  loop: "{{ technitium_record_jobs | default([]) }}"
-  loop_control:
-    label: "{{ item.domain }} ({{ item.type }})"
+      - technitium_records_api_token is defined
+      - technitium_records_api_token | length > 0
+    fail_msg: "Technitium API token is missing or empty."
+    success_msg: "Technitium API token is available."
+  no_log: true
 
 # -----------------------------------------------------------------------------
-# Delete -> Add (idempotent)
+# Optional zone existence check
 # -----------------------------------------------------------------------------
-- name: "Technitium | Delete existing record (best-effort, domain+type)"
+# zones.yaml should create zones before this file runs. This block exists as a
+# guardrail for direct task execution.
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Build declared zone names from record sources
+  ansible.builtin.set_fact:
+    technitium_records_declared_zones: >-
+      {%- set out = [] -%}
+      {%- for z in (technitium_records_forward_map | default({}) | dict2items) -%}
+        {%- set _ = out.append(z.key) -%}
+      {%- endfor -%}
+      {%- for rz in technitium_records_reverse_zones | default([]) -%}
+        {%- if rz.enabled | default(true) | bool -%}
+          {%- set _ = out.append(rz.zone | default(rz.name)) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out | unique | list }}
+
+- name: Technitium Records | Ensure declared zones exist when requested
   ansible.builtin.uri:
-    url: "{{ technitium_api_url.rstrip('/') }}/api/zones/records/delete"
+    url: "{{ technitium_records_api_base }}/api/zones/create"
     method: POST
+    headers:
+      Authorization: "Bearer {{ technitium_records_api_token }}"
     body_format: form-urlencoded
     body:
-      token: "{{ technitium_api_token }}"
-      domain: "{{ item.domain }}"
-      type: "{{ item.type }}"
+      token: "{{ technitium_records_api_token }}"
+      zone: "{{ item }}"
+      type: "Primary"
+    status_code:
+      - 200
+      - 400
+      - 409
     return_content: true
-    status_code: [200]
-  loop: "{{ technitium_record_jobs | default([]) }}"
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_records_zone_create
+  loop: "{{ technitium_records_declared_zones }}"
   loop_control:
-    label: "{{ item.domain }} ({{ item.type }})"
-  register: technitium_record_delete_loose
-  no_log: true
+    label: "{{ item }}"
   failed_when: false
-  changed_when: false
+  changed_when: technitium_records_zone_create.json.status | default('') == 'ok'
+  no_log: "{{ technitium_records_no_log | bool }}"
+  when: technitium_records_ensure_zones | default(false)
 
-- name: "Technitium | Delete existing record (best-effort, exact value)"
-  vars:
-    value_payload: >-
-      {{
-        (item.type in ['A','AAAA']) | ternary({'ipAddress': item.value}, {})
-        | combine((item.type == 'CNAME') | ternary({'cname': item.value}, {}))
-        | combine((item.type == 'TXT')   | ternary({'text': item.value}, {}))
-      }}
-  ansible.builtin.uri:
-    url: "{{ technitium_api_url.rstrip('/') }}/api/zones/records/delete"
-    method: POST
-    body_format: form-urlencoded
-    body: >-
-      {{
-        {
-          'token': technitium_api_token,
-          'domain': item.domain,
-          'type': item.type
-        } | combine(value_payload)
-      }}
-    return_content: true
-    status_code: [200]
-  loop: "{{ technitium_record_jobs | default([]) }}"
-  loop_control:
-    label: "{{ item.domain }} ({{ item.type }})"
-  register: technitium_record_delete_exact
-  no_log: true
-  failed_when: false
-  changed_when: false
-
-- name: "Technitium | Add record"
-  vars:
-    value_payload: >-
-      {{
-        (item.type in ['A','AAAA']) | ternary({'ipAddress': item.value}, {})
-        | combine((item.type == 'CNAME') | ternary({'cname': item.value}, {}))
-        | combine((item.type == 'TXT')   | ternary({'text': item.value}, {}))
-      }}
-    request_body: >-
-      {{
-        {
-          'token': technitium_api_token,
-          'domain': item.domain,
-          'type': item.type,
-          'ttl': (item.ttl | string)
-        } | combine(value_payload)
-      }}
-  ansible.builtin.uri:
-    url: "{{ technitium_api_url.rstrip('/') }}/api/zones/records/add"
-    method: POST
-    body_format: form-urlencoded
-    body: "{{ request_body }}"
-    return_content: true
-    status_code: [200]
-  loop: "{{ technitium_record_jobs | default([]) }}"
-  loop_control:
-    label: "{{ item.domain }} ({{ item.type }})"
-  register: technitium_record_add
-  no_log: true
-  failed_when: false
-  changed_when: false
-
-- name: "Technitium | Assert record apply succeeded (allow already-exists)"
+- name: Technitium Records | Assert optional zone creation succeeded
   ansible.builtin.assert:
     that:
-      - (item.json.status | default('')) in ['ok', 'error']
-      - >
-        (item.json.status | default('')) == 'ok'
-        or
-        (
-          (item.json.status | default('')) == 'error'
-          and
-          (item.json.errorMessage | default('') | lower) is search('record already exists')
+      - item.json is defined
+      - item.json.status is defined
+      - >-
+        item.json.status == 'ok'
+        or (
+          item.json.status == 'error'
+          and (
+            (item.json.errorMessage | default('')) is search('already', ignorecase=True)
+            or (item.json.errorMessage | default('')) is search('exists', ignorecase=True)
+          )
         )
-    fail_msg: "Record apply failed unexpectedly. Response: {{ item.content | default('') }}"
+    fail_msg: >-
+      Zone create failed for {{ item.item }}.
+      Response: {{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+  loop: "{{ technitium_records_zone_create.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: technitium_records_ensure_zones | default(false)
+
+# -----------------------------------------------------------------------------
+# Build forward record jobs
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Build forward record jobs
+  ansible.builtin.set_fact:
+    technitium_forward_record_jobs_raw: >-
+      {%- set out = [] -%}
+      {%- for z in (technitium_records_forward_map | default({}) | dict2items) -%}
+        {%- set zone = z.key -%}
+        {%- set recs = z.value.records | default([]) -%}
+        {%- for r in recs -%}
+          {%- if r.enabled | default(true) | bool -%}
+            {%- set n = r.name | default('@') | string -%}
+            {%- if n in ['', '@'] -%}
+              {%- set fqdn = zone -%}
+            {%- elif n.endswith('.') -%}
+              {%- set fqdn = n | regex_replace('\\.$', '') -%}
+            {%- else -%}
+              {%- set fqdn = n ~ '.' ~ zone -%}
+            {%- endif -%}
+            {%- set _ = out.append({
+              'zone': zone,
+              'domain': fqdn,
+              'name': n,
+              'type': r.type | default('A') | upper,
+              'ttl': r.ttl | default(technitium_records_default_ttl),
+              'value': r.value | default(''),
+              'record': r,
+              'comments': r.comment | default(r.comments | default('')),
+              'source': 'forward'
+            }) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+
+# -----------------------------------------------------------------------------
+# Build reverse PTR record jobs
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Build reverse PTR record jobs
+  ansible.builtin.set_fact:
+    technitium_reverse_record_jobs_raw: >-
+      {%- set out = [] -%}
+      {%- for rz in technitium_records_reverse_zones | default([]) -%}
+        {%- if rz.enabled | default(true) | bool -%}
+          {%- set zone = rz.zone | default(rz.name) -%}
+          {%- for ptr in rz.ptr_records | default([]) -%}
+            {%- if ptr.enabled | default(true) | bool -%}
+              {%- set fqdn = (ptr.ip_last_octet | string) ~ '.' ~ zone -%}
+              {%- set _ = out.append({
+                'zone': zone,
+                'domain': fqdn,
+                'name': ptr.ip_last_octet | string,
+                'type': 'PTR',
+                'ttl': ptr.ttl | default(technitium_records_default_ttl),
+                'value': ptr.hostname,
+                'record': ptr,
+                'comments': ptr.comment | default(ptr.comments | default('')),
+                'source': 'reverse'
+              }) -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Technitium Records | Combine raw record jobs
+  ansible.builtin.set_fact:
+    technitium_record_jobs_raw: "{{ technitium_forward_record_jobs_raw + technitium_reverse_record_jobs_raw }}"
+
+# -----------------------------------------------------------------------------
+# Base validation
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Validate record jobs have required base fields
+  ansible.builtin.assert:
+    that:
+      - item.zone is defined
+      - item.zone | length > 0
+      - item.domain is defined
+      - item.domain | length > 0
+      - item.type is defined
+      - item.type | length > 0
+      - item.ttl is defined
+      - item.ttl | int > 0
+    fail_msg: "Invalid DNS record job: {{ item }}"
+  loop: "{{ technitium_record_jobs_raw }}"
+  loop_control:
+    label: "{{ item.domain | default('unknown') }} ({{ item.type | default('unknown') }})"
+
+- name: Technitium Records | Validate CNAME records are not zone apex records
+  ansible.builtin.assert:
+    that:
+      - item.type != 'CNAME' or item.domain != item.zone
+    fail_msg: >-
+      Invalid CNAME at zone apex: {{ item.domain }}.
+      DNS CNAME records must not be placed at the zone apex.
+  loop: "{{ technitium_record_jobs_raw }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+
+- name: Technitium Records | Validate supported record types
+  ansible.builtin.assert:
+    that:
+      - item.type in technitium_records_supported_types
+    fail_msg: >-
+      Unsupported record type '{{ item.type }}' for {{ item.domain }}.
+      Add a parameter mapping before using this type.
+  loop: "{{ technitium_record_jobs_raw }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+  vars:
+    technitium_records_supported_types:
+      - A
+      - AAAA
+      - NS
+      - CNAME
+      - PTR
+      - MX
+      - TXT
+      - SRV
+      - DNAME
+      - DS
+      - SSHFP
+      - TLSA
+      - SVCB
+      - HTTPS
+      - URI
+      - CAA
+      - ANAME
+      - FWD
+      - APP
+      - RDATA
+
+# -----------------------------------------------------------------------------
+# Build API-ready record jobs
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Build API-ready record jobs
+  ansible.builtin.set_fact:
+    technitium_record_jobs: >-
+      {%- set out = [] -%}
+      {%- set seen_rrsets = [] -%}
+      {%- for item in technitium_record_jobs_raw -%}
+        {%- set r = item.record -%}
+        {%- set typ = item.type | upper -%}
+        {%- set rrset_key = item.zone ~ '|' ~ item.domain ~ '|' ~ typ -%}
+        {%- set overwrite = 'true' if rrset_key not in seen_rrsets else 'false' -%}
+        {%- if rrset_key not in seen_rrsets -%}
+          {%- set _ = seen_rrsets.append(rrset_key) -%}
+        {%- endif -%}
+
+        {%- set body = {
+          'token': technitium_records_api_token,
+          'zone': item.zone,
+          'domain': item.domain,
+          'type': typ,
+          'ttl': item.ttl | string,
+          'overwrite': overwrite
+        } -%}
+
+        {%- if item.comments | default('') | length > 0 -%}
+          {%- set _ = body.update({'comments': item.comments}) -%}
+        {%- endif -%}
+
+        {%- if r.expiryTtl is defined -%}
+          {%- set _ = body.update({'expiryTtl': r.expiryTtl | string}) -%}
+        {%- endif -%}
+
+        {%- if typ in ['A', 'AAAA'] -%}
+          {%- set _ = body.update({
+            'ipAddress': r.ipAddress | default(item.value),
+            'ptr': r.ptr | default(false) | bool | ternary('true', 'false'),
+            'createPtrZone': r.createPtrZone | default(false) | bool | ternary('true', 'false'),
+            'updateSvcbHints': r.updateSvcbHints | default(false) | bool | ternary('true', 'false')
+          }) -%}
+
+        {%- elif typ == 'NS' -%}
+          {%- set _ = body.update({
+            'nameServer': r.nameServer | default(item.value)
+          }) -%}
+          {%- if r.glue is defined -%}
+            {%- set _ = body.update({'glue': r.glue}) -%}
+          {%- endif -%}
+
+        {%- elif typ == 'CNAME' -%}
+          {%- set _ = body.update({
+            'cname': r.cname | default(item.value)
+          }) -%}
+
+        {%- elif typ == 'PTR' -%}
+          {%- set _ = body.update({
+            'ptrName': r.ptrName | default(item.value)
+          }) -%}
+
+        {%- elif typ == 'MX' -%}
+          {%- set mx_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'preference': r.preference | default(mx_parts[0] | default(10)) | string,
+            'exchange': r.exchange | default(mx_parts[1] | default(item.value)) | string
+          }) -%}
+
+        {%- elif typ == 'TXT' -%}
+          {%- set _ = body.update({
+            'text': r.text | default(item.value),
+            'splitText': r.splitText | default(false) | bool | ternary('true', 'false')
+          }) -%}
+
+        {%- elif typ == 'SRV' -%}
+          {%- set srv_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'priority': r.priority | default(srv_parts[0] | default(10)) | string,
+            'weight': r.weight | default(srv_parts[1] | default(100)) | string,
+            'port': r.port | default(srv_parts[2] | default(0)) | string,
+            'target': r.target | default(srv_parts[3] | default('')) | string
+          }) -%}
+
+        {%- elif typ == 'DNAME' -%}
+          {%- set _ = body.update({
+            'dname': r.dname | default(item.value)
+          }) -%}
+
+        {%- elif typ == 'DS' -%}
+          {%- set ds_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'keyTag': r.keyTag | default(ds_parts[0] | default('')) | string,
+            'algorithm': r.algorithm | default(ds_parts[1] | default('')) | string,
+            'digestType': r.digestType | default(ds_parts[2] | default('')) | string,
+            'digest': r.digest | default(ds_parts[3] | default('')) | string
+          }) -%}
+
+        {%- elif typ == 'SSHFP' -%}
+          {%- set sshfp_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'sshfpAlgorithm': r.sshfpAlgorithm | default(sshfp_parts[0] | default('')) | string,
+            'sshfpFingerprintType': r.sshfpFingerprintType | default(sshfp_parts[1] | default('')) | string,
+            'sshfpFingerprint': r.sshfpFingerprint | default(sshfp_parts[2] | default('')) | string
+          }) -%}
+
+        {%- elif typ == 'TLSA' -%}
+          {%- set tlsa_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'tlsaCertificateUsage': r.tlsaCertificateUsage | default(tlsa_parts[0] | default('')) | string,
+            'tlsaSelector': r.tlsaSelector | default(tlsa_parts[1] | default('')) | string,
+            'tlsaMatchingType': r.tlsaMatchingType | default(tlsa_parts[2] | default('')) | string,
+            'tlsaCertificateAssociationData': r.tlsaCertificateAssociationData | default(tlsa_parts[3] | default('')) | string
+          }) -%}
+
+        {%- elif typ in ['SVCB', 'HTTPS'] -%}
+          {%- set svc_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'svcPriority': r.svcPriority | default(svc_parts[0] | default(1)) | string,
+            'svcTargetName': r.svcTargetName | default(svc_parts[1] | default('.')) | string,
+            'svcParams': r.svcParams | default((svc_parts[2:] | join('|')) if (svc_parts | length > 2) else 'false') | string,
+            'autoIpv4Hint': r.autoIpv4Hint | default(false) | bool | ternary('true', 'false'),
+            'autoIpv6Hint': r.autoIpv6Hint | default(false) | bool | ternary('true', 'false')
+          }) -%}
+
+        {%- elif typ == 'URI' -%}
+          {%- set uri_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'uriPriority': r.uriPriority | default(uri_parts[0] | default(10)) | string,
+            'uriWeight': r.uriWeight | default(uri_parts[1] | default(1)) | string,
+            'uri': r.uri | default(uri_parts[2] | default(item.value)) | string
+          }) -%}
+
+        {%- elif typ == 'CAA' -%}
+          {%- set caa_parts = (item.value | string).split(' ', 2) -%}
+          {%- set caa_value = r.caaValue | default(r.caa_value | default(r.value | default(caa_parts[2] | default('')))) | string -%}
+          {%- set _ = body.update({
+            'flags': r.flags | default(caa_parts[0] | default(0)) | string,
+            'tag': r.tag | default(caa_parts[1] | default('issue')) | string,
+            'value': caa_value | regex_replace('^\"', '') | regex_replace('\"$', '')
+          }) -%}
+
+        {%- elif typ == 'ANAME' -%}
+          {%- set _ = body.update({
+            'aname': r.aname | default(item.value)
+          }) -%}
+
+        {%- elif typ == 'FWD' -%}
+          {%- set _ = body.update({
+            'protocol': r.protocol | default('Udp'),
+            'forwarder': r.forwarder | default(item.value),
+            'forwarderPriority': r.forwarderPriority | default(1) | string,
+            'dnssecValidation': r.dnssecValidation | default(false) | bool | ternary('true', 'false')
+          }) -%}
+          {%- if r.proxyType is defined -%}
+            {%- set _ = body.update({'proxyType': r.proxyType}) -%}
+          {%- endif -%}
+          {%- if r.proxyAddress is defined -%}
+            {%- set _ = body.update({'proxyAddress': r.proxyAddress}) -%}
+          {%- endif -%}
+          {%- if r.proxyPort is defined -%}
+            {%- set _ = body.update({'proxyPort': r.proxyPort | string}) -%}
+          {%- endif -%}
+          {%- if r.proxyUsername is defined -%}
+            {%- set _ = body.update({'proxyUsername': r.proxyUsername}) -%}
+          {%- endif -%}
+          {%- if r.proxyPassword is defined -%}
+            {%- set _ = body.update({'proxyPassword': r.proxyPassword}) -%}
+          {%- endif -%}
+
+        {%- elif typ == 'APP' -%}
+          {%- set _ = body.update({
+            'appName': r.appName | default(r.app_name | default('')),
+            'classPath': r.classPath | default(r.class_path | default('')),
+            'recordData': r.recordData | default(r.record_data | default(item.value))
+          }) -%}
+
+        {%- elif typ == 'RDATA' -%}
+          {%- set _ = body.update({
+            'type': r.realType | default(r.real_type | default(r.type | default('TYPE0'))),
+            'rdata': r.rdata | default(item.value)
+          }) -%}
+
+        {%- endif -%}
+
+        {%- set _ = out.append({
+          'zone': item.zone,
+          'domain': item.domain,
+          'type': body.type,
+          'ttl': item.ttl,
+          'overwrite': overwrite,
+          'source': item.source,
+          'body': body
+        }) -%}
+      {%- endfor -%}
+      {{ out }}
+  no_log: "{{ technitium_records_no_log | bool }}"
+
+# -----------------------------------------------------------------------------
+# Type-specific validation
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Validate API-ready record bodies
+  ansible.builtin.assert:
+    that:
+      - item.body.zone is defined
+      - item.body.domain is defined
+      - item.body.type is defined
+      - item.body.ttl is defined
+      - item.body.type not in ['A', 'AAAA'] or (item.body.ipAddress | default('') | length > 0)
+      - item.body.type != 'NS' or (item.body.nameServer | default('') | length > 0)
+      - item.body.type != 'CNAME' or (item.body.cname | default('') | length > 0)
+      - item.body.type != 'PTR' or (item.body.ptrName | default('') | length > 0)
+      - item.body.type != 'MX' or ((item.body.preference | default('') | length > 0) and (item.body.exchange | default('') | length > 0))
+      - item.body.type != 'TXT' or (item.body.text | default('') | length > 0)
+      - item.body.type != 'SRV' or ((item.body.priority | default('') | length > 0) and (item.body.weight | default('') | length > 0) and (item.body.port | default('') | length > 0) and (item.body.target | default('') | length > 0))
+      - item.body.type != 'DNAME' or (item.body.dname | default('') | length > 0)
+      - item.body.type != 'DS' or ((item.body.keyTag | default('') | length > 0) and (item.body.algorithm | default('') | length > 0) and (item.body.digestType | default('') | length > 0) and (item.body.digest | default('') | length > 0))
+      - item.body.type != 'SSHFP' or ((item.body.sshfpAlgorithm | default('') | length > 0) and (item.body.sshfpFingerprintType | default('') | length > 0) and (item.body.sshfpFingerprint | default('') | length > 0))
+      - item.body.type != 'TLSA' or ((item.body.tlsaCertificateUsage | default('') | length > 0) and (item.body.tlsaSelector | default('') | length > 0) and (item.body.tlsaMatchingType | default('') | length > 0) and (item.body.tlsaCertificateAssociationData | default('') | length > 0))
+      - item.body.type not in ['SVCB', 'HTTPS'] or ((item.body.svcPriority | default('') | length > 0) and (item.body.svcTargetName | default('') | length > 0))
+      - item.body.type != 'URI' or ((item.body.uriPriority | default('') | length > 0) and (item.body.uriWeight | default('') | length > 0) and (item.body.uri | default('') | length > 0))
+      - item.body.type != 'CAA' or ((item.body.flags | default('') | length > 0) and (item.body.tag | default('') | length > 0) and (item.body.value | default('') | length > 0))
+      - item.body.type != 'ANAME' or (item.body.aname | default('') | length > 0)
+      - item.body.type != 'FWD' or ((item.body.protocol | default('') | length > 0) and (item.body.forwarder | default('') | length > 0))
+      - item.body.type != 'APP' or ((item.body.appName | default('') | length > 0) and (item.body.classPath | default('') | length > 0))
+      - item.body.type != 'RDATA' or (item.body.rdata | default('') | length > 0)
+    fail_msg: >-
+      Record {{ item.domain }} ({{ item.type }}) is missing required API
+      parameters. Body: {{ item.body | dict2items | rejectattr('key', 'equalto', 'token') | list }}
+  loop: "{{ technitium_record_jobs }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+
+# -----------------------------------------------------------------------------
+# Optional exact-record delete mode
+# -----------------------------------------------------------------------------
+# Disabled by default. Use only when intentionally replacing records managed by
+# this file and after all desired values for each RRset are declared.
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Delete existing managed records when replace mode is enabled
+  ansible.builtin.uri:
+    url: "{{ technitium_records_api_base }}/api/zones/records/delete"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ technitium_records_api_token }}"
+    body_format: form-urlencoded
+    body: "{{ item.body }}"
+    status_code:
+      - 200
+      - 400
+      - 404
+    return_content: true
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_record_delete
+  loop: "{{ technitium_record_jobs }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+  failed_when: false
+  changed_when: technitium_record_delete.json.status | default('') == 'ok'
+  no_log: "{{ technitium_records_no_log | bool }}"
+  when:
+    - technitium_records_replace_mode | default(false)
+    - technitium_record_jobs | length > 0
+
+- name: Technitium Records | Assert optional record delete calls succeeded
+  ansible.builtin.assert:
+    that:
+      - item.json is defined
+      - item.json.status is defined
+      - >-
+        item.json.status == 'ok'
+        or (
+          item.json.status == 'error'
+          and (
+            (item.json.errorMessage | default('')) is search('not found', ignorecase=True)
+            or (item.json.errorMessage | default('')) is search('does not exist', ignorecase=True)
+            or (item.json.errorMessage | default('')) is search('no record', ignorecase=True)
+          )
+        )
+    fail_msg: >-
+      Record delete failed for {{ item.item.domain }} ({{ item.item.type }}).
+      Response: {{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+  loop: "{{ technitium_record_delete.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.domain }} ({{ item.item.type }})"
+  when:
+    - technitium_records_replace_mode | default(false)
+    - technitium_record_jobs | length > 0
+
+# -----------------------------------------------------------------------------
+# Add / upsert records
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Apply DNS records
+  ansible.builtin.uri:
+    url: "{{ technitium_records_api_base }}/api/zones/records/add"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ technitium_records_api_token }}"
+    body_format: form-urlencoded
+    body: "{{ item.body }}"
+    status_code:
+      - 200
+      - 400
+      - 409
+    return_content: true
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_record_add
+  loop: "{{ technitium_record_jobs }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }}) overwrite={{ item.overwrite }}"
+  failed_when: false
+  changed_when: technitium_record_add.json.status | default('') == 'ok'
+  no_log: "{{ technitium_records_no_log | bool }}"
+  when: technitium_record_jobs | length > 0
+
+- name: Technitium Records | Assert record apply calls succeeded
+  ansible.builtin.assert:
+    that:
+      - item.json is defined
+      - item.json.status is defined
+      - >-
+        item.json.status == 'ok'
+        or (
+          item.json.status == 'error'
+          and (
+            (item.json.errorMessage | default('')) is search('already', ignorecase=True)
+            or (item.json.errorMessage | default('')) is search('exists', ignorecase=True)
+            or (item.json.errorMessage | default('')) is search('same record', ignorecase=True)
+          )
+        )
+    fail_msg: >-
+      Record apply failed for {{ item.item.domain }} ({{ item.item.type }}).
+      Response: {{ item.json.errorMessage | default(item.content | default('unknown error')) }}
   loop: "{{ technitium_record_add.results | default([]) }}"
   loop_control:
     label: "{{ item.item.domain }} ({{ item.item.type }})"
-  no_log: true
+  when: technitium_record_jobs | length > 0
+
+# -----------------------------------------------------------------------------
+# Optional verification
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Verify declared record domains are readable
+  ansible.builtin.uri:
+    url: "{{ technitium_records_api_base }}/api/zones/records/get"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ technitium_records_api_token }}"
+    body_format: form-urlencoded
+    body:
+      token: "{{ technitium_records_api_token }}"
+      domain: "{{ item.domain }}"
+      zone: "{{ item.zone }}"
+      listZone: "false"
+    status_code:
+      - 200
+      - 400
+      - 404
+    return_content: true
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_record_verify
+  loop: "{{ technitium_record_jobs }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+  failed_when: false
+  changed_when: false
+  no_log: "{{ technitium_records_no_log | bool }}"
+  when:
+    - technitium_verify_records_after_apply | default(false)
+    - technitium_record_jobs | length > 0
+
+- name: Technitium Records | Assert declared record domains are readable
+  ansible.builtin.assert:
+    that:
+      - item.json is defined
+      - item.json.status is defined
+      - item.json.status == 'ok'
+    fail_msg: >-
+      Record verification failed for {{ item.item.domain }} ({{ item.item.type }}).
+      Response: {{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+  loop: "{{ technitium_record_verify.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.domain }} ({{ item.item.type }})"
+  when:
+    - technitium_verify_records_after_apply | default(false)
+    - technitium_record_jobs | length > 0
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Technitium Records | Show records summary
+  ansible.builtin.debug:
+    msg:
+      - "Technitium record configuration complete."
+      - "Host: {{ inventory_hostname }}"
+      - "API: {{ technitium_records_api_base }}"
+      - "Forward records declared: {{ technitium_forward_record_jobs_raw | length }}"
+      - "Reverse PTR records declared: {{ technitium_reverse_record_jobs_raw | length }}"
+      - "Total records declared: {{ technitium_record_jobs | length }}"
+      - "Ensure zones enabled: {{ technitium_records_ensure_zones | default(false) }}"
+      - "Replace mode enabled: {{ technitium_records_replace_mode | default(false) }}"
+      - "Verification enabled: {{ technitium_verify_records_after_apply | default(false) }}"

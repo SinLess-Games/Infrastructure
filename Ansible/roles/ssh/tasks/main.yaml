@@ -1,545 +1,332 @@
 ---
 # =============================================================================
-# SSH Role – Task Orchestration (SELF-HEALING + PATH-ROBUST)
-# =============================================================================
+# SSH Role - Main Task Orchestration
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Orchestrates SSH CA generation, user key generation, user certificate
+#   signing, user SSH configuration, OpenSSH daemon hardening, and Proxmox
+#   host-certificate workflows.
 #
-# Fixes:
-# - Avoid ansible.builtin.stat follow=true ELOOP failures ("Too many levels of symbolic links")
-# - Break/repair CA symlink loops by converging to a REAL canonical keypair (copy, not link)
-# - Keep optional candidate symlinks pointing at canonical WITHOUT creating cycles
+# Design:
+#   - Keep orchestration simple.
+#   - Let each task file own its own validation, idempotency, symlink safety,
+#     force-regeneration behavior, and verification.
+#   - Avoid running both generic and Proxmox-specific sshd configuration unless
+#     explicitly requested.
+#
+# Phase order:
+#   1. Normalize role flags
+#   2. Validate inputs
+#   3. Generate controller-side CA/user key material
+#   4. Sign user certificates
+#   5. Resolve remote user homes
+#   6. Configure user-level SSH files
+#   7. Configure system sshd
+#   8. Run Proxmox-specific CA/host-certificate/root workflows
+#   9. Repair controller output permissions
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Phase 1: Validation
+# Phase 0 - Normalize role controls
 # -----------------------------------------------------------------------------
 
-- name: Validate SSH role inputs
+- name: SSH | Main | Normalize role controls
+  ansible.builtin.set_fact:
+    ssh_main_ca_enabled: "{{ ssh_ca_enabled | default(true) | bool }}"
+    ssh_main_manage_ca: "{{ ssh_role_manage_ca | default(true) | bool }}"
+    ssh_main_manage_controller_materials: "{{ ssh_role_manage_controller_materials | default(true) | bool }}"
+    ssh_main_manage_user_materials: "{{ ssh_role_manage_user_materials | default(true) | bool }}"
+    ssh_main_manage_user_authorized_keys: "{{ ssh_role_manage_user_authorized_keys |
+      default(ssh_role_manage_user_materials | default(true)) | bool }}"
+    ssh_main_manage_user_principals: "{{ ssh_role_manage_user_principals | default(true) | bool }}"
+    ssh_main_manage_user_client_config: "{{ ssh_role_manage_user_client_config | default(true) | bool }}"
+    ssh_main_manage_user_known_hosts: "{{ ssh_role_manage_user_known_hosts | default(true) | bool }}"
+    ssh_main_manage_daemon: "{{ ssh_role_manage_daemon | default(true) | bool }}"
+    ssh_main_manage_proxmox: "{{ ssh_role_manage_proxmox | default(true) | bool }}"
+    ssh_main_use_proxmox_specialized_daemon_config: "{{ ssh_use_proxmox_specialized_daemon_config | default(true) | bool }}"
+    ssh_main_manage_proxmox_ca: "{{ ssh_role_manage_proxmox_ca | default(true) | bool }}"
+    ssh_main_manage_proxmox_host_certificates: "{{
+      ssh_role_manage_proxmox_host_certificates |
+      default(ssh_host_certificates_enabled | default(true)) | bool }}"
+    ssh_main_manage_proxmox_known_hosts: "{{ ssh_role_manage_proxmox_known_hosts | default(true) | bool }}"
+    ssh_main_manage_proxmox_authorized_keys: "{{ ssh_role_manage_proxmox_authorized_keys | default(true) | bool }}"
+    ssh_main_manage_proxmox_principals: "{{ ssh_role_manage_proxmox_principals | default(true) | bool }}"
+    ssh_main_fix_output_permissions: "{{ ssh_role_fix_output_permissions | default(true) | bool }}"
+    ssh_main_flush_handlers: "{{ ssh_role_flush_handlers | default(false) | bool }}"
+    ssh_main_is_proxmox: "{{ 'proxmox' in group_names }}"
+    ssh_main_users_count: "{{ ssh_role_users | default([]) | length }}"
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-main
+
+- name: SSH | Main | Show selected orchestration mode
+  ansible.builtin.debug:
+    msg:
+      - "SSH role orchestration starting."
+      - "Host: {{ inventory_hostname }}"
+      - "Proxmox host: {{ ssh_main_is_proxmox | bool }}"
+      - "CA enabled: {{ ssh_main_ca_enabled | bool }}"
+      - "Controller materials: {{ ssh_main_manage_controller_materials | bool }}"
+      - "User materials: {{ ssh_main_manage_user_materials | bool }}"
+      - "User count: {{ ssh_main_users_count }}"
+      - "Generic daemon config: {{ ssh_main_manage_daemon | bool and (not
+        ssh_main_is_proxmox or not
+        ssh_main_use_proxmox_specialized_daemon_config) }}"
+      - "Proxmox specialized config: {{ ssh_main_is_proxmox | bool and
+        ssh_main_manage_proxmox | bool and
+        ssh_main_use_proxmox_specialized_daemon_config | bool }}"
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-main
+    - ssh-summary
+
+# -----------------------------------------------------------------------------
+# Phase 1 - Validation
+# -----------------------------------------------------------------------------
+
+- name: SSH | Main | Validate SSH role inputs
   ansible.builtin.import_tasks: base/validate.yaml
+  tags:
+    - ssh
+    - ssh-validate
 
 # -----------------------------------------------------------------------------
-# Phase 2: Detect existing SSH materials (controller-side)
+# Phase 2 - Controller-side CA and user key material
 # -----------------------------------------------------------------------------
 
-- name: Check for existing SSH user private keys (controller)
-  ansible.builtin.stat:
-    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
-  loop: "{{ ssh_role_users }}"
-  delegate_to: localhost
-  register: ssh__user_privkey_stats
-  changed_when: false
-  run_once: true
-  when:
-    - ssh_role_manage_user_materials | bool
-    - ssh_role_users | length > 0
-
-- name: Check for existing SSH user public keys (controller)
-  ansible.builtin.stat:
-    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
-  loop: "{{ ssh_role_users }}"
-  delegate_to: localhost
-  register: ssh__user_pubkey_stats
-  changed_when: false
-  run_once: true
-  when:
-    - ssh_role_manage_user_materials | bool
-    - ssh_role_users | length > 0
-
-- name: Determine if SSH user key generation is required
-  ansible.builtin.set_fact:
-    ssh__generate_user_keys: >-
-      {{
-        (
-          (ssh__user_privkey_stats.results | selectattr('stat.exists','equalto',false) | list | length) > 0
-        )
-        or
-        (
-          (ssh__user_pubkey_stats.results | selectattr('stat.exists','equalto',false) | list | length) > 0
-        )
-      }}
-  run_once: true
-  changed_when: false
-  when:
-    - ssh_role_manage_user_materials | bool
-    - ssh_role_users | length > 0
-
-- name: Default user key generation flag when user materials are disabled
-  ansible.builtin.set_fact:
-    ssh__generate_user_keys: false
-  run_once: true
-  changed_when: false
-  when: not (ssh_role_manage_user_materials | bool and ssh_role_users | length > 0)
-
-# -----------------------------------------------------------------------------
-# Phase 2A: Canonical CA paths + candidate resolution (controller-side)
-# -----------------------------------------------------------------------------
-
-- name: Set canonical CA paths (controller)
-  ansible.builtin.set_fact:
-    ssh__ca_canonical_dir: "{{ ssh_ca_output_dir }}"
-    ssh__ca_canonical_pub: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
-    ssh__ca_canonical_priv: "{{ ssh_ca_output_dir }}/ssh_ca"
-    # Common alternate directory naming (dash vs underscore) if your repo ever used both
-    ssh__ca_alt_dir: "{{ (ssh_ca_output_dir | regex_replace('/ssh-ca$', '/ssh_ca')) }}"
-  run_once: true
-  changed_when: false
-
-- name: Read configured CA pub candidates (safe)
-  ansible.builtin.set_fact:
-    ssh__controller_ca_pub_candidates: "{{ ssh.controller.ca_pub_candidates | default([]) }}"
-  run_once: true
-  changed_when: false
-
-- name: Build SSH CA pubkey candidate list (canonical-first)
-  ansible.builtin.set_fact:
-    ssh__ca_pub_candidates: >-
-      {{
-        (
-          [ssh__ca_canonical_pub]
-          + (
-              ([ssh__ca_alt_dir ~ '/ssh_ca.pub'] if (ssh__ca_alt_dir | length > 0 and ssh__ca_alt_dir != ssh__ca_canonical_dir) else [])
-            )
-          + ssh__controller_ca_pub_candidates
-        )
-        | map('string')
-        | unique
-        | list
-      }}
-  run_once: true
-  changed_when: false
-
-- name: Build SSH CA keypair candidate paths
-  ansible.builtin.set_fact:
-    ssh__ca_keypair_candidates: >-
-      {%- set out = [] -%}
-      {%- for pub in ssh__ca_pub_candidates -%}
-      {%- set _ = out.append({'pub': pub, 'priv': (pub | regex_replace('\\.pub$', ''))}) -%}
-      {%- endfor -%}
-      {{ out }}
-  run_once: true
-  changed_when: false
-
-# IMPORTANT:
-# Do NOT use stat(follow=true) on paths that may contain symlink cycles (ELOOP).
-# Instead, probe usability with shell `test -f/-r`, and treat failures as "not usable".
-
-- name: Probe CA keypair candidates for usability (controller) (ELOOP-safe)
-  ansible.builtin.shell: |
-    set -euo pipefail
-    pub="{{ item.pub }}"
-    priv="{{ item.priv }}"
-    test -f "$pub" -a -r "$pub"
-    test -f "$priv" -a -r "$priv"
-  args:
-    executable: /bin/bash
-  loop: "{{ ssh__ca_keypair_candidates }}"
-  delegate_to: localhost
-  register: ssh__ca_candidate_checks
-  failed_when: false
-  changed_when: false
-  run_once: true
-  when: ssh_ca_enabled | default(false) | bool
-
-- name: Initialize CA source selection (controller)
-  ansible.builtin.set_fact:
-    ssh__ca_source_pub: ""
-    ssh__ca_source_priv: ""
-    ssh__ca_source_dir: ""
-  run_once: true
-  changed_when: false
-
-- name: Select first usable CA keypair candidate (controller)
-  ansible.builtin.set_fact:
-    ssh__ca_source_pub: "{{ item.item.pub }}"
-    ssh__ca_source_priv: "{{ item.item.priv }}"
-    ssh__ca_source_dir: "{{ item.item.pub | dirname }}"
-  loop: "{{ ssh__ca_candidate_checks.results | default([]) }}"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__ca_source_pub | length == 0
-    - item.rc is defined
-    - item.rc == 0
-  loop_control:
-    label: "{{ item.item.pub }}"
-  delegate_to: localhost
-  run_once: true
-  changed_when: false
-
-- name: Ensure canonical CA directory exists (controller)
-  ansible.builtin.file:
-    path: "{{ ssh__ca_canonical_dir }}"
-    state: directory
-    owner: "{{ ssh_controller_local_user }}"
-    group: "{{ ssh_controller_local_group }}"
-    mode: "0700"
-  when: ssh_ca_enabled | default(false) | bool
-  delegate_to: localhost
-  become: true
-  run_once: true
-
-- name: Normalize canonical CA directory ownership (controller)
-  ansible.builtin.file:
-    path: "{{ ssh__ca_canonical_dir }}"
-    state: directory
-    owner: "{{ ssh_controller_local_user }}"
-    group: "{{ ssh_controller_local_group }}"
-    mode: "0700"
-  when: ssh_ca_enabled | default(false) | bool
-  delegate_to: localhost
-  become: true
-  run_once: true
-
-- name: Determine if SSH CA generation is required
-  ansible.builtin.set_fact:
-    ssh__generate_ca: >-
-      {{
-        (ssh_ca_enabled | default(false) | bool)
-        and (ssh__ca_source_pub | length == 0)
-      }}
-  run_once: true
-  changed_when: false
-
-# If canonical CA paths are symlinks (including loops), remove them so we can copy/generate cleanly.
-- name: Stat canonical CA public key (no-follow) (controller)
-  ansible.builtin.stat:
-    path: "{{ ssh__ca_canonical_pub }}"
-    follow: false
-  when: ssh_ca_enabled | default(false) | bool
-  delegate_to: localhost
-  register: ssh__ca_canonical_pub_lstat
-  failed_when: false
-  changed_when: false
-  run_once: true
-
-- name: Stat canonical CA private key (no-follow) (controller)
-  ansible.builtin.stat:
-    path: "{{ ssh__ca_canonical_priv }}"
-    follow: false
-  when: ssh_ca_enabled | default(false) | bool
-  delegate_to: localhost
-  register: ssh__ca_canonical_priv_lstat
-  failed_when: false
-  changed_when: false
-  run_once: true
-
-- name: Remove canonical CA public key if it is a symlink (controller)
-  ansible.builtin.file:
-    path: "{{ ssh__ca_canonical_pub }}"
-    state: absent
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__ca_canonical_pub_lstat.stat is defined
-    - ssh__ca_canonical_pub_lstat.stat.exists | default(false) | bool
-    - ssh__ca_canonical_pub_lstat.stat.islnk | default(false) | bool
-  delegate_to: localhost
-  become: true
-  run_once: true
-
-- name: Remove canonical CA private key if it is a symlink (controller)
-  ansible.builtin.file:
-    path: "{{ ssh__ca_canonical_priv }}"
-    state: absent
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__ca_canonical_priv_lstat.stat is defined
-    - ssh__ca_canonical_priv_lstat.stat.exists | default(false) | bool
-    - ssh__ca_canonical_priv_lstat.stat.islnk | default(false) | bool
-  delegate_to: localhost
-  become: true
-  run_once: true
-
-# Converge onto canonical by COPYING (not linking) to prevent symlink cycles.
-- name: Converge CA into canonical path (copy public key)
-  ansible.builtin.copy:
-    src: "{{ ssh__ca_source_pub }}"
-    dest: "{{ ssh__ca_canonical_pub }}"
-    remote_src: true
-    owner: "{{ ssh_controller_local_user }}"
-    group: "{{ ssh_controller_local_group }}"
-    mode: "0644"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__generate_ca | bool == false
-    - ssh__ca_source_pub | length > 0
-    - ssh__ca_source_pub != ssh__ca_canonical_pub
-  delegate_to: localhost
-  become: true
-  run_once: true
-
-- name: Converge CA into canonical path (copy private key)
-  ansible.builtin.copy:
-    src: "{{ ssh__ca_source_priv }}"
-    dest: "{{ ssh__ca_canonical_priv }}"
-    remote_src: true
-    owner: "{{ ssh_controller_local_user }}"
-    group: "{{ ssh_controller_local_group }}"
-    mode: "0600"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__generate_ca | bool == false
-    - ssh__ca_source_priv | length > 0
-    - ssh__ca_source_priv != ssh__ca_canonical_priv
-  delegate_to: localhost
-  become: true
-  run_once: true
-
-# Generate CA directly into canonical dir if none exists anywhere.
-- name: Generate or repair SSH Certificate Authority (controller)
+- name: SSH | Main | Generate SSH Certificate Authority
   ansible.builtin.import_tasks: base/generate-ca.yaml
   when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__generate_ca | bool
+    - ssh_main_manage_controller_materials | bool
+    - ssh_main_manage_ca | bool
+    - ssh_main_ca_enabled | bool
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
 
-# After generation (or converge), define resolved CA paths to ALWAYS be canonical.
-- name: Set resolved CA paths to canonical (controller)
-  ansible.builtin.set_fact:
-    ssh__ca_resolved_pub: "{{ ssh__ca_canonical_pub }}"
-    ssh__ca_resolved_priv: "{{ ssh__ca_canonical_priv }}"
-    ssh__ca_resolved_dir: "{{ ssh__ca_canonical_dir }}"
-    ssh_ca_output_dir: "{{ ssh__ca_canonical_dir }}"
-  when: ssh_ca_enabled | default(false) | bool
-  run_once: true
-  changed_when: false
-
-# Hardening: make sure CA pub is readable by the user running ansible (lookup('file') safety).
-- name: Normalize CA public key permissions (controller)
-  ansible.builtin.file:
-    path: "{{ ssh__ca_resolved_pub }}"
-    state: file
-    owner: "{{ ssh_controller_local_user }}"
-    group: "{{ ssh_controller_local_group }}"
-    mode: "0644"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__ca_resolved_pub | length > 0
-  delegate_to: localhost
-  become: true
-  run_once: true
-
-- name: Normalize CA private key permissions (controller)
-  ansible.builtin.file:
-    path: "{{ ssh__ca_resolved_priv }}"
-    state: file
-    owner: "{{ ssh_controller_local_user }}"
-    group: "{{ ssh_controller_local_group }}"
-    mode: "0600"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__ca_resolved_priv | length > 0
-  delegate_to: localhost
-  become: true
-  run_once: true
-
-# Optional: ensure configured candidate paths exist as symlinks -> canonical (WITHOUT cycles).
-# Only replace if missing OR already a symlink (including looped symlinks). Do not clobber real files.
-
-- name: Build CA pub symlink destinations (non-canonical)
-  ansible.builtin.set_fact:
-    ssh__ca_pub_link_dests: >-
-      {{
-        (
-          (
-            ([ssh__ca_alt_dir ~ '/ssh_ca.pub'] if (ssh__ca_alt_dir | length > 0 and ssh__ca_alt_dir != ssh__ca_canonical_dir) else [])
-            + (ssh__controller_ca_pub_candidates | default([]))
-          )
-          | map('string')
-          | unique
-          | reject('equalto', ssh__ca_canonical_pub)
-          | list
-        )
-      }}
-  when: ssh_ca_enabled | default(false) | bool
-  run_once: true
-  changed_when: false
-
-- name: Ensure configured CA candidate directories exist (controller)
-  ansible.builtin.file:
-    path: "{{ item | dirname }}"
-    state: directory
-    mode: "0755"
-  loop: "{{ ssh__ca_pub_link_dests | default([]) }}"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - (ssh__ca_pub_link_dests | default([]) | length) > 0
-  delegate_to: localhost
-  run_once: true
-
-- name: Lstat configured CA public key candidates (no-follow) (controller)
-  ansible.builtin.stat:
-    path: "{{ item }}"
-    follow: false
-  loop: "{{ ssh__ca_pub_link_dests | default([]) }}"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - (ssh__ca_pub_link_dests | default([]) | length) > 0
-  delegate_to: localhost
-  register: ssh__ca_pub_link_lstats
-  failed_when: false
-  changed_when: false
-  run_once: true
-
-- name: Ensure configured CA public key candidates exist (symlink -> canonical)
-  ansible.builtin.file:
-    src: "{{ ssh__ca_resolved_pub }}"
-    dest: "{{ item.item }}"
-    state: link
-    force: true
-  loop: "{{ ssh__ca_pub_link_lstats.results | default([]) }}"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__ca_resolved_pub | length > 0
-    - item.stat is defined
-    - (
-        (item.stat.exists | default(false) | bool == false)
-        or
-        (item.stat.islnk | default(false) | bool)
-      )
-  delegate_to: localhost
-  run_once: true
-
-- name: Lstat configured CA private key candidates (no-follow) (controller)
-  ansible.builtin.stat:
-    path: "{{ (item | regex_replace('\\.pub$', '')) }}"
-    follow: false
-  loop: "{{ ssh__ca_pub_link_dests | default([]) }}"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - (ssh__ca_pub_link_dests | default([]) | length) > 0
-  delegate_to: localhost
-  register: ssh__ca_priv_link_lstats
-  failed_when: false
-  changed_when: false
-  run_once: true
-
-- name: Ensure configured CA private key candidates exist (symlink -> canonical)
-  ansible.builtin.file:
-    src: "{{ ssh__ca_resolved_priv }}"
-    dest: "{{ (item.item | regex_replace('\\.pub$', '')) }}"
-    state: link
-    force: true
-  loop: "{{ ssh__ca_priv_link_lstats.results | default([]) }}"
-  when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__ca_resolved_priv | length > 0
-    - item.stat is defined
-    - (
-        (item.stat.exists | default(false) | bool == false)
-        or
-        (item.stat.islnk | default(false) | bool)
-      )
-  delegate_to: localhost
-  run_once: true
-
-# -----------------------------------------------------------------------------
-# Phase 2B: Local SSH user key generation (conditional)
-# -----------------------------------------------------------------------------
-
-- name: Generate SSH user keys (controller)
+- name: SSH | Main | Generate SSH user key material
   ansible.builtin.import_tasks: base/generate-keys.yaml
-  when: ssh__generate_user_keys | bool
-
-# --- SSH user certificates ---
-
-- name: Check for existing SSH user certificates (controller)
-  ansible.builtin.stat:
-    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}-cert.pub"
-  loop: "{{ ssh_role_users }}"
-  delegate_to: localhost
-  register: ssh__user_cert_stats
-  changed_when: false
-  run_once: true
   when:
-    - ssh_role_manage_user_materials | bool
-    - ssh_role_users | length > 0
+    - ssh_main_manage_controller_materials | bool
+    - ssh_main_manage_user_materials | bool
+    - ssh_main_users_count | int > 0
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
 
-- name: Determine if SSH user cert signing is required
-  ansible.builtin.set_fact:
-    ssh__sign_user_certs: >-
-      {{
-        (ssh__user_cert_stats.results
-          | selectattr('stat.exists', 'equalto', false)
-          | list
-          | length > 0)
-        or (ssh_ca_force_resign | default(false) | bool)
-        or (ssh__generate_ca | bool)
-      }}
-  run_once: true
-  changed_when: false
-  when:
-    - ssh_role_manage_user_materials | bool
-    - ssh_role_users | length > 0
-
-- name: Default user certificate signing flag when user materials are disabled
-  ansible.builtin.set_fact:
-    ssh__sign_user_certs: false
-  run_once: true
-  changed_when: false
-  when: not (ssh_role_manage_user_materials | bool and ssh_role_users | length > 0)
-
-- name: Sign SSH user keys with CA (controller)
+- name: SSH | Main | Sign SSH user keys with CA
   ansible.builtin.import_tasks: base/sign.yaml
   when:
-    - ssh_ca_enabled | default(false) | bool
-    - ssh__sign_user_certs | bool
+    - ssh_main_manage_controller_materials | bool
+    - ssh_main_manage_user_materials | bool
+    - ssh_main_ca_enabled | bool
+    - ssh_main_users_count | int > 0
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
 
 # -----------------------------------------------------------------------------
-# Phase 3: User-level SSH deployment
+# Phase 3 - Resolve remote user homes
 # -----------------------------------------------------------------------------
 
-- name: User SSH configuration
+- name: SSH | Main | Resolve managed user home directories
+  ansible.builtin.import_tasks: base/resolve-homes.yaml
   when:
-    - ssh_role_manage_user_materials | bool
-    - ssh_role_users | length > 0
-  block:
-
-    - name: Install authorized_keys for users
-      ansible.builtin.import_tasks: users/copy-keys.yaml
-
-    - name: Install AuthorizedPrincipals files for users
-      ansible.builtin.import_tasks: users/configure-principals.yaml
-      when: ssh_ca_enabled | default(false) | bool
-
-    - name: Install SSH client config for users
-      ansible.builtin.import_tasks: users/copy-config.yaml
-
-    - name: Install user known_hosts
-      ansible.builtin.import_tasks: users/copy-known-hosts.yaml
+    - ssh_main_users_count | int > 0
+    - >-
+      ssh_main_manage_user_authorized_keys | bool or
+      ssh_main_manage_user_principals | bool or
+      ssh_main_manage_user_client_config | bool or
+      ssh_main_manage_user_known_hosts | bool
+  tags:
+    - ssh
+    - ssh-homes
 
 # -----------------------------------------------------------------------------
-# Phase 4: System / daemon SSH configuration
+# Phase 4 - User-level SSH deployment
 # -----------------------------------------------------------------------------
 
-- name: Pre-stage root certificate principals for Proxmox before sshd restart
-  ansible.builtin.import_tasks: proxmox/ensure-ssh-works.yaml
+- name: SSH | Main | Install authorized_keys for managed users
+  ansible.builtin.import_tasks: users/copy-keys.yaml
   when:
-    - "'proxmox' in group_names"
-    - ssh_ca_enabled | default(false) | bool
+    - ssh_main_manage_user_authorized_keys | bool
+    - ssh_main_users_count | int > 0
+  tags:
+    - ssh
+    - ssh-copy-keys
+    - ssh-authorized-keys
 
-- name: Configure SSH daemon (generic)
+- name: SSH | Main | Install AuthorizedPrincipalsFile entries for managed users
+  ansible.builtin.import_tasks: users/configure-principals.yaml
+  when:
+    - ssh_main_manage_user_principals | bool
+    - ssh_main_ca_enabled | bool
+    - ssh_main_users_count | int > 0
+  tags:
+    - ssh
+    - ssh-principals
+
+- name: SSH | Main | Install SSH client config for managed users
+  ansible.builtin.import_tasks: users/copy-config.yaml
+  when:
+    - ssh_main_manage_user_client_config | bool
+    - ssh_main_users_count | int > 0
+  tags:
+    - ssh
+    - ssh-client-config
+
+- name: SSH | Main | Install known_hosts for managed users
+  ansible.builtin.import_tasks: users/copy-known-hosts.yaml
+  when:
+    - ssh_main_manage_user_known_hosts | bool
+    - ssh_main_users_count | int > 0
+  tags:
+    - ssh
+    - ssh-known-hosts
+
+# -----------------------------------------------------------------------------
+# Phase 5 - Generic OpenSSH daemon configuration
+# -----------------------------------------------------------------------------
+# Proxmox hosts normally use the specialized proxmox/configure-ssh.yaml path.
+# Non-Proxmox hosts use base/configure.yaml.
+# Set ssh_use_proxmox_specialized_daemon_config=false to force generic daemon
+# configuration on Proxmox too.
+# -----------------------------------------------------------------------------
+
+- name: SSH | Main | Configure generic OpenSSH daemon
   ansible.builtin.import_tasks: base/configure.yaml
-
-- name: Fix SSH output permissions
-  ansible.builtin.import_tasks: base/fix-permissions.yaml
+  when:
+    - ssh_main_manage_daemon | bool
+    - not (ssh_main_is_proxmox | bool and
+      ssh_main_use_proxmox_specialized_daemon_config | bool)
+  tags:
+    - ssh
+    - ssh-configure
+    - ssh-server
 
 # -----------------------------------------------------------------------------
-# Phase 5: Proxmox-specific SSH configuration
+# Phase 6 - Proxmox-specific SSH configuration
 # -----------------------------------------------------------------------------
 
-- name: Proxmox SSH configuration
-  when: "'proxmox' in group_names"
+- name: SSH | Main | Run Proxmox-specific SSH workflow
+  when:
+    - ssh_main_is_proxmox | bool
+    - ssh_main_manage_proxmox | bool
+  tags:
+    - ssh
+    - ssh-proxmox
   block:
 
-    - name: Copy SSH Certificate Authority files to Proxmox node
+    - name: SSH | Main | Copy SSH CA trust material to Proxmox node
       ansible.builtin.import_tasks: proxmox/copy-ca.yaml
+      when:
+        - ssh_main_ca_enabled | bool
+        - ssh_main_manage_proxmox_ca | bool
+      tags:
+        - ssh
+        - ssh-proxmox
+        - ssh-ca
+        - ssh-copy-ca
 
-    - name: Sign Proxmox host SSH keys with CA
+    - name: SSH | Main | Sign Proxmox SSH host keys with CA
       ansible.builtin.import_tasks: proxmox/sign-host-keys.yaml
-      when: ssh_ca_enabled | default(false) | bool
+      when:
+        - ssh_main_ca_enabled | bool
+        - ssh_main_manage_proxmox_host_certificates | bool
+      tags:
+        - ssh
+        - ssh-proxmox
+        - ssh-host-cert
 
-    - name: Create Proxmox known_hosts entries
+    - name: SSH | Main | Create Proxmox root known_hosts
       ansible.builtin.import_tasks: proxmox/create-known-hosts.yaml
+      when:
+        - ssh_main_ca_enabled | bool
+        - ssh_main_manage_proxmox_known_hosts | bool
+      tags:
+        - ssh
+        - ssh-proxmox
+        - ssh-known-hosts
 
-    - name: Ensure SSH CA-based user cert auth works for root
+    - name: SSH | Main | Create Proxmox root authorized_keys fallback
+      ansible.builtin.import_tasks: proxmox/create-ssh-authorized-keys.yaml
+      when:
+        - ssh_main_manage_proxmox_authorized_keys | bool
+      tags:
+        - ssh
+        - ssh-proxmox
+        - ssh-authorized-keys
+
+    - name: SSH | Main | Ensure Proxmox certificate principals are usable
       ansible.builtin.import_tasks: proxmox/ensure-ssh-works.yaml
+      when:
+        - ssh_main_ca_enabled | bool
+        - ssh_main_manage_proxmox_principals | bool
+      tags:
+        - ssh
+        - ssh-proxmox
+        - ssh-principals
+        - ssh-ensure-works
 
-    - name: Configure Proxmox SSH daemon
+    - name: SSH | Main | Configure Proxmox OpenSSH daemon
       ansible.builtin.import_tasks: proxmox/configure-ssh.yaml
+      when:
+        - ssh_main_manage_daemon | bool
+        - ssh_main_use_proxmox_specialized_daemon_config | bool
+      tags:
+        - ssh
+        - ssh-proxmox
+        - ssh-configure
+        - ssh-server
+
+# -----------------------------------------------------------------------------
+# Phase 7 - Repair controller output permissions
+# -----------------------------------------------------------------------------
+
+- name: SSH | Main | Fix SSH output permissions on controller
+  ansible.builtin.import_tasks: base/fix-permissions.yaml
+  when:
+    - ssh_main_fix_output_permissions | bool
+    - ssh_main_manage_controller_materials | bool
+  tags:
+    - ssh
+    - ssh-permissions
+
+# -----------------------------------------------------------------------------
+# Phase 8 - Optional final handler flush
+# -----------------------------------------------------------------------------
+
+- name: SSH | Main | Flush SSH handlers
+  ansible.builtin.meta: flush_handlers
+  when: ssh_main_flush_handlers | bool
+  tags:
+    - ssh
+    - ssh-handlers
+
+# -----------------------------------------------------------------------------
+# Phase 9 - Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Main | Show SSH role completion summary
+  ansible.builtin.debug:
+    msg:
+      - "SSH role orchestration complete."
+      - "Host: {{ inventory_hostname }}"
+      - "Proxmox host: {{ ssh_main_is_proxmox | bool }}"
+      - "CA enabled: {{ ssh_main_ca_enabled | bool }}"
+      - "Managed users: {{ ssh_main_users_count }}"
+      - "Controller materials managed: {{ ssh_main_manage_controller_materials |
+        bool }}"
+      - "User materials managed: {{ ssh_main_manage_user_materials | bool }}"
+      - "Daemon managed: {{ ssh_main_manage_daemon | bool }}"
+      - "Proxmox workflow managed: {{ ssh_main_is_proxmox | bool and
+        ssh_main_manage_proxmox | bool }}"
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-summary

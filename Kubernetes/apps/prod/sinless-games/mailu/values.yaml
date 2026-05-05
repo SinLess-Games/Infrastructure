@@ -84,7 +84,7 @@ ingress:
     gethomepage.dev/group: Platform
     gethomepage.dev/name: Mailu
     gethomepage.dev/icon: mailu.png
-    gethomepage.dev/description: Mail admin"
+    gethomepage.dev/description: "Mail admin"
     gethomepage.dev/href: https://mail.sinlessgames.com
 
     security.sinlessgames.io/exposure: public
@@ -160,25 +160,30 @@ admin:
   updateStrategy:
     type: Recreate
 
-  # Mailu admin performs a DNSSEC validation check at startup. CoreDNS does not
-  # provide the AD flag here, so point only admin at validating resolvers.
-  dnsPolicy: None
-  dnsConfig:
-    nameservers:
-      - 1.1.1.1
-      - 1.0.0.1
+  # Keep cluster DNS enabled.
+  # Mailu components must be able to resolve internal Kubernetes services.
+  # If DNSSEC validation is still needed, solve it at CoreDNS/upstream DNS
+  # instead of bypassing Kubernetes DNS inside the admin pod.
+  dnsPolicy: ClusterFirst
 
   extraEnvVars:
+    - name: ADMIN_ADDRESS
+      value: mailu-admin.sinless-games.svc.cluster.local
     - name: REDIS_ADDRESS
-      value: 10.43.80.67
+      value: mailu-redis-master.sinless-games.svc.cluster.local
     - name: RATELIMIT_STORAGE_URL
-      value: redis://10.43.80.67:6379/2
+      value: redis://mailu-redis-master.sinless-games.svc.cluster.local:6379/2
     - name: QUOTA_STORAGE_URL
-      value: redis://10.43.80.67:6379/1
+      value: redis://mailu-redis-master.sinless-games.svc.cluster.local:6379/1
+
+  podLabels:
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/component: mail-admin
 
   podAnnotations:
     sidecar.istio.io/inject: "false"
     security.sinlessgames.io/istio-sidecar: "disabled-mail-admin"
+    security.sinlessgames.io/reason: "Mailu internal services use their own protocol and service-discovery wiring."
 
   podSecurityContext:
     enabled: true
@@ -199,7 +204,7 @@ admin:
 
   startupProbe:
     enabled: true
-    failureThreshold: 30
+    failureThreshold: 60
     initialDelaySeconds: 10
     periodSeconds: 10
     successThreshold: 1
@@ -208,14 +213,14 @@ admin:
   livenessProbe:
     enabled: true
     failureThreshold: 6
-    initialDelaySeconds: 90
+    initialDelaySeconds: 120
     periodSeconds: 20
     successThreshold: 1
     timeoutSeconds: 5
 
   readinessProbe:
     enabled: true
-    failureThreshold: 12
+    failureThreshold: 18
     initialDelaySeconds: 30
     periodSeconds: 10
     successThreshold: 1
@@ -235,6 +240,10 @@ postfix:
 
   updateStrategy:
     type: Recreate
+
+  podLabels:
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/component: mail-smtp
 
   podAnnotations:
     sidecar.istio.io/inject: "false"
@@ -272,6 +281,10 @@ dovecot:
   updateStrategy:
     type: Recreate
 
+  podLabels:
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/component: mail-imap
+
   podAnnotations:
     sidecar.istio.io/inject: "false"
     security.sinlessgames.io/istio-sidecar: "disabled-mail-internal"
@@ -308,9 +321,24 @@ rspamd:
   updateStrategy:
     type: Recreate
 
+  # Rspamd waits on Mailu Admin during startup. These explicit DNS names avoid
+  # brittle ClusterIP references and make the dependency path obvious.
+  extraEnvVars:
+    - name: ADMIN_ADDRESS
+      value: mailu-admin.sinless-games.svc.cluster.local
+    - name: REDIS_ADDRESS
+      value: mailu-redis-master.sinless-games.svc.cluster.local
+    - name: ANTISPAM_ADDRESS
+      value: mailu-rspamd.sinless-games.svc.cluster.local
+
+  podLabels:
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/component: mail-antispam
+
   podAnnotations:
     sidecar.istio.io/inject: "false"
     security.sinlessgames.io/istio-sidecar: "disabled-mail-internal"
+    security.sinlessgames.io/reason: "Rspamd must directly reach Mailu Admin during startup."
 
   podSecurityContext:
     enabled: true
@@ -327,6 +355,30 @@ rspamd:
       drop:
         - ALL
 
+  startupProbe:
+    enabled: true
+    failureThreshold: 90
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 5
+
+  livenessProbe:
+    enabled: true
+    failureThreshold: 6
+    initialDelaySeconds: 180
+    periodSeconds: 20
+    successThreshold: 1
+    timeoutSeconds: 5
+
+  readinessProbe:
+    enabled: true
+    failureThreshold: 30
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 5
+
   resources:
     requests:
       cpu: 100m
@@ -336,6 +388,20 @@ rspamd:
       memory: 1536Mi
 
 clamav:
+  nodeSelector:
+    kubernetes.io/hostname: rke2-prod-wk-02
+
+  updateStrategy:
+    type: Recreate
+
+  podLabels:
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/component: mail-antivirus
+
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+    security.sinlessgames.io/istio-sidecar: "disabled-mail-internal"
+
   podSecurityContext:
     enabled: true
     fsGroup: 1001
@@ -369,6 +435,20 @@ clamav:
       memory: 2Gi
 
 oletools:
+  nodeSelector:
+    kubernetes.io/hostname: rke2-prod-wk-02
+
+  updateStrategy:
+    type: Recreate
+
+  podLabels:
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/component: mail-document-scanner
+
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+    security.sinlessgames.io/istio-sidecar: "disabled-mail-internal"
+
   resources:
     requests:
       cpu: 50m
@@ -378,6 +458,20 @@ oletools:
       memory: 512Mi
 
 tika:
+  nodeSelector:
+    kubernetes.io/hostname: rke2-prod-wk-02
+
+  updateStrategy:
+    type: Recreate
+
+  podLabels:
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/component: mail-text-extraction
+
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+    security.sinlessgames.io/istio-sidecar: "disabled-mail-internal"
+
   resources:
     requests:
       cpu: 100m
@@ -389,13 +483,27 @@ tika:
 redis:
   enabled: true
   architecture: standalone
+
   auth:
     enabled: false
+
   master:
+    nodeSelector:
+      kubernetes.io/hostname: rke2-prod-wk-02
+
     persistence:
       enabled: true
       storageClass: longhorn
       size: 8Gi
+
+    podLabels:
+      security.sinlessgames.io/exposure: cluster-internal
+      security.sinlessgames.io/component: mail-redis
+
+    podAnnotations:
+      sidecar.istio.io/inject: "false"
+      security.sinlessgames.io/istio-sidecar: "disabled-mail-internal"
+
     resources:
       requests:
         cpu: 50m

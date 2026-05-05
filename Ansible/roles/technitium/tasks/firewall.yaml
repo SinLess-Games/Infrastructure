@@ -1,101 +1,560 @@
 ---
 # =============================================================================
-# Technitium DNS – Firewall (LAN-only, not public)
+# Technitium DNS - Firewall
 # -----------------------------------------------------------------------------
 # Purpose:
-#   - Restrict inbound access to Technitium (Docker-published ports) to ONLY
-#     the CIDRs you allow.
-#   - Prevent accidental exposure of DNS/Web UI beyond your trusted networks.
+#   - Restrict Technitium Docker-published ports to trusted internal networks.
+#   - Prevent accidental public exposure of DNS, Web UI, API, cluster HTTPS,
+#     encrypted DNS listeners, and optional DHCP listeners.
 #
 # Why DOCKER-USER:
-#   - When Technitium runs in Docker, published ports are handled via iptables/NAT.
+#   - Docker-published ports are handled through Docker NAT rules.
 #   - Host firewalls like UFW may not filter published container ports the way
-#     you expect; Docker recommends enforcing allow/deny in the DOCKER-USER chain.
+#     operators expect.
+#   - Docker documents DOCKER-USER as the operator-owned chain for filtering
+#     container traffic before Docker's own accept rules.
 #
-# Variables (define in group_vars/technitium/*.yaml):
-#   technitium_firewall_enabled: true
-#   technitium_firewall_allowed_cidrs:
-#     - "10.10.0.0/16"
-#     - "192.168.0.0/24"
-#   # Optional override; otherwise uses ansible_default_ipv4.interface
-#   technitium_firewall_interface: "eth0"
+# Design:
+#   - Creates a dedicated TECHNITIUM-DOCKER chain.
+#   - Jumps into that chain only for Technitium service ports.
+#   - Does not broadly drop unrelated Docker container traffic.
+#   - Allows trusted sources first.
+#   - Drops only unmatched traffic targeting Technitium service ports.
 #
-# Notes:
-#   - This file does NOT change your system-wide INPUT default policy.
-#   - It focuses on Docker-published ports (DNS 53, UI 5380, etc.) by controlling
-#     forwarded traffic to containers through DOCKER-USER.
+# Companion vars:
+#   - Ansible/group_vars/technitium/firewall.yaml
+#   - Ansible/group_vars/technitium/main.yaml
 # =============================================================================
 
-- name: Firewall | Validate allowlist is defined and non-empty
-  ansible.builtin.assert:
-    that:
-      - technitium_firewall_allowed_cidrs is defined
-      - technitium_firewall_allowed_cidrs is iterable
-      - (technitium_firewall_allowed_cidrs | length) > 0
-    fail_msg: >-
-      technitium_firewall_allowed_cidrs must be a non-empty list of CIDRs
-      to enforce "LAN-only" access (example: ['10.10.0.0/16','192.168.0.0/24']).
+- name: Firewall | Configure Technitium firewall
+  become: true
   when: technitium_firewall_enabled | default(true) | bool
+  block:
+    # -------------------------------------------------------------------------
+    # Facts / validation
+    # -------------------------------------------------------------------------
 
-- name: Firewall | Determine interface used for LAN access
-  ansible.builtin.set_fact:
-    technitium_firewall_interface_effective: >-
-      {{ technitium_firewall_interface | default(ansible_default_ipv4.interface) }}
-  when: technitium_firewall_enabled | default(true) | bool
+    - name: Firewall | Gather facts when default interface is unknown
+      ansible.builtin.setup:
+        gather_subset:
+          - network
+        gather_timeout: 30
+      when: ansible_default_ipv4 is not defined
 
-# ---------------------------------------------------------------------------
-# Ensure DOCKER-USER chain exists (safe even if Docker creates it later)
-# ---------------------------------------------------------------------------
-- name: Firewall | Ensure DOCKER-USER chain exists (IPv4)
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    chain_management: true
-    state: present
-  when: technitium_firewall_enabled | default(true) | bool
+    - name: Firewall | Validate trusted CIDR allowlist is defined and non-empty
+      ansible.builtin.assert:
+        that:
+          - technitium_firewall_allowed_cidrs is defined
+          - technitium_firewall_allowed_cidrs is iterable
+          - technitium_firewall_allowed_cidrs | length > 0
+        fail_msg: >-
+          technitium_firewall_allowed_cidrs must be a non-empty list of trusted
+          internal CIDRs. Refusing to configure firewall without an allowlist.
+        success_msg: "Technitium firewall trusted CIDR allowlist is valid."
 
-# ---------------------------------------------------------------------------
-# Rule order in DOCKER-USER is important:
-#   1) allow established/related
-#   2) allow new inbound from allowlisted CIDRs (on your LAN interface)
-#   3) drop other new inbound on that interface
-# ---------------------------------------------------------------------------
+    - name: Firewall | Normalize firewall defaults
+      ansible.builtin.set_fact:
+        technitium_firewall_interface_effective: >-
+          {{
+            technitium_firewall_interface
+            | default(ansible_default_ipv4.interface | default('eth0'))
+          }}
+        technitium_firewall_dns_allowed_cidrs_effective: >-
+          {{
+            technitium_firewall_dns_allowed_cidrs
+            | default(technitium_firewall_allowed_cidrs)
+            | unique
+            | list
+          }}
+        technitium_firewall_management_allowed_cidrs_effective: >-
+          {{
+            technitium_firewall_management_allowed_cidrs
+            | default(['10.10.10.0/24', '10.10.20.0/24'])
+            | unique
+            | list
+          }}
+        technitium_firewall_automation_allowed_cidrs_effective: >-
+          {{
+            technitium_firewall_automation_allowed_cidrs
+            | default([])
+            | unique
+            | list
+          }}
+        technitium_firewall_cluster_allowed_ips_effective: >-
+          {{
+            technitium_firewall_cluster_allowed_ips
+            | default([])
+            | unique
+            | list
+          }}
+        technitium_firewall_docker_chain: "{{ technitium_firewall_docker_chain | default('TECHNITIUM-DOCKER') }}"
+        technitium_firewall_reset_effective: "{{ technitium_firewall_reset | default(true) | bool }}"
 
-- name: Firewall | DOCKER-USER | Allow established/related
-  ansible.builtin.iptables:
-    table: filter
-    chain: DOCKER-USER
-    ctstate:
-      - RELATED
-      - ESTABLISHED
-    jump: ACCEPT
-    comment: "technitium: allow established/related"
-    state: present
-  when: technitium_firewall_enabled | default(true) | bool
+    - name: Firewall | Normalize service ports
+      ansible.builtin.set_fact:
+        technitium_firewall_port_ssh: "{{ technitium_firewall_ports.ssh | default(22) | int }}"
+        technitium_firewall_port_dns: "{{ technitium_firewall_ports.dns | default(53) | int }}"
+        technitium_firewall_port_http: "{{ technitium_firewall_ports.technitium_http | default(technitium_http_port | default(5380)) | int }}"
+        technitium_firewall_port_https: "{{ technitium_firewall_ports.technitium_https | default(technitium_https_port | default(53443)) | int }}"
+        technitium_firewall_port_dot: "{{ technitium_firewall_ports.dns_over_tls | default(853) | int }}"
+        technitium_firewall_port_doh: "{{ technitium_firewall_ports.dns_over_https | default(443) | int }}"
+        technitium_firewall_port_doq: "{{ technitium_firewall_ports.dns_over_quic | default(853) | int }}"
+        technitium_firewall_port_dhcp_server: "{{ technitium_firewall_ports.dhcp_server | default(67) | int }}"
+        technitium_firewall_port_dhcp_client: "{{ technitium_firewall_ports.dhcp_client | default(68) | int }}"
 
-- name: Firewall | DOCKER-USER | Allow NEW inbound from allowlisted CIDRs (LAN-only)
-  ansible.builtin.iptables:
-    table: filter
-    chain: DOCKER-USER
-    in_interface: "{{ technitium_firewall_interface_effective }}"
-    source: "{{ item }}"
-    ctstate:
-      - NEW
-    jump: ACCEPT
-    comment: "technitium: allow from {{ item }}"
-    state: present
-  loop: "{{ technitium_firewall_allowed_cidrs }}"
-  loop_control:
-    label: "{{ item }}"
-  when: technitium_firewall_enabled | default(true) | bool
+    - name: Firewall | Build effective TCP service ports
+      ansible.builtin.set_fact:
+        technitium_firewall_tcp_ports_effective: >-
+          {{
+            []
+            + (technitium_firewall_allow_dns_tcp | default(true) | bool | ternary([technitium_firewall_port_dns], []))
+            + (technitium_firewall_allow_technitium_http | default(true) | bool | ternary([technitium_firewall_port_http], []))
+            + (
+                (
+                  technitium_firewall_allow_technitium_https | default(true) | bool
+                  or technitium_firewall_allow_cluster_https | default(true) | bool
+                )
+                | ternary([technitium_firewall_port_https], [])
+              )
+            + (technitium_firewall_allow_dot | default(false) | bool | ternary([technitium_firewall_port_dot], []))
+            + (technitium_firewall_allow_doh | default(false) | bool | ternary([technitium_firewall_port_doh], []))
+            | unique
+            | list
+          }}
 
-- name: Firewall | DOCKER-USER | Drop other NEW inbound on LAN interface
-  ansible.builtin.iptables:
-    table: filter
-    chain: DOCKER-USER
-    in_interface: "{{ technitium_firewall_interface_effective }}"
-    ctstate:
-      - NEW
-    jump: DROP
-    comment: "technitium: drop non-allowlisted inbound"
-    state: present
-  when: technitium_firewall_enabled | default(true) | bool
+    - name: Firewall | Build effective UDP service ports
+      ansible.builtin.set_fact:
+        technitium_firewall_udp_ports_effective: >-
+          {{
+            []
+            + (technitium_firewall_allow_dns_udp | default(true) | bool | ternary([technitium_firewall_port_dns], []))
+            + (technitium_firewall_allow_doq | default(false) | bool | ternary([technitium_firewall_port_doq], []))
+            + (
+                technitium_firewall_allow_dhcp | default(false) | bool
+                | ternary([technitium_firewall_port_dhcp_server, technitium_firewall_port_dhcp_client], [])
+              )
+            | unique
+            | list
+          }}
+
+    - name: Firewall | Assert at least one Technitium service port is protected
+      ansible.builtin.assert:
+        that:
+          - technitium_firewall_tcp_ports_effective | length > 0 or technitium_firewall_udp_ports_effective | length > 0
+        fail_msg: "No Technitium firewall service ports are enabled."
+        success_msg: "Technitium firewall service port list is valid."
+
+    # -------------------------------------------------------------------------
+    # Host firewall note
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Warn when host networking is enabled
+      ansible.builtin.debug:
+        msg:
+          - "technitium_use_host_network=true detected."
+          - "DOCKER-USER does not filter host-network containers."
+          - "Host INPUT/UFW rules from os.yaml must protect Technitium ports."
+      when:
+        - technitium_use_host_network | default(false) | bool
+        - technitium_firewall_show_host_network_warning | default(true)
+
+    # -------------------------------------------------------------------------
+    # DOCKER-USER chain setup
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Ensure DOCKER-USER chain exists
+      ansible.builtin.iptables:
+        table: filter
+        chain: DOCKER-USER
+        chain_management: true
+        state: present
+
+    - name: Firewall | Ensure dedicated Technitium Docker chain exists
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        chain_management: true
+        state: present
+
+    - name: Firewall | Flush dedicated Technitium Docker chain when reset is enabled
+      ansible.builtin.command:
+        cmd: "iptables -w -t filter -F {{ technitium_firewall_docker_chain }}"
+      changed_when: true
+      when: technitium_firewall_reset_effective | bool
+
+    - name: Firewall | Allow established and related Docker traffic
+      ansible.builtin.iptables:
+        table: filter
+        chain: DOCKER-USER
+        ctstate:
+          - RELATED
+          - ESTABLISHED
+        jump: ACCEPT
+        comment: "technitium: allow established/related docker traffic"
+        state: present
+
+    # -------------------------------------------------------------------------
+    # Jump only Technitium service ports into the dedicated chain
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | DOCKER-USER | Send Technitium TCP ports to dedicated chain
+      ansible.builtin.iptables:
+        table: filter
+        chain: DOCKER-USER
+        protocol: tcp
+        destination_port: "{{ item }}"
+        jump: "{{ technitium_firewall_docker_chain }}"
+        comment: "technitium: filter tcp/{{ item }}"
+        state: present
+        action: insert
+      loop: "{{ technitium_firewall_tcp_ports_effective }}"
+      loop_control:
+        label: "tcp/{{ item }}"
+
+    - name: Firewall | DOCKER-USER | Send Technitium UDP ports to dedicated chain
+      ansible.builtin.iptables:
+        table: filter
+        chain: DOCKER-USER
+        protocol: udp
+        destination_port: "{{ item }}"
+        jump: "{{ technitium_firewall_docker_chain }}"
+        comment: "technitium: filter udp/{{ item }}"
+        state: present
+        action: insert
+      loop: "{{ technitium_firewall_udp_ports_effective }}"
+      loop_control:
+        label: "udp/{{ item }}"
+
+    # -------------------------------------------------------------------------
+    # Dedicated chain allow rules - DNS
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Technitium chain | Allow UDP DNS from trusted resolver networks
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: udp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_dns }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow udp dns from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_dns_allowed_cidrs_effective }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_firewall_allow_dns_udp | default(true) | bool
+
+    - name: Firewall | Technitium chain | Allow TCP DNS from trusted resolver networks
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: tcp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_dns }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow tcp dns from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_dns_allowed_cidrs_effective }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_firewall_allow_dns_tcp | default(true) | bool
+
+    # -------------------------------------------------------------------------
+    # Dedicated chain allow rules - Technitium Web/API
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Technitium chain | Allow HTTP admin/API from management networks
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: tcp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_http }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow http admin/api from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_management_allowed_cidrs_effective }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_firewall_allow_technitium_http | default(true) | bool
+
+    - name: Firewall | Technitium chain | Allow HTTP API from automation networks
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: tcp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_http }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow http api automation from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_automation_allowed_cidrs_effective }}"
+      loop_control:
+        label: "{{ item }}"
+      when:
+        - technitium_firewall_allow_technitium_http | default(true) | bool
+        - technitium_firewall_automation_allowed_cidrs_effective | length > 0
+
+    - name: Firewall | Technitium chain | Allow HTTPS admin/API from management networks
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: tcp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_https }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow https admin/api from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_management_allowed_cidrs_effective }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_firewall_allow_technitium_https | default(true) | bool
+
+    - name: Firewall | Technitium chain | Allow cluster HTTPS from DNS peer IPs
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: tcp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_https }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow cluster https from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_cluster_allowed_ips_effective }}"
+      loop_control:
+        label: "{{ item }}"
+      when:
+        - technitium_firewall_allow_cluster_https | default(true) | bool
+        - technitium_firewall_cluster_allowed_ips_effective | length > 0
+
+    # -------------------------------------------------------------------------
+    # Dedicated chain allow rules - Optional encrypted DNS
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Technitium chain | Allow DNS-over-TLS from trusted networks
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: tcp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_dot }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow dot from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_dns_allowed_cidrs_effective }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_firewall_allow_dot | default(false) | bool
+
+    - name: Firewall | Technitium chain | Allow DNS-over-HTTPS from trusted networks
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: tcp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_doh }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow doh from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_dns_allowed_cidrs_effective }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_firewall_allow_doh | default(false) | bool
+
+    - name: Firewall | Technitium chain | Allow DNS-over-QUIC from trusted networks
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: udp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_doq }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow doq from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_dns_allowed_cidrs_effective }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_firewall_allow_doq | default(false) | bool
+
+    # -------------------------------------------------------------------------
+    # Dedicated chain allow rules - Optional DHCP
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Technitium chain | Allow DHCP server requests when enabled
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: udp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_dhcp_server }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow dhcp server from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_allowed_cidrs }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_firewall_allow_dhcp | default(false) | bool
+
+    - name: Firewall | Technitium chain | Allow DHCP client replies when enabled
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: udp
+        source: "{{ item }}"
+        destination_port: "{{ technitium_firewall_port_dhcp_client }}"
+        ctstate:
+          - NEW
+        jump: ACCEPT
+        comment: "technitium: allow dhcp client reply from {{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_allowed_cidrs }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_firewall_allow_dhcp | default(false) | bool
+
+    # -------------------------------------------------------------------------
+    # Dedicated chain deny rules - only Technitium service ports
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Technitium chain | Drop untrusted TCP access to Technitium ports
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: tcp
+        destination_port: "{{ item }}"
+        ctstate:
+          - NEW
+        jump: DROP
+        comment: "technitium: drop untrusted tcp/{{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_tcp_ports_effective }}"
+      loop_control:
+        label: "tcp/{{ item }}"
+
+    - name: Firewall | Technitium chain | Drop untrusted UDP access to Technitium ports
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        in_interface: "{{ technitium_firewall_interface_effective }}"
+        protocol: udp
+        destination_port: "{{ item }}"
+        ctstate:
+          - NEW
+        jump: DROP
+        comment: "technitium: drop untrusted udp/{{ item }}"
+        state: present
+      loop: "{{ technitium_firewall_udp_ports_effective }}"
+      loop_control:
+        label: "udp/{{ item }}"
+
+    - name: Firewall | Technitium chain | Return all other Docker traffic
+      ansible.builtin.iptables:
+        table: filter
+        chain: "{{ technitium_firewall_docker_chain }}"
+        jump: RETURN
+        comment: "technitium: return non-technitium docker traffic"
+        state: present
+
+    # -------------------------------------------------------------------------
+    # Optional UFW reload
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Reload UFW when enabled
+      community.general.ufw:
+        state: reloaded
+      when:
+        - technitium_firewall_reload_ufw | default(false) | bool
+
+    # -------------------------------------------------------------------------
+    # Verification
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Read DOCKER-USER rules
+      ansible.builtin.command:
+        cmd: "iptables -w -S DOCKER-USER"
+      register: technitium_firewall_docker_user_rules
+      changed_when: false
+      failed_when: false
+      when: technitium_firewall_verify | default(true)
+
+    - name: Firewall | Read dedicated Technitium chain rules
+      ansible.builtin.command:
+        cmd: "iptables -w -S {{ technitium_firewall_docker_chain }}"
+      register: technitium_firewall_dedicated_chain_rules
+      changed_when: false
+      failed_when: false
+      when: technitium_firewall_verify | default(true)
+
+    - name: Firewall | Assert dedicated chain is referenced from DOCKER-USER
+      ansible.builtin.assert:
+        that:
+          - technitium_firewall_docker_user_rules.rc == 0
+          - technitium_firewall_docker_chain in technitium_firewall_docker_user_rules.stdout
+        fail_msg: >-
+          DOCKER-USER does not appear to reference {{ technitium_firewall_docker_chain }}.
+          Docker-published Technitium ports may not be protected.
+        success_msg: "DOCKER-USER references the dedicated Technitium firewall chain."
+      when: technitium_firewall_verify | default(true)
+
+    - name: Firewall | Assert dedicated chain contains drop rules
+      ansible.builtin.assert:
+        that:
+          - technitium_firewall_dedicated_chain_rules.rc == 0
+          - "'DROP' in technitium_firewall_dedicated_chain_rules.stdout"
+        fail_msg: >-
+          {{ technitium_firewall_docker_chain }} does not contain DROP rules.
+          Untrusted access to Technitium ports may not be blocked.
+        success_msg: "Dedicated Technitium firewall chain contains DROP rules."
+      when: technitium_firewall_verify | default(true)
+
+    # -------------------------------------------------------------------------
+    # Summary
+    # -------------------------------------------------------------------------
+
+    - name: Firewall | Show Technitium firewall summary
+      ansible.builtin.debug:
+        msg:
+          - "Technitium firewall configuration complete."
+          - "Host: {{ inventory_hostname }}"
+          - "Interface: {{ technitium_firewall_interface_effective }}"
+          - "Docker chain: {{ technitium_firewall_docker_chain }}"
+          - "Trusted resolver CIDRs: {{ technitium_firewall_dns_allowed_cidrs_effective | join(', ') }}"
+          - "Management CIDRs: {{ technitium_firewall_management_allowed_cidrs_effective | join(', ') }}"
+          - "Automation CIDRs: {{ technitium_firewall_automation_allowed_cidrs_effective | join(', ') if technitium_firewall_automation_allowed_cidrs_effective | length > 0 else 'none' }}"
+          - "Cluster peer IPs: {{ technitium_firewall_cluster_allowed_ips_effective | join(', ') if technitium_firewall_cluster_allowed_ips_effective | length > 0 else 'none' }}"
+          - "Protected TCP ports: {{ technitium_firewall_tcp_ports_effective | join(', ') }}"
+          - "Protected UDP ports: {{ technitium_firewall_udp_ports_effective | join(', ') }}"
+          - "Host networking: {{ technitium_use_host_network | default(false) | bool }}"
+          - "Verification enabled: {{ technitium_firewall_verify | default(true) }}"

@@ -1,73 +1,513 @@
 ---
 # =============================================================================
-# Generate SSH Certificate Authority (CA) Keys (Local Only)
+# SSH Role - Generate SSH Certificate Authority Keys
 # -----------------------------------------------------------------------------
-# Generates an SSH CA keypair used to sign user and/or host certificates.
-# Runs ONLY on the Ansible control node.
+# Purpose:
+#   Generates the SSH User/Host Certificate Authority keypair on the Ansible
+#   controller.
+#
+# Execution:
+#   - Runs only once.
+#   - Delegates to localhost.
+#   - Writes key material under the repo-local .outputs directory.
 #
 # Output layout:
 #   {{ ssh_ca_output_dir }}/
 #     ├── ssh_ca
-#     └── ssh_ca.pub
+#     ├── ssh_ca.pub
+#     └── serial
+#
+# Safety:
+#   - Refuses unsafe output paths.
+#   - Refuses symlinked CA key paths.
+#   - Does not regenerate the CA unless ssh_ca_force_regenerate=true.
+#   - Backs up existing CA material before forced regeneration.
 # =============================================================================
 
-- name: Ensure SSH CA output directory exists
+# -----------------------------------------------------------------------------
+# Preconditions / normalization
+# -----------------------------------------------------------------------------
+
+- name: SSH | CA | Assert SSH CA is enabled
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_enabled | bool
+    fail_msg: "SSH CA generation requested but ssh_ca_enabled=false."
+    success_msg: "SSH CA generation is enabled."
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Normalize CA paths and ownership
+  ansible.builtin.set_fact:
+    ssh_ca_output_dir_effective: "{{ ssh_ca_output_dir }}"
+    ssh_ca_private_key_path_effective: "{{ ssh_ca_private_key_path | default(ssh_ca_output_dir ~ '/ssh_ca') }}"
+    ssh_ca_public_key_path_effective: "{{ ssh_ca_public_key_path | default(ssh_ca_output_dir ~ '/ssh_ca.pub') }}"
+    ssh_ca_serial_file_effective: "{{ ssh_ca_serial_file | default(ssh_ca_output_dir ~ '/serial') }}"
+    ssh_ca_owner_effective: >-
+      {{
+        ssh_outputs_owner
+        | default(
+            ssh_controller_local_user
+            | default(lookup('ansible.builtin.pipe', 'id -un') | trim)
+          )
+      }}
+    ssh_ca_group_effective: >-
+      {{
+        ssh_outputs_group
+        | default(
+            ssh_controller_local_group
+            | default(lookup('ansible.builtin.pipe', 'id -gn') | trim)
+          )
+      }}
+    ssh_ca_key_bits_effective: "{{ ssh_ca_key_bits | default(4096) | int }}"
+    ssh_ca_force_regenerate_effective: "{{ ssh_ca_force_regenerate | default(false) | bool }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Assert CA output paths are safe
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_output_dir_effective is match('^/')
+      - ssh_ca_private_key_path_effective is match('^/')
+      - ssh_ca_public_key_path_effective is match('^/')
+      - ssh_ca_serial_file_effective is match('^/')
+      - ssh_ca_output_dir_effective not in ['/', '/etc', '/usr', '/var', '/tmp',
+        '/root', '/home']
+      - ssh_ca_private_key_path_effective not in ['/', '/etc', '/usr', '/var',
+        '/tmp', '/root', '/home']
+      - ssh_ca_public_key_path_effective not in ['/', '/etc', '/usr', '/var',
+        '/tmp', '/root', '/home']
+    fail_msg: >-
+      Refusing to generate SSH CA because one or more CA output paths are
+      unsafe. CA output dir={{ ssh_ca_output_dir_effective }}, private key={{
+      ssh_ca_private_key_path_effective }}, public key={{
+      ssh_ca_public_key_path_effective }}.
+    success_msg: "SSH CA output paths are safe."
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Assert CA key type is supported
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_key_type in ssh_supported_key_types
+    fail_msg: >-
+      Unsupported ssh_ca_key_type={{ ssh_ca_key_type }}. Supported key types: {{
+      ssh_supported_key_types | join(', ') }}.
+    success_msg: "SSH CA key type is supported."
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Assert RSA CA key size is valid
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_key_bits_effective | int >= 3072
+    fail_msg: "ssh_ca_key_bits must be >= 3072 when ssh_ca_key_type=rsa."
+    success_msg: "RSA CA key size is valid."
+  when: ssh_ca_key_type == "rsa"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Assert ECDSA CA key size is valid
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_key_bits_effective | int in [256, 384, 521]
+    fail_msg: "ssh_ca_key_bits must be one of 256, 384, or 521 when
+      ssh_ca_key_type=ecdsa."
+    success_msg: "ECDSA CA key size is valid."
+  when: ssh_ca_key_type == "ecdsa"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+# -----------------------------------------------------------------------------
+# Directory setup
+# -----------------------------------------------------------------------------
+
+- name: SSH | CA | Ensure SSH CA output directory exists
   ansible.builtin.file:
-    path: "{{ ssh_ca_output_dir }}"
+    path: "{{ ssh_ca_output_dir_effective }}"
     state: directory
-    owner: "{{ ssh_controller_local_user }}"
-    group: "{{ ssh_controller_local_group }}"
-    mode: "0700"
+    owner: "{{ ssh_ca_owner_effective }}"
+    group: "{{ ssh_ca_group_effective }}"
+    mode: "{{ ssh_outputs_dir_mode | default('0700') }}"
   delegate_to: localhost
-  become: true
   run_once: true
-
-- name: Generate SSH CA keypair (idempotent)
-  ansible.builtin.command: >
-    ssh-keygen
-    -t {{ ssh_ca_key_type }}
-    {% if ssh_ca_key_type == 'rsa' %}-b {{ ssh_ca_key_bits }}{% endif %}
-    -C "{{ ssh_ca_comment }}"
-    -f {{ ssh_ca_output_dir }}/ssh_ca
-    -N ""
-  args:
-    creates: "{{ ssh_ca_output_dir }}/ssh_ca"
-  delegate_to: localhost
   become: false
-  run_once: true
-  when: not ssh_ca_force_regenerate
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
 
-- name: Force regenerate SSH CA keypair
-  ansible.builtin.command: >
-    ssh-keygen
-    -t {{ ssh_ca_key_type }}
-    {% if ssh_ca_key_type == 'rsa' %}-b {{ ssh_ca_key_bits }}{% endif %}
-    -C "{{ ssh_ca_comment }}"
-    -f {{ ssh_ca_output_dir }}/ssh_ca
-    -N ""
+# -----------------------------------------------------------------------------
+# Existing CA inspection
+# -----------------------------------------------------------------------------
+
+- name: SSH | CA | Stat existing CA private key
+  ansible.builtin.stat:
+    path: "{{ ssh_ca_private_key_path_effective }}"
+    follow: false
+  register: ssh_ca_private_key_stat
   delegate_to: localhost
-  become: false
   run_once: true
-  when: ssh_ca_force_regenerate
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
 
-- name: Set permissions on SSH CA private key
+- name: SSH | CA | Stat existing CA public key
+  ansible.builtin.stat:
+    path: "{{ ssh_ca_public_key_path_effective }}"
+    follow: false
+  register: ssh_ca_public_key_stat
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Refuse symlinked CA private key
+  ansible.builtin.fail:
+    msg: >-
+      SSH CA private key is a symlink: {{ ssh_ca_private_key_path_effective }}.
+      Refusing to use or overwrite symlinked CA key material.
+  when: ssh_ca_private_key_stat.stat.islnk | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Refuse symlinked CA public key
+  ansible.builtin.fail:
+    msg: >-
+      SSH CA public key is a symlink: {{ ssh_ca_public_key_path_effective }}.
+      Refusing to use or overwrite symlinked CA key material.
+  when: ssh_ca_public_key_stat.stat.islnk | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Assert existing CA keypair is complete unless regenerating
+  ansible.builtin.assert:
+    that:
+      - >-
+        ssh_ca_force_regenerate_effective or (
+          ssh_ca_private_key_stat.stat.exists | default(false) | bool
+          == ssh_ca_public_key_stat.stat.exists | default(false) | bool
+        )
+    fail_msg: >-
+      Incomplete SSH CA keypair detected. Private exists={{
+      ssh_ca_private_key_stat.stat.exists | default(false) }}, public exists={{
+      ssh_ca_public_key_stat.stat.exists | default(false) }}. Fix the keypair
+      manually or set ssh_ca_force_regenerate=true.
+    success_msg: "Existing SSH CA keypair state is consistent."
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+# -----------------------------------------------------------------------------
+# Forced regeneration backup
+# -----------------------------------------------------------------------------
+
+- name: SSH | CA | Create timestamp for forced CA backup
+  ansible.builtin.set_fact:
+    ssh_ca_backup_timestamp: "{{ lookup('ansible.builtin.pipe', 'date +%Y%m%d%H%M%S') | trim }}"
+  when:
+    - ssh_ca_force_regenerate_effective | bool
+    - ssh_ca_private_key_stat.stat.exists | default(false) | bool or
+      ssh_ca_public_key_stat.stat.exists | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Ensure forced-regeneration backup directory exists
   ansible.builtin.file:
-    path: "{{ ssh_ca_output_dir }}/ssh_ca"
+    path: "{{ ssh_ca_output_dir_effective }}/backup-{{ ssh_ca_backup_timestamp }}"
+    state: directory
+    owner: "{{ ssh_ca_owner_effective }}"
+    group: "{{ ssh_ca_group_effective }}"
+    mode: "0700"
+  when:
+    - ssh_ca_force_regenerate_effective | bool
+    - ssh_ca_backup_timestamp is defined
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Backup existing CA private key before forced regeneration
+  ansible.builtin.copy:
+    src: "{{ ssh_ca_private_key_path_effective }}"
+    dest: "{{ ssh_ca_output_dir_effective }}/backup-{{ ssh_ca_backup_timestamp
+      }}/ssh_ca"
+    remote_src: true
+    owner: "{{ ssh_ca_owner_effective }}"
+    group: "{{ ssh_ca_group_effective }}"
+    mode: "{{ ssh_ca_key_mode_private }}"
+  when:
+    - ssh_ca_force_regenerate_effective | bool
+    - ssh_ca_backup_timestamp is defined
+    - ssh_ca_private_key_stat.stat.exists | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+  become: false
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Backup existing CA public key before forced regeneration
+  ansible.builtin.copy:
+    src: "{{ ssh_ca_public_key_path_effective }}"
+    dest: "{{ ssh_ca_output_dir_effective }}/backup-{{ ssh_ca_backup_timestamp
+      }}/ssh_ca.pub"
+    remote_src: true
+    owner: "{{ ssh_ca_owner_effective }}"
+    group: "{{ ssh_ca_group_effective }}"
+    mode: "{{ ssh_ca_key_mode_public }}"
+  when:
+    - ssh_ca_force_regenerate_effective | bool
+    - ssh_ca_backup_timestamp is defined
+    - ssh_ca_public_key_stat.stat.exists | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Remove existing CA private key before forced regeneration
+  ansible.builtin.file:
+    path: "{{ ssh_ca_private_key_path_effective }}"
+    state: absent
+  when:
+    - ssh_ca_force_regenerate_effective | bool
+    - ssh_ca_private_key_stat.stat.exists | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+  become: false
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Remove existing CA public key before forced regeneration
+  ansible.builtin.file:
+    path: "{{ ssh_ca_public_key_path_effective }}"
+    state: absent
+  when:
+    - ssh_ca_force_regenerate_effective | bool
+    - ssh_ca_public_key_stat.stat.exists | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+# -----------------------------------------------------------------------------
+# Generate CA
+# -----------------------------------------------------------------------------
+
+- name: SSH | CA | Generate SSH CA keypair
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t {{ ssh_ca_key_type }} {% if ssh_ca_key_type in ['rsa',
+      'ecdsa'] %}-b {{ ssh_ca_key_bits_effective }}{% endif %} -C {{
+      ssh_ca_comment | quote }} -f {{ ssh_ca_private_key_path_effective | quote
+      }} -N ''
+  args:
+    creates: "{{ ssh_ca_private_key_path_effective }}"
+  register: ssh_ca_generate_result
+  delegate_to: localhost
+  run_once: true
+  become: false
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+# -----------------------------------------------------------------------------
+# Serial file
+# -----------------------------------------------------------------------------
+
+- name: SSH | CA | Ensure SSH CA serial file exists
+  ansible.builtin.copy:
+    dest: "{{ ssh_ca_serial_file_effective }}"
+    content: "{{ ssh_ca_default_serial | default(1) }}\n"
+    owner: "{{ ssh_ca_owner_effective }}"
+    group: "{{ ssh_ca_group_effective }}"
+    mode: "0600"
+    force: false
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+# -----------------------------------------------------------------------------
+# Permissions
+# -----------------------------------------------------------------------------
+
+- name: SSH | CA | Set permissions on SSH CA private key
+  ansible.builtin.file:
+    path: "{{ ssh_ca_private_key_path_effective }}"
     state: file
-    owner: "{{ ssh_controller_local_user }}"
-    group: "{{ ssh_controller_local_group }}"
+    owner: "{{ ssh_ca_owner_effective }}"
+    group: "{{ ssh_ca_group_effective }}"
     mode: "{{ ssh_ca_key_mode_private }}"
   delegate_to: localhost
-  become: true
   run_once: true
+  become: false
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
 
-- name: Set permissions on SSH CA public key
+- name: SSH | CA | Set permissions on SSH CA public key
   ansible.builtin.file:
-    path: "{{ ssh_ca_output_dir }}/ssh_ca.pub"
+    path: "{{ ssh_ca_public_key_path_effective }}"
     state: file
-    owner: "{{ ssh_controller_local_user }}"
-    group: "{{ ssh_controller_local_group }}"
+    owner: "{{ ssh_ca_owner_effective }}"
+    group: "{{ ssh_ca_group_effective }}"
     mode: "{{ ssh_ca_key_mode_public }}"
   delegate_to: localhost
-  become: true
   run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+- name: SSH | CA | Set permissions on SSH CA serial file
+  ansible.builtin.file:
+    path: "{{ ssh_ca_serial_file_effective }}"
+    state: file
+    owner: "{{ ssh_ca_owner_effective }}"
+    group: "{{ ssh_ca_group_effective }}"
+    mode: "0600"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+
+# -----------------------------------------------------------------------------
+# Verification
+# -----------------------------------------------------------------------------
+
+- name: SSH | CA | Read generated SSH CA public key
+  ansible.builtin.command:
+    cmd: "ssh-keygen -l -f {{ ssh_ca_public_key_path_effective }}"
+  register: ssh_ca_public_key_verify
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+    - ssh-ca-verify
+
+- name: SSH | CA | Assert SSH CA public key is readable
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_public_key_verify.rc == 0
+      - ssh_ca_public_key_verify.stdout | length > 0
+    fail_msg: "Generated SSH CA public key could not be read by ssh-keygen."
+    success_msg: "Generated SSH CA public key is readable."
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+    - ssh-ca-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | CA | Show SSH CA generation summary
+  ansible.builtin.debug:
+    msg:
+      - "SSH CA keypair is ready."
+      - "CA output dir: {{ ssh_ca_output_dir_effective }}"
+      - "Private key: {{ ssh_ca_private_key_path_effective }}"
+      - "Public key: {{ ssh_ca_public_key_path_effective }}"
+      - "Serial file: {{ ssh_ca_serial_file_effective }}"
+      - "Key type: {{ ssh_ca_key_type }}"
+      - "Generated this run: {{ ssh_ca_generate_result is changed }}"
+      - "Forced regeneration: {{ ssh_ca_force_regenerate_effective }}"
+      - "Backup timestamp: {{ ssh_ca_backup_timestamp | default('none') }}"
+      - "Fingerprint: {{ ssh_ca_public_key_verify.stdout }}"
+  when: ssh_role_show_summary | default(true)
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-ca
+    - ssh-ca-generate
+    - ssh-summary

@@ -1,146 +1,471 @@
 ---
 # =============================================================================
-# Validation — shell-config role
+# shell-config — validation
 # -----------------------------------------------------------------------------
 # Purpose:
-# - Fail fast on misconfiguration
-# - Ensure variables are sane before installation/configuration
-# - Prevent accidental shell changes or broken user setups
+#   Validates shell-config role inputs and builds the normalized user lists used
+#   by the rest of the role.
+#
+# Builds:
+#   shell__resolved_users:
+#     All valid present users selected for shell-config consideration.
+#
+#   shell__home_users:
+#     Users whose home directories exist and are safe to manage.
+#
+# Safety:
+#   - Skips absent users.
+#   - Skips system/non-interactive users by default.
+#   - Does not fail just because automation users use /usr/sbin/nologin.
+#   - Refuses unsafe paths.
+#   - Validates plugin definitions before cloning.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Required variables
+# Normalize role inputs
 # -----------------------------------------------------------------------------
 
-- name: Validate resolved shell users is a list
+- name: Shell Config | Validate | Normalize role inputs
+  ansible.builtin.set_fact:
+    shell__role_users_effective: "{{ shell_role_users | default(shell_config_users |
+      default(users | default([]), true), true) }}"
+    shell__plugins_effective: "{{ shell_plugins | default(plugins | default([]), true) }}"
+    shell__skip_system_users_effective: "{{ shell_skip_system_users | default(true) | bool }}"
+    shell__noninteractive_safe_effective: "{{ shell_noninteractive_safe | default(true) | bool }}"
+    shell__supported_shells_effective: "{{ shell_supported_shells | default(['bash', 'zsh']) }}"
+    shell__noninteractive_shells_effective: >-
+      {{
+        shell_noninteractive_shells
+        | default(['/usr/sbin/nologin', '/sbin/nologin', '/bin/false', '/usr/bin/false'])
+      }}
+  changed_when: false
+  tags:
+    - shell
+    - shell-validate
+
+# -----------------------------------------------------------------------------
+# Core validation
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Validate | Validate role controls
   ansible.builtin.assert:
     that:
-      - shell__resolved_users is defined
-      - shell__resolved_users is iterable
-    fail_msg: >
-      shell_role_users must resolve to a list.
-      Example:
+      - shell_config_enabled | default(true) | type_debug == 'bool'
+      - shell_config_validate_inputs | default(true) | type_debug == 'bool'
+      - shell_config_show_summary | default(true) | type_debug == 'bool'
+      - shell_install_zsh | default(true) | type_debug == 'bool'
+      - shell_install_oh_my_zsh | default(true) | type_debug == 'bool'
+      - shell_install_starship | default(false) | type_debug == 'bool'
+      - shell_remove_starship | default(true) | type_debug == 'bool'
+      - shell_set_default_shell | default(true) | type_debug == 'bool'
+      - shell_skip_system_users | default(true) | type_debug == 'bool'
+      - shell_noninteractive_safe | default(true) | type_debug == 'bool'
+      - shell_bin_commands_enabled | default(true) | type_debug == 'bool'
+      - shell_plugin_update | default(false) | type_debug == 'bool'
+      - shell_git_accept_hostkey | default(true) | type_debug == 'bool'
+      - shell_git_update | default(false) | type_debug == 'bool'
+    fail_msg: "One or more shell-config boolean controls are invalid."
+    success_msg: "shell-config role controls are valid."
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+
+- name: Shell Config | Validate | Validate selected shell
+  ansible.builtin.assert:
+    that:
+      - shell_default is string
+      - shell_default | length > 0
+      - shell_default in shell__supported_shells_effective
+      - shell_default_shell is string
+      - shell_default_shell is match('^/')
+      - shell_default_shell | length > 1
+    fail_msg: >-
+      shell_default must be one of {{ shell__supported_shells_effective |
+      join(', ') }}, and shell_default_shell must be an absolute path.
+    success_msg: "Selected shell configuration is valid."
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+
+- name: Shell Config | Validate | Validate user source is a list
+  ansible.builtin.assert:
+    that:
+      - shell__role_users_effective is sequence
+      - shell__role_users_effective is not string
+      - shell__role_users_effective is not mapping
+    fail_msg: >-
+      shell_role_users must resolve to a list of user definitions. Example:
         shell_role_users:
-          - name: user
-            home_directory: /home/user
+          - name: sinless777
+            shell: /usr/bin/zsh
+    success_msg: "shell-config user source is valid."
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
 
 # -----------------------------------------------------------------------------
-# Validate user structure
+# User validation
 # -----------------------------------------------------------------------------
 
-- name: Validate each resolved shell user entry
+- name: Shell Config | Validate | Validate user entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.state is not defined or item.state in ['present', 'absent']
+      - item.shell is not defined or item.shell is string
+      - item.home_directory is not defined or item.home_directory is string
+      - item.home_directory is not defined or item.home_directory is match('^/')
+    fail_msg: "Invalid shell user entry: {{ item | default({}) }}"
+  loop: "{{ shell__role_users_effective }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+
+# -----------------------------------------------------------------------------
+# Build normalized user list
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Validate | Build resolved shell user list
+  ansible.builtin.set_fact:
+    shell__resolved_users: >-
+      {%- set resolved = [] -%} {%- for user in shell__role_users_effective -%}
+        {%- set state = user.state | default('present') -%}
+        {%- set shell_path = user.shell | default(shell_default_shell) -%}
+        {%- set is_system = user.system | default(false) | bool -%}
+        {%- set is_noninteractive = shell_path in shell__noninteractive_shells_effective -%}
+        {%- set home = user.home_directory | default('/root' if user.name == 'root' else '/home/' ~ user.name) -%}
+
+        {%- if state == 'present' -%}
+          {%- if not (shell__skip_system_users_effective and is_system) -%}
+            {%- if not (shell__noninteractive_safe_effective and is_noninteractive) -%}
+              {%- set _ = resolved.append(
+                user | combine({
+                  'home_directory': home,
+                  'shell': shell_path,
+                  'shell_config_group': user.primary_group | default(user.name)
+                }, recursive=True)
+              ) -%}
+            {%- endif -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%} {{ resolved }}
+  changed_when: false
+  tags:
+    - shell
+    - shell-validate
+
+- name: Shell Config | Validate | Validate resolved shell users
+  ansible.builtin.assert:
+    that:
+      - shell__resolved_users is sequence
+      - shell__resolved_users is not string
+      - shell__resolved_users is not mapping
+    fail_msg: "shell__resolved_users must resolve to a list."
+    success_msg: "Resolved shell user list is valid."
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+
+- name: Shell Config | Validate | Validate each resolved shell user
   ansible.builtin.assert:
     that:
       - item.name is defined
+      - item.name is string
       - item.name | length > 0
       - item.home_directory is defined
-      - item.home_directory | length > 0
-    fail_msg: >
-      Each entry in shell_role_users must define:
-        - name
-        - home_directory
+      - item.home_directory is string
+      - item.home_directory is match('^/')
+      - item.shell is defined
+      - item.shell is string
+      - item.shell is match('^/')
+      - item.shell_config_group is defined
+      - item.shell_config_group is string
+      - item.shell_config_group | length > 0
+    fail_msg: "Invalid resolved shell user entry: {{ item }}"
   loop: "{{ shell__resolved_users }}"
   loop_control:
-    label: "{{ item.name | default('UNKNOWN') }}"
-
-# -----------------------------------------------------------------------------
-# Feature toggles (safe defaults)
-# -----------------------------------------------------------------------------
-
-- name: Validate shell_install_oh_my_zsh flag
-  ansible.builtin.assert:
-    that:
-      - shell_install_oh_my_zsh | default(false) | type_debug == 'bool'
-    fail_msg: "shell_install_oh_my_zsh must be a boolean"
-
-- name: Validate shell_remove_starship flag
-  ansible.builtin.assert:
-    that:
-      - shell_remove_starship | default(true) | type_debug == 'bool'
-    fail_msg: "shell_remove_starship must be a boolean"
-
-- name: Validate shell_set_default_shell flag
-  ansible.builtin.assert:
-    that:
-      - shell_set_default_shell | default(false) | type_debug == 'bool'
-    fail_msg: "shell_set_default_shell must be a boolean"
-
-# -----------------------------------------------------------------------------
-# Plugin validation (if defined)
-# -----------------------------------------------------------------------------
-
-- name: Validate zsh plugins structure (optional)
-  ansible.builtin.assert:
-    that:
-      - item.name is defined
-      - item.repo is defined
-      - item.repo | regex_search('^https?://')
-    fail_msg: >
-      Each plugin must define:
-        - name
-        - repo (valid http/https URL)
-  loop: "{{ plugins | default([]) }}"
-  loop_control:
-    label: "{{ item.name | default('UNKNOWN') }}"
-  when: plugins is defined
+    label: "{{ item.name }}"
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
 
 # -----------------------------------------------------------------------------
 # Filesystem sanity checks
 # -----------------------------------------------------------------------------
 
-- name: Ensure user home directories exist
+- name: Shell Config | Validate | Stat user home directories
   ansible.builtin.stat:
     path: "{{ item.home_directory }}"
-  register: home_dirs
+    follow: false
+  register: shell__home_dir_stats
   loop: "{{ shell__resolved_users }}"
   loop_control:
-    label: "{{ item.name }}"
+    label: "{{ item.name }} -> {{ item.home_directory }}"
+  changed_when: false
+  tags:
+    - shell
+    - shell-validate
 
-- name: Build shell users with existing home directories
+- name: Shell Config | Validate | Build shell users with existing home directories
   ansible.builtin.set_fact:
     shell__home_users: >-
       {{
-        home_dirs.results
-        | selectattr('stat.exists')
+        shell__home_dir_stats.results
+        | default([])
+        | selectattr('stat.exists', 'equalto', true)
+        | selectattr('stat.isdir', 'equalto', true)
+        | rejectattr('stat.islnk', 'equalto', true)
         | map(attribute='item')
         | list
       }}
+  changed_when: false
+  tags:
+    - shell
+    - shell-validate
 
-- name: Report shell users skipped because home directories are missing
+- name: Shell Config | Validate | Report shell users skipped because home
+    directories are missing or unsafe
   ansible.builtin.debug:
-    msg: "Skipping shell dotfile/plugin management for {{ item.item.name }} because {{ item.item.home_directory }} does not exist"
-  when: not item.stat.exists
-  loop: "{{ home_dirs.results }}"
+    msg: >-
+      Skipping shell dotfile/plugin management for {{ item.item.name }} because
+      {{ item.item.home_directory }} is missing, not a directory, or a symlink.
+  loop: "{{ shell__home_dir_stats.results | default([]) }}"
   loop_control:
     label: "{{ item.item.name }}"
+  when: >-
+    not (item.stat.exists | default(false) | bool) or not (item.stat.isdir |
+    default(false) | bool) or (item.stat.islnk | default(false) | bool)
+  tags:
+    - shell
+    - shell-validate
 
-- name: Validate shell bin command source directory
+# -----------------------------------------------------------------------------
+# Plugin validation
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Validate | Validate plugin list
+  ansible.builtin.assert:
+    that:
+      - shell__plugins_effective is sequence
+      - shell__plugins_effective is not string
+      - shell__plugins_effective is not mapping
+    fail_msg: "shell_plugins/plugins must be a list."
+    success_msg: "Shell plugin list is valid."
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+    - shell-plugins
+
+- name: Shell Config | Validate | Validate plugin entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[A-Za-z0-9._-]+$')
+      - item.repo is defined
+      - item.repo is string
+      - item.repo is match('^https://')
+      - item.version is not defined or item.version is string
+    fail_msg: >-
+      Each plugin must define:
+        - name: safe plugin directory name
+        - repo: https URL
+  loop: "{{ shell__plugins_effective }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-plugin') if item is mapping else
+      'invalid-plugin' }}"
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+    - shell-plugins
+
+# -----------------------------------------------------------------------------
+# Path and mode validation
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Validate | Validate shell path settings
+  ansible.builtin.assert:
+    that:
+      - shell_oh_my_zsh_repo is string
+      - shell_oh_my_zsh_repo is match('^https://')
+      - shell_oh_my_zsh_dir is string
+      - shell_oh_my_zsh_dir | length > 0
+      - shell_oh_my_zsh_dir is not search('^/')
+      - shell_oh_my_zsh_custom_dir is string
+      - shell_oh_my_zsh_custom_dir | length > 0
+      - shell_oh_my_zsh_custom_dir is not search('^/')
+      - shell_oh_my_zsh_plugins_dir is string
+      - shell_oh_my_zsh_plugins_dir | length > 0
+      - shell_oh_my_zsh_plugins_dir is not search('^/')
+      - shell_prompt_file is string
+      - shell_prompt_file | length > 0
+      - shell_prompt_file is not search('/')
+      - shell_completion_cache_dir is string
+      - shell_completion_cache_dir | length > 0
+      - shell_completion_cache_dir is not search('^/')
+    fail_msg: "One or more shell path settings are invalid."
+    success_msg: "Shell path settings are valid."
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+
+- name: Shell Config | Validate | Validate file modes
+  ansible.builtin.assert:
+    that:
+      - shell_home_mode is match('^0[0-7]{3}$')
+      - shell_zshrc_mode is match('^0[0-7]{3}$')
+      - shell_prompt_mode is match('^0[0-7]{3}$')
+      - shell_starship_config_mode is match('^0[0-7]{3}$')
+      - shell_plugin_dir_mode is match('^0[0-7]{3}$')
+      - shell_bin_commands_mode is match('^0[0-7]{3}$')
+    fail_msg: "One or more shell-config file modes are invalid."
+    success_msg: "shell-config file modes are valid."
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+
+- name: Shell Config | Validate | Validate git clone controls
+  ansible.builtin.assert:
+    that:
+      - shell_plugin_depth | int >= 1
+      - shell_git_depth | int >= 1
+    fail_msg: "shell_plugin_depth and shell_git_depth must be >= 1."
+    success_msg: "Shell git clone controls are valid."
+  when: shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+
+# -----------------------------------------------------------------------------
+# Bin command validation
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Validate | Validate shell bin command settings
+  ansible.builtin.assert:
+    that:
+      - shell_bin_commands_src is string
+      - shell_bin_commands_src | length > 0
+      - shell_bin_commands_dest is string
+      - shell_bin_commands_dest | length > 0
+      - shell_bin_commands_dest is not search('^/')
+    fail_msg: "shell_bin_commands_src/dest settings are invalid."
+    success_msg: "Shell bin command settings are valid."
+  when:
+    - shell_config_validate_inputs | default(true) | bool
+    - shell_bin_commands_enabled | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+    - shell-bin
+
+- name: Shell Config | Validate | Stat shell bin command source directory
   ansible.builtin.stat:
     path: "{{ shell_bin_commands_src }}"
+    follow: false
   register: shell_bin_commands_src_stat
   delegate_to: localhost
   become: false
   run_once: true
-  when: shell_bin_commands_enabled | bool
+  changed_when: false
+  when: shell_bin_commands_enabled | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+    - shell-bin
 
-- name: Fail if shell bin command source directory is missing
+- name: Shell Config | Validate | Fail if shell bin command source directory is
+    missing or unsafe
   ansible.builtin.fail:
-    msg: "shell_bin_commands_src does not exist: {{ shell_bin_commands_src }}"
+    msg: >-
+      shell_bin_commands_src must exist as a real directory on the controller:
+      {{ shell_bin_commands_src }}
   when:
-    - shell_bin_commands_enabled | bool
-    - not shell_bin_commands_src_stat.stat.exists
+    - shell_bin_commands_enabled | default(true) | bool
+    - >-
+      not (shell_bin_commands_src_stat.stat.exists | default(false) | bool) or
+      not (shell_bin_commands_src_stat.stat.isdir | default(false) | bool) or
+      (shell_bin_commands_src_stat.stat.islnk | default(false) | bool)
+  tags:
+    - shell
+    - shell-validate
+    - shell-bin
 
 # -----------------------------------------------------------------------------
-# Safety checks
+# Optional command availability checks
 # -----------------------------------------------------------------------------
 
-- name: Prevent accidental shell change for system users
-  ansible.builtin.assert:
-    that:
-      - item.shell is not defined or item.shell != '/usr/sbin/nologin'
-    fail_msg: >
-      User {{ item.name }} has shell '/usr/sbin/nologin'.
-      Refusing to manage shell configuration.
-  loop: "{{ shell__resolved_users }}"
-  loop_control:
-    label: "{{ item.name }}"
+- name: Shell Config | Validate | Check zsh binary when default shell is zsh
+  ansible.builtin.stat:
+    path: "{{ shell_default_shell }}"
+    follow: false
+  register: shell_default_shell_stat
+  changed_when: false
+  when:
+    - shell_default == "zsh"
+    - shell_install_zsh | default(true) | bool == false
+  tags:
+    - shell
+    - shell-validate
+
+- name: Shell Config | Validate | Fail when zsh is required but missing and
+    install is disabled
+  ansible.builtin.fail:
+    msg: >-
+      shell_default_shell is {{ shell_default_shell }}, but it does not exist
+      and shell_install_zsh=false.
+  when:
+    - shell_default == "zsh"
+    - shell_install_zsh | default(true) | bool == false
+    - not (shell_default_shell_stat.stat.exists | default(false) | bool)
+  tags:
+    - shell
+    - shell-validate
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Validate | Show validation summary
+  ansible.builtin.debug:
+    msg:
+      - "shell-config validation complete."
+      - "Role enabled: {{ shell_config_enabled | default(true) | bool }}"
+      - "Selected shell: {{ shell_default }}"
+      - "Default shell path: {{ shell_default_shell }}"
+      - "Input users: {{ shell__role_users_effective | length }}"
+      - "Resolved users: {{ shell__resolved_users | length }}"
+      - "Users with valid homes: {{ shell__home_users | length }}"
+      - "Oh My Zsh enabled: {{ shell_install_oh_my_zsh | default(true) | bool }}"
+      - "Starship install enabled: {{ shell_install_starship | default(false) |
+        bool }}"
+      - "Starship remove enabled: {{ shell_remove_starship | default(true) |
+        bool }}"
+      - "Plugin count: {{ shell__plugins_effective | length }}"
+      - "Bin commands enabled: {{ shell_bin_commands_enabled | default(true) |
+        bool }}"
+  when:
+    - shell_config_show_summary | default(true) | bool
+    - shell_config_validate_inputs | default(true) | bool
+  tags:
+    - shell
+    - shell-validate
+    - shell-summary

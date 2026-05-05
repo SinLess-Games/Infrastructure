@@ -1,58 +1,334 @@
 ---
 # =============================================================================
 # packages — validation
+# -----------------------------------------------------------------------------
+# Validates package role inputs before any package manager changes are made.
 # =============================================================================
 
-- name: Validate package catalog is defined
+- name: Packages | Validate package role controls
+  ansible.builtin.assert:
+    that:
+      - packages_validate_inputs | default(true) | type_debug == 'bool'
+      - packages_manage_apt | default(true) | type_debug == 'bool'
+      - packages_update_cache | default(true) | type_debug == 'bool'
+      - packages_install_recommends | default(false) | type_debug == 'bool'
+      - packages_autoremove | default(false) | type_debug == 'bool'
+      - packages_autoclean | default(false) | type_debug == 'bool'
+      - packages_fail_on_missing_groups | default(true) | type_debug == 'bool'
+      - packages_filter_empty_items | default(true) | type_debug == 'bool'
+      - packages_install_homebrew | default(false) | type_debug == 'bool'
+      - packages_homebrew_bootstrap | default(true) | type_debug == 'bool'
+      - packages_homebrew_update | default(true) | type_debug == 'bool'
+      - packages_homebrew_upgrade | default(false) | type_debug == 'bool'
+      - packages_homebrew_cleanup | default(false) | type_debug == 'bool'
+      - packages_show_summary | default(true) | type_debug == 'bool'
+    fail_msg: "One or more packages role boolean controls are invalid."
+    success_msg: "Package role controls are valid."
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+
+# -----------------------------------------------------------------------------
+# APT catalog validation
+# -----------------------------------------------------------------------------
+
+- name: Packages | Validate package catalog is defined as a mapping
   ansible.builtin.assert:
     that:
       - packages_role_catalog is defined
       - packages_role_catalog is mapping
-    fail_msg: "packages_role_catalog must be defined as a dictionary"
+    fail_msg: "packages_role_catalog must be defined as a dictionary/map."
+    success_msg: "Package catalog is valid."
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
 
-- name: Validate selected package groups is a list
+- name: Packages | Validate selected package groups are a list
   ansible.builtin.assert:
     that:
       - packages_role_groups is defined
-      - packages_role_groups is iterable
-    fail_msg: "packages_role_groups must be defined as a list"
+      - packages_role_groups is sequence
+      - packages_role_groups is not string
+      - packages_role_groups is not mapping
+    fail_msg: "packages_role_groups must be defined as a list of package group names."
+    success_msg: "Selected package groups are valid."
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
 
-- name: Validate enabled package groups exist
+- name: Packages | Validate selected package group names
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | trim | length > 0
+    fail_msg: "Each enabled package group must be a non-empty string."
+  loop: "{{ packages_role_groups }}"
+  loop_control:
+    label: "{{ item | default('undefined-group') }}"
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
+
+- name: Packages | Validate enabled package groups exist
   ansible.builtin.assert:
     that:
       - item in packages_role_catalog
-    fail_msg: "Package group '{{ item }}' is not defined in packages_role_catalog"
+    fail_msg: "Package group '{{ item }}' is not defined in packages_role_catalog."
   loop: "{{ packages_role_groups }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - packages_validate_inputs | default(true) | bool
+    - packages_fail_on_missing_groups | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
 
-- name: Validate each package group is a list
+- name: Packages | Validate each enabled package group is a list
   ansible.builtin.assert:
     that:
-      - packages_role_catalog[item] is iterable
-    fail_msg: "packages_role_catalog['{{ item }}'] must be a list"
+      - packages_role_catalog[item] is sequence
+      - packages_role_catalog[item] is not string
+      - packages_role_catalog[item] is not mapping
+    fail_msg: "packages_role_catalog['{{ item }}'] must be a list."
   loop: "{{ packages_role_groups }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - packages_validate_inputs | default(true) | bool
+    - item in packages_role_catalog
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
 
-- name: Validate packages_install_homebrew flag
+- name: Packages | Validate package names in enabled groups
   ansible.builtin.assert:
     that:
-      - packages_install_homebrew | default(false) | type_debug == 'bool'
-    fail_msg: "packages_install_homebrew must be a boolean"
+      - package_name is string
+      - packages_filter_empty_items | default(true) | bool or package_name |
+        trim | length > 0
+    fail_msg: "Invalid package entry in group '{{ item.0 }}': {{ package_name |
+      default('undefined') }}"
+  loop: "{{ packages_role_groups | product(['__placeholder__']) | list }}"
+  loop_control:
+    label: "{{ item.0 }}"
+  vars:
+    # This task is only used to keep validation grouping readable.
+    # Per-package validation happens in the next task.
+    package_name: "placeholder"
+  when:
+    - false
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
 
-- name: Validate Homebrew package list
+- name: Packages | Build package validation list
+  ansible.builtin.set_fact:
+    packages_validation_entries: >-
+      {%- set out = [] -%} {%- for group_name in packages_role_groups -%}
+        {%- if group_name in packages_role_catalog -%}
+          {%- for package_name in packages_role_catalog[group_name] -%}
+            {%- set _ = out.append({
+              'group': group_name,
+              'package': package_name
+            }) -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%} {{ out }}
+  changed_when: false
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
+
+- name: Packages | Validate package entries
   ansible.builtin.assert:
     that:
-      - packages_role_brew_packages is iterable
-    fail_msg: "packages_role_brew_packages must be a list"
+      - item.package is string
+      - packages_filter_empty_items | default(true) | bool or item.package |
+        trim | length > 0
+    fail_msg: "Invalid package entry in group '{{ item.group }}': {{ item.package |
+      default('undefined') }}"
+  loop: "{{ packages_validation_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.group }} -> {{ item.package | default('undefined') }}"
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
 
-- name: Validate Homebrew prefix
+- name: Packages | Validate extra APT package list
   ansible.builtin.assert:
     that:
-      - packages_homebrew_prefix is string
-      - packages_homebrew_prefix | length > 0
-    fail_msg: "packages_homebrew_prefix must be a non-empty string"
+      - packages_extra_apt_packages is defined
+      - packages_extra_apt_packages is sequence
+      - packages_extra_apt_packages is not string
+      - packages_extra_apt_packages is not mapping
+    fail_msg: "packages_extra_apt_packages must be a list."
+    success_msg: "Extra APT package list is valid."
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
 
-- name: Validate Homebrew user
+- name: Packages | Validate remove APT package list
+  ansible.builtin.assert:
+    that:
+      - packages_remove_apt_packages is defined
+      - packages_remove_apt_packages is sequence
+      - packages_remove_apt_packages is not string
+      - packages_remove_apt_packages is not mapping
+      - packages_remove_apt_state in ['absent', 'present']
+      - packages_remove_apt_purge | default(false) | type_debug == 'bool'
+    fail_msg: "APT removal settings are invalid."
+    success_msg: "APT removal settings are valid."
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
+
+- name: Packages | Validate APT retry/cache settings
+  ansible.builtin.assert:
+    that:
+      - packages_cache_valid_time | int >= 0
+      - packages_apt_retries | int >= 1
+      - packages_apt_delay | int >= 0
+      - packages_apt_state in ['present', 'latest', 'absent', 'build-dep']
+    fail_msg: "APT cache, retry, delay, or state settings are invalid."
+    success_msg: "APT retry/cache settings are valid."
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-apt
+
+# -----------------------------------------------------------------------------
+# Homebrew validation
+# -----------------------------------------------------------------------------
+
+- name: Packages | Validate Homebrew package list
+  ansible.builtin.assert:
+    that:
+      - packages_role_brew_packages is defined
+      - packages_role_brew_packages is sequence
+      - packages_role_brew_packages is not string
+      - packages_role_brew_packages is not mapping
+    fail_msg: "packages_role_brew_packages must be a list."
+    success_msg: "Homebrew package list is valid."
+  when: packages_validate_inputs | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-homebrew
+
+- name: Packages | Validate Homebrew package names
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | trim | length > 0
+    fail_msg: "Each Homebrew package must be a non-empty string."
+  loop: "{{ packages_role_brew_packages }}"
+  loop_control:
+    label: "{{ item | default('undefined-brew-package') }}"
+  when:
+    - packages_validate_inputs | default(true) | bool
+    - packages_install_homebrew | default(false) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-homebrew
+
+- name: Packages | Validate Homebrew paths and user
   ansible.builtin.assert:
     that:
       - packages_homebrew_user is string
       - packages_homebrew_user | length > 0
-    fail_msg: "packages_homebrew_user must be a non-empty string"
+      - packages_homebrew_group is string
+      - packages_homebrew_group | length > 0
+      - packages_homebrew_prefix is string
+      - packages_homebrew_prefix is match('^/')
+      - packages_homebrew_prefix | length > 1
+      - packages_homebrew_prefix not in ['/', '/etc', '/usr', '/var', '/tmp',
+        '/root', '/home']
+      - packages_homebrew_bin is string
+      - packages_homebrew_bin is match('^/')
+      - packages_homebrew_bin.startswith(packages_homebrew_prefix ~ '/')
+    fail_msg: "Homebrew user, group, prefix, or binary path is invalid."
+    success_msg: "Homebrew paths and user are valid."
+  when:
+    - packages_validate_inputs | default(true) | bool
+    - packages_install_homebrew | default(false) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-homebrew
+
+- name: Packages | Validate Homebrew install URL
+  ansible.builtin.assert:
+    that:
+      - packages_homebrew_install_url is string
+      - packages_homebrew_install_url is match('^https://')
+    fail_msg: "packages_homebrew_install_url must be an HTTPS URL."
+    success_msg: "Homebrew install URL is valid."
+  when:
+    - packages_validate_inputs | default(true) | bool
+    - packages_install_homebrew | default(false) | bool
+    - packages_homebrew_bootstrap | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-homebrew
+
+- name: Packages | Validate Homebrew environment
+  ansible.builtin.assert:
+    that:
+      - packages_homebrew_environment is mapping
+    fail_msg: "packages_homebrew_environment must be a dictionary/map."
+    success_msg: "Homebrew environment is valid."
+  when:
+    - packages_validate_inputs | default(true) | bool
+    - packages_install_homebrew | default(false) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-homebrew
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Packages | Show validation summary
+  ansible.builtin.debug:
+    msg:
+      - "Package role validation complete."
+      - "APT enabled: {{ packages_manage_apt | default(true) | bool }}"
+      - "Enabled groups: {{ packages_role_groups | join(', ') if
+        packages_role_groups | length > 0 else 'none' }}"
+      - "Catalog groups: {{ packages_role_catalog.keys() | list | sort | join(',
+        ') if packages_role_catalog is mapping else 'none' }}"
+      - "Extra APT packages: {{ packages_extra_apt_packages | length }}"
+      - "Remove APT packages: {{ packages_remove_apt_packages | length }}"
+      - "Homebrew enabled: {{ packages_install_homebrew | default(false) | bool
+        }}"
+      - "Homebrew packages: {{ packages_role_brew_packages | length }}"
+  when:
+    - packages_validate_inputs | default(true) | bool
+    - packages_show_summary | default(true) | bool
+  tags:
+    - packages
+    - packages-validate
+    - packages-summary

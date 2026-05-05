@@ -1,19 +1,154 @@
 ---
 # =============================================================================
-# shell-config defaults
+# shell-config — defaults
+# -----------------------------------------------------------------------------
+# Default controls for configuring interactive shells on managed hosts.
+#
+# Expected user source:
+#   group_vars/all/users.yaml
+#
+# Expected shell source:
+#   group_vars/all/zsh.yaml
 # =============================================================================
 
-shell_config_enabled: true
+# -----------------------------------------------------------------------------
+# Role controls
+# -----------------------------------------------------------------------------
 
-shell_default: zsh
+shell_config_enabled: true
+shell_config_validate_inputs: true
+shell_config_show_summary: true
+
+# Skip non-interactive/system users by default.
+shell_skip_system_users: "{{ zsh_skip_for_system_users | default(true) }}"
+shell_noninteractive_safe: "{{ zsh_noninteractive_safe | default(true) }}"
+
+shell_noninteractive_shells:
+  - /usr/sbin/nologin
+  - /sbin/nologin
+  - /bin/false
+  - /usr/bin/false
+
+# -----------------------------------------------------------------------------
+# User selection
+# -----------------------------------------------------------------------------
 
 shell_role_users: "{{ shell_config_users | default(users | default([]), true) }}"
 
-shell_install_oh_my_zsh: true
+# -----------------------------------------------------------------------------
+# Default shell
+# -----------------------------------------------------------------------------
+
+shell_default: zsh
+shell_default_shell: "{{ zsh_default_shell | default('/usr/bin/zsh') }}"
+shell_set_default_shell: "{{ shell_set_default_shell | default(true) }}"
+
+shell_supported_shells:
+  - bash
+  - zsh
+
+# -----------------------------------------------------------------------------
+# Zsh / Oh My Zsh
+# -----------------------------------------------------------------------------
+
+shell_install_zsh: "{{ shell_install_zsh | default(true) }}"
+shell_install_oh_my_zsh: "{{ shell_install_oh_my_zsh | default(true) }}"
+
+shell_oh_my_zsh_repo: "https://github.com/ohmyzsh/ohmyzsh.git"
+shell_oh_my_zsh_version: "master"
+shell_oh_my_zsh_dir: ".oh-my-zsh"
+
+shell_zsh_theme: "{{ zsh_theme | default('robbyrussell') }}"
+shell_zshrc_template: "{{ shell_zshrc_template_src | default('zshrc.j2') }}"
+
+# Compatibility alias for older tasks/templates.
+zsh_theme_effective: "{{ shell_zsh_theme }}"
+
+# -----------------------------------------------------------------------------
+# Starship
+# -----------------------------------------------------------------------------
+
+shell_install_starship: "{{ shell_install_starship | default(false) }}"
 shell_remove_starship: true
 
-shell_zsh_theme: robbyrussell
+shell_starship_bin: /usr/local/bin/starship
+shell_starship_config_template: "{{ shell_starship_config_template_src | default('starship.toml.j2') }}"
+
+# -----------------------------------------------------------------------------
+# Zsh plugins
+# -----------------------------------------------------------------------------
+
+shell_plugins: "{{ plugins | default([]) }}"
+shell_plugin_update: "{{ zsh_plugin_update | default(false) }}"
+shell_plugin_depth: "{{ zsh_plugin_depth | default(1) }}"
+
+shell_oh_my_zsh_custom_dir: "{{ oh_my_zsh_custom_dir | default('.oh-my-zsh/custom') }}"
+shell_oh_my_zsh_plugins_dir: "{{ oh_my_zsh_plugins_dir | default('.oh-my-zsh/custom/plugins') }}"
+
+# Base plugins are written into .zshrc before custom plugin names.
+shell_base_zsh_plugins:
+  - git
+  - sudo
+  - history
+  - command-not-found
+
+# -----------------------------------------------------------------------------
+# fzf integration
+# -----------------------------------------------------------------------------
+
+shell_fzf_install_shell_integration: "{{ fzf_install_shell_integration | default(true) }}"
+shell_fzf_key_bindings: "{{ fzf_key_bindings | default(true) }}"
+shell_fzf_completion: "{{ fzf_completion | default(true) }}"
+
+# -----------------------------------------------------------------------------
+# Prompt
+# -----------------------------------------------------------------------------
+
+shell_prompt_enabled: "{{ zsh_prompt_enabled | default(true) }}"
+shell_prompt_file: "{{ zsh_prompt_file | default('.zsh_prompt') }}"
+shell_prompt_template: "{{ shell_prompt_template_src | default('zsh_prompt.j2') }}"
+
+# -----------------------------------------------------------------------------
+# Completion tuning
+# -----------------------------------------------------------------------------
+
+shell_enable_extra_completions: "{{ zsh_enable_extra_completions | default(true) }}"
+shell_completion_cache_dir: "{{ zsh_completion_cache_dir | default('.cache/zcompdump') }}"
+
+# -----------------------------------------------------------------------------
+# User-local bin commands
+# -----------------------------------------------------------------------------
 
 shell_bin_commands_enabled: true
 shell_bin_commands_src: "{{ playbook_dir }}/../files/bin_commands"
 shell_bin_commands_dest: "bin"
+shell_bin_commands_mode: "0755"
+
+# -----------------------------------------------------------------------------
+# File modes
+# -----------------------------------------------------------------------------
+
+shell_home_mode: "0750"
+shell_zshrc_mode: "0644"
+shell_prompt_mode: "0644"
+shell_starship_config_mode: "0644"
+shell_plugin_dir_mode: "0755"
+
+# -----------------------------------------------------------------------------
+# Git behavior for shell-managed repositories
+# -----------------------------------------------------------------------------
+
+shell_git_accept_hostkey: true
+shell_git_update: false
+shell_git_depth: 1
+
+# -----------------------------------------------------------------------------
+# Compatibility aliases
+# -----------------------------------------------------------------------------
+# Kept so older task files can continue working while newer task files use the
+# shell_* names above.
+# -----------------------------------------------------------------------------
+
+shell_install_ohmyzsh: "{{ shell_install_oh_my_zsh }}"
+shell_remove_starship_binary: "{{ shell_remove_starship }}"
+shell_config_users_effective: "{{ shell_role_users }}"

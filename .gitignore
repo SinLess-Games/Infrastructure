@@ -1,32 +1,129 @@
-Packer/proxmox-templates/variables.auto.pkrvars.hcl
-/.env
+# =============================================================================
+# Repository Ignore Rules
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Ignore local secrets, generated artifacts, Terraform state, Ansible runtime
+#   files, Packer caches, build logs, and machine-local development files.
+#
+# Notes:
+#   - Do not ignore .gitignore.
+#   - Do not ignore Terraform .terraform.lock.hcl files by default; they should
+#     normally be committed for reproducible provider installs.
+# =============================================================================
 
-.outputs/
-Ansible/.venv/
-.ansible/
-Ansible/.collections/
-Ansible/group_vars/proxmox/vault-certs.yaml
+# =============================================================================
+# Local environment / secrets
+# =============================================================================
+
+.env
+.env.*
+!.env.example
+
 .vault-password
-**/build.log
-Terraform/.terraform
-Terraform/terraform.tfstate
-.gitignore
-
-Terraform/.terraform.lock.hcl
-Terraform/terraform.tfstate.backup
-Terraform/*-cluster.tf
-Terraform/modules/vault-secrets/.terraform.lock.hcl
-Terraform/modules/vault-secrets/terraform.tfstate
-Terraform/modules/vault-secrets/.terraform
-Terraform/modules/vault-secrets/terraform.tfstate.backup
-Ansible/group_vars/vault/vault-secrets.yaml
-notes.md
-Packer/flatcar/manifest.json
-Terraform/terraform.tfstate.1772233972.backup
-Terraform/.terraform.tfstate.lock.info
-Terraform/tfplan
-terraform.tfstate
-Ansible/roles/lablabs.rke2
 .secrets/
+.outputs/
 .codex
+
+Ansible/group_vars/proxmox/vault-certs.yaml
+Ansible/group_vars/vault/vault-secrets.yaml
+
+# =============================================================================
+# Local notes / scratch files
+# =============================================================================
+
 notes.md
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# =============================================================================
+# Python / Ansible runtime
+# =============================================================================
+
+Ansible/.venv/
+Ansible/.collections/
+Ansible/.ansible/
+.ansible/
+Ansible/generated/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Vendored Galaxy role installs
+Ansible/roles/lablabs.rke2/
+
+# =============================================================================
+# Terraform
+# =============================================================================
+
+**/.terraform/
+**/.terraform.tfstate.lock.info
+
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+tfplan.*
+
+Terraform/*-cluster.tf
+Terraform/tfplan
+
+# =============================================================================
+# Packer
+# =============================================================================
+
+Packer/.iso-cache/
+Packer/flatcar/manifest.json
+Packer/proxmox-templates/variables.auto.pkrvars.hcl
+
+# =============================================================================
+# Logs / build output
+# =============================================================================
+
+*.log
+**/build.log
+
+dist/
+build/
+out/
+coverage/
+
+# =============================================================================
+# Node / frontend tooling
+# =============================================================================
+
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# =============================================================================
+# IDE / editor files
+# =============================================================================
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+.idea/
+*.iml
+
+# =============================================================================
+# OS files
+# =============================================================================
+
+.DS_Store
+Thumbs.db
+desktop.ini

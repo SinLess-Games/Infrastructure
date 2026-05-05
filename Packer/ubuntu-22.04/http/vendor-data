@@ -1,0 +1,40 @@
+#cloud-config
+# Ansible/templates/packer/http/vendor-data.j2
+#
+# Vendor data for Ubuntu autoinstall / NoCloud.
+#
+# Rendered by Ansible into:
+#   Packer/ubuntu-22.04/http/vendor-data
+
+package_update: false
+package_upgrade: false
+package_reboot_if_required: false
+
+timezone: UTC
+
+write_files:
+  - path: /etc/cloud/cloud.cfg.d/99-packer-proxmox.cfg
+    owner: root:root
+    permissions: "0644"
+    content: |
+      datasource_list: [ NoCloud, ConfigDrive ]
+
+  - path: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+    owner: root:root
+    permissions: "0644"
+    content: |
+      network:
+        config: disabled
+
+  - path: /etc/ssh/sshd_config.d/99-packer.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      PermitRootLogin yes
+      PasswordAuthentication yes
+      PubkeyAuthentication yes
+
+runcmd:
+  - [ systemctl, enable, ssh ]
+  - [ systemctl, enable, qemu-guest-agent ]
+  - [ cloud-init, clean, --logs, --seed ]

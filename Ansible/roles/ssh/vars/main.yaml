@@ -1,8 +1,192 @@
 ---
 # =============================================================================
 # SSH Role Variables
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Internal role constants for the SSH role.
+#
+# Notes:
+#   - Keep user-tunable values in defaults/main.yaml or group_vars.
+#   - Keep vars/main.yaml focused on constants that should not normally be
+#     overridden by inventory.
+# =============================================================================
+
+# =============================================================================
+# Supported SSH key types
 # =============================================================================
 
 ssh_supported_key_types:
   - ed25519
   - rsa
+  - ecdsa
+
+# =============================================================================
+# Key generation metadata
+# -----------------------------------------------------------------------------
+# Used by validation and key-generation tasks.
+# =============================================================================
+
+ssh_key_type_defaults:
+  ed25519:
+    requires_bits: false
+    default_bits: null
+    ssh_keygen_type: ed25519
+
+  rsa:
+    requires_bits: true
+    default_bits: 4096
+    minimum_bits: 3072
+    ssh_keygen_type: rsa
+
+  ecdsa:
+    requires_bits: true
+    default_bits: 521
+    allowed_bits:
+      - 256
+      - 384
+      - 521
+    ssh_keygen_type: ecdsa
+
+# =============================================================================
+# Certificate constants
+# =============================================================================
+
+ssh_certificate_types:
+  user: "-I"
+  host: "-h"
+
+ssh_certificate_default_extensions:
+  safe:
+    - permit-pty
+    - permit-user-rc
+
+  interactive:
+    - permit-pty
+    - permit-user-rc
+    - permit-X11-forwarding
+    - permit-agent-forwarding
+    - permit-port-forwarding
+
+ssh_certificate_known_critical_options:
+  - force-command
+  - source-address
+  - verify-required
+
+# =============================================================================
+# OpenSSH daemon constants
+# =============================================================================
+
+ssh_sshd_boolean_yes_no_options:
+  - PubkeyAuthentication
+  - PasswordAuthentication
+  - PermitEmptyPasswords
+  - KbdInteractiveAuthentication
+  - KeyboardInteractiveAuthentication
+  - ChallengeResponseAuthentication
+  - UsePAM
+  - X11Forwarding
+  - AllowAgentForwarding
+  - AllowTcpForwarding
+  - PermitUserEnvironment
+  - PermitUserRC
+  - TCPKeepAlive
+  - UseDNS
+
+ssh_sshd_valid_permit_root_login_values:
+  - "yes"
+  - "no"
+  - "prohibit-password"
+  - "forced-commands-only"
+  - "without-password"
+
+ssh_sshd_valid_address_family_values:
+  - any
+  - inet
+  - inet6
+
+ssh_sshd_valid_gateway_ports_values:
+  - "yes"
+  - "no"
+  - clientspecified
+
+ssh_sshd_valid_permit_tunnel_values:
+  - "yes"
+  - "no"
+  - point-to-point
+  - ethernet
+
+ssh_sshd_valid_compression_values:
+  - "yes"
+  - "no"
+  - delayed
+
+ssh_sshd_valid_log_levels:
+  - QUIET
+  - FATAL
+  - ERROR
+  - INFO
+  - VERBOSE
+  - DEBUG
+  - DEBUG1
+  - DEBUG2
+  - DEBUG3
+
+ssh_sshd_valid_syslog_facilities:
+  - DAEMON
+  - USER
+  - AUTH
+  - LOCAL0
+  - LOCAL1
+  - LOCAL2
+  - LOCAL3
+  - LOCAL4
+  - LOCAL5
+  - LOCAL6
+  - LOCAL7
+
+# =============================================================================
+# OpenSSH client constants
+# =============================================================================
+
+ssh_client_valid_strict_host_key_checking_values:
+  - "yes"
+  - "no"
+  - ask
+  - accept-new
+
+ssh_client_boolean_yes_no_options:
+  - IdentitiesOnly
+  - PubkeyAuthentication
+  - PasswordAuthentication
+
+# =============================================================================
+# Path constants
+# =============================================================================
+
+ssh_managed_paths:
+  ca_dir: /etc/ssh/ca
+  authorized_principals_dir: /etc/ssh/auth_principals
+  sshd_config_dir: /etc/ssh/sshd_config.d
+
+ssh_default_managed_files:
+  trusted_user_ca_keys: /etc/ssh/ca/ssh_ca.pub
+  authorized_principals_pattern: /etc/ssh/auth_principals/%u
+  managed_sshd_config: /etc/ssh/sshd_config.d/99-sinless-games.conf
+  banner: /etc/issue.net
+
+# =============================================================================
+# Role task phase names
+# -----------------------------------------------------------------------------
+# Useful if the role later supports phase-based execution.
+# =============================================================================
+
+ssh_role_supported_phases:
+  - validate
+  - ca
+  - user-materials
+  - certificates
+  - principals
+  - authorized-keys
+  - server
+  - client
+  - known-hosts

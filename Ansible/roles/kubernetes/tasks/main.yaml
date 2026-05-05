@@ -1,12 +1,60 @@
 ---
+# =============================================================================
+# Kubernetes Role Task Entry Point
+# =============================================================================
+
+- name: Normalize Kubernetes role phases
+  ansible.builtin.set_fact:
+    kubernetes_role_phases_effective: "{{ kubernetes_role_phases | default(['deploy', 'configure', 'validate']) | list }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate requested Kubernetes role phases
+  ansible.builtin.assert:
+    that:
+      - kubernetes_role_phases_effective | length > 0
+      - kubernetes_role_phases_effective | difference(kubernetes_role_allowed_phases | default(['deploy', 'configure', 'validate'])) | length == 0
+    fail_msg: >-
+      Invalid Kubernetes role phase requested.
+      requested={{ kubernetes_role_phases_effective }},
+      allowed={{ kubernetes_role_allowed_phases | default(['deploy', 'configure', 'validate']) }}
+    success_msg: >-
+      Kubernetes role phases validated:
+      {{ kubernetes_role_phases_effective | join(', ') }}
+  delegate_to: localhost
+  run_once: true
+
+# =============================================================================
+# Deploy Phase
+# =============================================================================
+# Creates or destroys the Kubernetes VMs through Terraform and handles Proxmox
+# VM-level preparation such as cloud-init snippets and GPU passthrough mappings.
+
 - name: Run deploy phase
   ansible.builtin.include_tasks: deploy/main.yaml
-  when: "'deploy' in kubernetes_role_phases"
+  when: "'deploy' in kubernetes_role_phases_effective"
+
+# =============================================================================
+# Configure Phase
+# =============================================================================
+# Configures the guest operating systems, installs RKE2, bootstraps the control
+# plane, joins workers, and applies node-level runtime settings.
 
 - name: Run configure phase
   ansible.builtin.include_tasks: configure/main.yaml
-  when: "'configure' in kubernetes_role_phases"
+  when:
+    - "'configure' in kubernetes_role_phases_effective"
+    - not (kubernetes_operation.destroy | default(false) | bool)
+
+# =============================================================================
+# Validate Phase
+# =============================================================================
+# Validates the final production cluster shape, node readiness, labels, taints,
+# GPU worker metadata, kube-system health, and Kubernetes API readiness.
 
 - name: Run validate phase
   ansible.builtin.include_tasks: validate/main.yaml
-  when: "'validate' in kubernetes_role_phases"
+  when:
+    - "'validate' in kubernetes_role_phases_effective"
+    - not (kubernetes_operation.plan_only | default(false) | bool)
+    - not (kubernetes_operation.destroy | default(false) | bool)

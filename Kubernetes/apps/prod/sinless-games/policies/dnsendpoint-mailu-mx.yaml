@@ -1,0 +1,31 @@
+# Kubernetes/apps/prod/networking/external-dns/dnsendpoint-mail-mx.yaml
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: mail-mx-records
+  namespace: networking
+  labels:
+    app.kubernetes.io/name: mail-mx-records
+    app.kubernetes.io/component: dns-records
+    app.kubernetes.io/part-of: mail-platform
+    app.kubernetes.io/managed-by: gitops
+    topology.kubernetes.io/environment: prod
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+    external-dns.alpha.kubernetes.io/provider: cloudflare
+    security.sinlessgames.io/description: "Cloudflare MX records for SinLess Games and Helix AI mail domains."
+    security.sinlessgames.io/dns-provider: cloudflare
+    security.sinlessgames.io/mail-provider: mailu
+spec:
+  endpoints:
+    - dnsName: sinlessgames.com
+      recordType: MX
+      recordTTL: 300
+      targets:
+        - "10 mail.sinlessgames.com"
+
+    - dnsName: helixaibot.com
+      recordType: MX
+      recordTTL: 300
+      targets:
+        - "10 mail.sinlessgames.com"

@@ -1,67 +1,373 @@
 ---
 # =============================================================================
-# Technitium DNS — Initial Admin Setup
-# =============================================================================
-# Detects whether the instance uses the custom password or the default "admin".
-# Sets a fact `technitium_actual_password` for use in subsequent tasks.
+# Technitium DNS - Initial Admin Setup
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Detect the working Technitium admin password.
+#   - Prefer the desired configured admin password.
+#   - Fall back to the bootstrap/default password when needed.
+#   - Change the bootstrap/default password to the desired password when safe.
+#   - Create or reuse an Ansible API token for later role tasks.
+#
+# Facts set:
+#   - technitium_admin_username_effective
+#   - technitium_actual_password
+#   - technitium_admin_password_source
+#   - technitium_session_token
+#   - technitium_api_token
+#
+# Security:
+#   - Passwords and tokens are always no_log.
+#   - Debug output never prints secret values.
 # =============================================================================
 
-- name: Technitium | Check if custom password works
+# -----------------------------------------------------------------------------
+# Defaults / validation
+# -----------------------------------------------------------------------------
+
+- name: Technitium Admin | Normalize admin variables
+  ansible.builtin.set_fact:
+    technitium_api_url_normalized: "{{ technitium_api_url | regex_replace('/+$', '') }}"
+    technitium_admin_username_effective: >-
+      {{
+        technitium_admin_username
+        | default(technitium_admin_user | default('admin'))
+      }}
+    technitium_desired_admin_password: "{{ technitium_admin_password }}"
+    technitium_bootstrap_admin_password: "{{ technitium_bootstrap_admin_password | default('admin') }}"
+    technitium_init_change_bootstrap_password: "{{ technitium_init_change_bootstrap_password | default(true) }}"
+    technitium_create_api_token: "{{ technitium_create_api_token | default(true) }}"
+    technitium_force_create_api_token: "{{ technitium_force_create_api_token | default(false) }}"
+  no_log: true
+
+- name: Technitium Admin | Assert required admin variables
+  ansible.builtin.assert:
+    that:
+      - technitium_api_url_normalized is defined
+      - technitium_api_url_normalized | length > 0
+      - technitium_admin_username_effective is defined
+      - technitium_admin_username_effective | length > 0
+      - technitium_desired_admin_password is defined
+      - technitium_desired_admin_password | length > 0
+      - technitium_bootstrap_admin_password is defined
+      - technitium_bootstrap_admin_password | length > 0
+    fail_msg: >-
+      Technitium admin initialization requires technitium_api_url and
+      technitium_admin_password to be defined.
+    success_msg: "Technitium admin initialization variables passed validation."
+  no_log: true
+
+- name: Technitium Admin | Build password detection candidates
+  ansible.builtin.set_fact:
+    technitium_admin_login_candidates: >-
+      {{
+        [
+          {
+            'label': 'configured',
+            'password': technitium_desired_admin_password
+          },
+          {
+            'label': 'bootstrap',
+            'password': technitium_bootstrap_admin_password
+          }
+        ]
+      }}
+  no_log: true
+
+# -----------------------------------------------------------------------------
+# Password detection
+# -----------------------------------------------------------------------------
+
+- name: Technitium Admin | Try admin login candidates
   ansible.builtin.uri:
-    url: "{{ technitium_api_url }}/api/user/login"
+    url: "{{ technitium_api_url_normalized }}/api/user/login"
     method: POST
     body_format: form-urlencoded
     body:
-      user: "{{ technitium_admin_user | default('admin') }}"
-      pass: "{{ technitium_admin_password }}"
-    status_code: [200, 400]
+      user: "{{ technitium_admin_username_effective }}"
+      pass: "{{ item.password }}"
+      includeInfo: "true"
+    status_code:
+      - 200
+      - 400
+      - 401
+      - 403
     return_content: true
-  register: _technitium_custom_password_check
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  loop: "{{ technitium_admin_login_candidates }}"
+  loop_control:
+    label: "{{ item.label }}"
+  register: technitium_admin_login_checks
   failed_when: false
   no_log: true
 
-- name: Technitium | Set actual password to custom if it works
+- name: Technitium Admin | Select successful admin login result
   ansible.builtin.set_fact:
-    technitium_actual_password: "{{ technitium_admin_password }}"
-  when: >-
-    _technitium_custom_password_check.json is defined
-    and _technitium_custom_password_check.json.status is defined
-    and _technitium_custom_password_check.json.status == "ok"
+    technitium_successful_admin_login_result: >-
+      {{
+        (
+          technitium_admin_login_checks.results
+          | selectattr('json.status', 'defined')
+          | selectattr('json.status', 'equalto', 'ok')
+          | list
+          | first
+        )
+        | default({})
+      }}
+  no_log: true
 
-- name: Technitium | Set actual password to default if custom doesn't work
+- name: Technitium Admin | Fail when no admin password works
+  ansible.builtin.fail:
+    msg: >-
+      Unable to authenticate to Technitium as {{ technitium_admin_username_effective }}.
+      Neither the configured password nor the bootstrap password worked.
+      Confirm the admin password, reset the Technitium admin account, or check
+      whether the instance has already been initialized with another password.
+  when: technitium_successful_admin_login_result.json.status | default('') != 'ok'
+
+- name: Technitium Admin | Set detected admin password facts
   ansible.builtin.set_fact:
-    technitium_actual_password: "admin"
-  when: >-
-    _technitium_custom_password_check.json is not defined
-    or _technitium_custom_password_check.json.status is not defined
-    or _technitium_custom_password_check.json.status != "ok"
+    technitium_actual_password: "{{ technitium_successful_admin_login_result.item.password }}"
+    technitium_admin_password_source: "{{ technitium_successful_admin_login_result.item.label }}"
+    technitium_session_token: "{{ technitium_successful_admin_login_result.json.token | default('') }}"
+    technitium_server_version: "{{ technitium_successful_admin_login_result.json.info.version | default('unknown') }}"
+    technitium_server_domain_detected: "{{ technitium_successful_admin_login_result.json.info.dnsServerDomain | default('unknown') }}"
+  no_log: true
 
-- name: Technitium | Verify default password works when custom fails
+- name: Technitium Admin | Assert session token was returned
+  ansible.builtin.assert:
+    that:
+      - technitium_session_token is defined
+      - technitium_session_token | length > 0
+    fail_msg: "Technitium login succeeded but no session token was returned."
+    success_msg: "Technitium admin login returned a session token."
+  no_log: true
+
+# -----------------------------------------------------------------------------
+# Optional bootstrap password rotation
+# -----------------------------------------------------------------------------
+
+- name: Technitium Admin | Change bootstrap admin password to configured password
   ansible.builtin.uri:
-    url: "{{ technitium_api_url }}/api/user/login"
+    url: "{{ technitium_api_url_normalized }}/api/user/changePassword"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ technitium_session_token }}"
+    body_format: form-urlencoded
+    body:
+      pass: "{{ technitium_actual_password }}"
+      newPass: "{{ technitium_desired_admin_password }}"
+    status_code:
+      - 200
+      - 400
+      - 401
+      - 403
+    return_content: true
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_admin_password_change
+  failed_when: false
+  no_log: true
+  when:
+    - technitium_init_change_bootstrap_password | bool
+    - technitium_admin_password_source == 'bootstrap'
+    - technitium_actual_password != technitium_desired_admin_password
+
+- name: Technitium Admin | Fail when bootstrap password rotation fails
+  ansible.builtin.fail:
+    msg: >-
+      Technitium admin login worked with the bootstrap password, but changing
+      it to the configured admin password failed. Check the Technitium API
+      response and password policy.
+  when:
+    - technitium_admin_password_change is defined
+    - technitium_admin_password_change.skipped is not defined
+    - technitium_admin_password_change.json.status | default('') != 'ok'
+
+- name: Technitium Admin | Re-login after password rotation
+  ansible.builtin.uri:
+    url: "{{ technitium_api_url_normalized }}/api/user/login"
     method: POST
     body_format: form-urlencoded
     body:
-      user: "{{ technitium_admin_user | default('admin') }}"
-      pass: "admin"
-    status_code: [200, 400]
+      user: "{{ technitium_admin_username_effective }}"
+      pass: "{{ technitium_desired_admin_password }}"
+      includeInfo: "true"
+    status_code:
+      - 200
+      - 400
+      - 401
+      - 403
     return_content: true
-  register: _technitium_default_password_check
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_admin_relogin_after_password_change
   failed_when: false
   no_log: true
-  when: >-
-    _technitium_custom_password_check.json is not defined
-    or _technitium_custom_password_check.json.status is not defined
-    or _technitium_custom_password_check.json.status != "ok"
+  when:
+    - technitium_admin_password_change is defined
+    - technitium_admin_password_change.skipped is not defined
+    - technitium_admin_password_change.json.status | default('') == 'ok'
 
-- name: Technitium | Fallback to custom password if default also fails
+- name: Technitium Admin | Fail when re-login after password rotation fails
+  ansible.builtin.fail:
+    msg: >-
+      Technitium admin password was changed, but re-login with the configured
+      password failed.
+  when:
+    - technitium_admin_relogin_after_password_change is defined
+    - technitium_admin_relogin_after_password_change.skipped is not defined
+    - technitium_admin_relogin_after_password_change.json.status | default('') != 'ok'
+
+- name: Technitium Admin | Refresh facts after password rotation
   ansible.builtin.set_fact:
-    technitium_actual_password: "{{ technitium_admin_password }}"
-  when: >-
-    _technitium_default_password_check.json is defined
-    and _technitium_default_password_check.json.status is defined
-    and _technitium_default_password_check.json.status != "ok"
+    technitium_actual_password: "{{ technitium_desired_admin_password }}"
+    technitium_admin_password_source: "configured"
+    technitium_session_token: "{{ technitium_admin_relogin_after_password_change.json.token }}"
+    technitium_server_version: "{{ technitium_admin_relogin_after_password_change.json.info.version | default(technitium_server_version | default('unknown')) }}"
+    technitium_server_domain_detected: "{{ technitium_admin_relogin_after_password_change.json.info.dnsServerDomain | default(technitium_server_domain_detected | default('unknown')) }}"
+  no_log: true
+  when:
+    - technitium_admin_relogin_after_password_change is defined
+    - technitium_admin_relogin_after_password_change.skipped is not defined
+    - technitium_admin_relogin_after_password_change.json.status | default('') == 'ok'
 
-- name: Technitium | Log password detection result
+# -----------------------------------------------------------------------------
+# Controller-side API token file
+# -----------------------------------------------------------------------------
+
+- name: Technitium Admin | Check existing controller API token file
+  ansible.builtin.stat:
+    path: "{{ technitium_token_file }}"
+  register: technitium_existing_token_file
+  delegate_to: localhost
+  become: false
+  when:
+    - technitium_token_file is defined
+    - technitium_token_file | length > 0
+  no_log: true
+
+- name: Technitium Admin | Read existing controller API token file
+  ansible.builtin.slurp:
+    src: "{{ technitium_token_file }}"
+  register: technitium_existing_token_file_content
+  delegate_to: localhost
+  become: false
+  when:
+    - technitium_existing_token_file is defined
+    - technitium_existing_token_file.stat.exists | default(false)
+    - not (technitium_force_create_api_token | bool)
+  no_log: true
+
+- name: Technitium Admin | Set API token fact from existing token file
+  ansible.builtin.set_fact:
+    technitium_api_token: "{{ technitium_existing_token_file_content.content | b64decode | trim }}"
+    technitium_api_token_source: "existing-token-file"
+  when:
+    - technitium_existing_token_file_content is defined
+    - technitium_existing_token_file_content.content is defined
+    - not (technitium_force_create_api_token | bool)
+  no_log: true
+
+- name: Technitium Admin | Create Ansible API token
+  ansible.builtin.uri:
+    url: "{{ technitium_api_url_normalized }}/api/user/createToken"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ technitium_session_token }}"
+    body_format: form-urlencoded
+    body:
+      tokenName: "{{ technitium_token_name | default('ansible') }}"
+    status_code:
+      - 200
+      - 400
+      - 401
+      - 403
+    return_content: true
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_create_token_result
+  failed_when: false
+  no_log: true
+  when:
+    - technitium_create_api_token | bool
+    - technitium_token_file is defined
+    - technitium_token_file | length > 0
+    - technitium_force_create_api_token | bool or technitium_api_token is not defined
+
+- name: Technitium Admin | Fail when API token creation fails
+  ansible.builtin.fail:
+    msg: >-
+      Technitium admin login succeeded, but creating the Ansible API token failed.
+      Check the Technitium API response and permissions.
+  when:
+    - technitium_create_token_result is defined
+    - technitium_create_token_result.skipped is not defined
+    - technitium_create_token_result.json.status | default('') != 'ok'
+
+- name: Technitium Admin | Set API token fact from created token
+  ansible.builtin.set_fact:
+    technitium_api_token: "{{ technitium_create_token_result.json.token }}"
+    technitium_api_token_source: "created-token"
+  when:
+    - technitium_create_token_result is defined
+    - technitium_create_token_result.skipped is not defined
+    - technitium_create_token_result.json.status | default('') == 'ok'
+  no_log: true
+
+- name: Technitium Admin | Ensure controller API token output directory exists
+  ansible.builtin.file:
+    path: "{{ technitium_token_file | dirname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  when:
+    - technitium_api_token is defined
+    - technitium_api_token_source | default('') == 'created-token'
+    - technitium_token_file is defined
+    - technitium_token_file | length > 0
+  no_log: true
+
+- name: Technitium Admin | Write controller API token file
+  ansible.builtin.copy:
+    dest: "{{ technitium_token_file }}"
+    content: "{{ technitium_api_token }}\n"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  when:
+    - technitium_api_token is defined
+    - technitium_api_token_source | default('') == 'created-token'
+    - technitium_token_file is defined
+    - technitium_token_file | length > 0
+  no_log: true
+
+# -----------------------------------------------------------------------------
+# Final validation / summary
+# -----------------------------------------------------------------------------
+
+- name: Technitium Admin | Assert usable authentication facts exist
+  ansible.builtin.assert:
+    that:
+      - technitium_actual_password is defined
+      - technitium_actual_password | length > 0
+      - technitium_session_token is defined
+      - technitium_session_token | length > 0
+    fail_msg: "Technitium admin initialization did not produce usable authentication facts."
+    success_msg: "Technitium admin authentication facts are ready."
+  no_log: true
+
+- name: Technitium Admin | Show admin initialization summary
   ansible.builtin.debug:
-    msg: "Using {{ 'custom' if technitium_actual_password == technitium_admin_password else 'default' }} password for {{ inventory_hostname }}"
+    msg:
+      - "Technitium admin initialization complete."
+      - "Host: {{ inventory_hostname }}"
+      - "API URL: {{ technitium_api_url_normalized }}"
+      - "Admin user: {{ technitium_admin_username_effective }}"
+      - "Password source: {{ technitium_admin_password_source }}"
+      - "Server version: {{ technitium_server_version | default('unknown') }}"
+      - "Detected server domain: {{ technitium_server_domain_detected | default('unknown') }}"
+      - "API token source: {{ technitium_api_token_source | default('not-created') }}"
+      - "API token file: {{ technitium_token_file | default('not-configured') }}"

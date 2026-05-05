@@ -74,9 +74,6 @@ proxmox_node_bonds:
         - eno4
       mode: 802.3ad
       miimon: 100ip link show nic1s10g
-ethtool nic1s10g
-bridge link
-
       lacp_rate: fast
       xmit_hash_policy: layer3+4
 

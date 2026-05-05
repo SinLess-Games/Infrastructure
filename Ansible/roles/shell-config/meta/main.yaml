@@ -1,2 +1,41 @@
 ---
+# =============================================================================
+# shell-config — role metadata
+# -----------------------------------------------------------------------------
+# Configures interactive shell environments for managed infrastructure users.
+# =============================================================================
+
+galaxy_info:
+  role_name: shell_config
+  namespace: sinless_games
+  author: SinLess Games LLC
+  description: Configure Zsh, Oh My Zsh, shell plugins, prompts, and user-local
+    shell tooling.
+  company: SinLess Games LLC
+  license: MIT
+  min_ansible_version: "2.17"
+
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+
+    - name: Ubuntu
+      versions:
+        - noble
+
+  galaxy_tags:
+    - shell
+    - zsh
+    - oh-my-zsh
+    - terminal
+    - linux
+    - debian
+    - ubuntu
+    - infrastructure
+    - automation
+    - homelab
+    - devops
+
 dependencies: []

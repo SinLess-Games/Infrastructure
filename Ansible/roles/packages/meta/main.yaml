@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# packages — role metadata
+# -----------------------------------------------------------------------------
+# Manages package installation for Debian/Ubuntu-based infrastructure hosts and
+# optional Homebrew tooling on local/operator systems.
+# =============================================================================
+
+galaxy_info:
+  role_name: packages
+  namespace: sinless_games
+  author: SinLess Games LLC
+  description: Manage grouped APT packages and optional Homebrew packages for
+    infrastructure hosts.
+  company: SinLess Games LLC
+  license: MIT
+  min_ansible_version: "2.17"
+
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+
+    - name: Ubuntu
+      versions:
+        - noble
+
+  galaxy_tags:
+    - packages
+    - apt
+    - homebrew
+    - linux
+    - debian
+    - ubuntu
+    - infrastructure
+    - automation
+    - homelab
+    - devops
+
+dependencies: []

@@ -106,8 +106,8 @@
 - name: Fail if controller root public key is missing
   ansible.builtin.fail:
     msg: >-
-      Root SSH public key not found on controller:
-      {{ ssh_root_pubkey_path_on_controller }}
+      Root SSH public key not found on controller: {{
+      ssh_root_pubkey_path_on_controller }}
   when: not ssh__root_pubkey_stat.stat.exists
   delegate_to: localhost
 
@@ -155,7 +155,8 @@
 
 - name: Fail if SSH CA private key is missing
   ansible.builtin.fail:
-    msg: "SSH CA private key not found: {{ ssh__controller_host_ca_private_key_path }}"
+    msg: "SSH CA private key not found: {{ ssh__controller_host_ca_private_key_path
+      }}"
   when: not ssh__controller_ca_priv_lstat.stat.exists
   delegate_to: localhost
 
@@ -165,7 +166,8 @@
 - name: Resolve host key and certificate paths
   ansible.builtin.set_fact:
     ssh__host_key_pub_path: "{{ ssh_host_key_pub | default('/etc/ssh/ssh_host_ed25519_key.pub') }}"
-    ssh__host_cert_path: "{{ ssh_host_cert_path | default('/etc/ssh/ssh_host_ed25519_key-cert.pub') }}"
+    ssh__host_cert_path: "{{ ssh_host_cert_path |
+      default('/etc/ssh/ssh_host_ed25519_key-cert.pub') }}"
   changed_when: false
 
 # -----------------------------------------------------------------------------

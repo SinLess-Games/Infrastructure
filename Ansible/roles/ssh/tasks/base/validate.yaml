@@ -1,89 +1,877 @@
 ---
 # =============================================================================
-# Validate SSH Role Inputs
+# SSH Role - Input Validation
 # -----------------------------------------------------------------------------
-# Performs early, explicit validation of variables and assumptions
-# before any keys, CA material, or signing actions occur.
+# Purpose:
+#   Performs early validation of SSH role variables before any key generation,
+#   CA creation, certificate signing, principals rendering, or sshd changes.
 #
-# Runs on the control node only.
+# Execution:
+#   - Controller-side validations run once on localhost.
+#   - Host-side sshd policy validation still uses inventory variables but does
+#     not modify the remote host.
 # =============================================================================
 
-- name: Validate SSH key type
-  ansible.builtin.assert:
-    that:
-      - ssh_key_type in ssh_supported_key_types
-    fail_msg: "Unsupported ssh_key_type: {{ ssh_key_type }}"
+# -----------------------------------------------------------------------------
+# Normalize validation inputs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Normalize role inputs
+  ansible.builtin.set_fact:
+    _ssh_role_users: "{{ ssh_role_users | default([]) }}"
+    _ssh_supported_key_types: "{{ ssh_supported_key_types | default(['ed25519', 'rsa', 'ecdsa']) }}"
+    _ssh_key_type_defaults: "{{ ssh_key_type_defaults | default({}) }}"
+    _ssh_policy_effective: "{{ ssh_policy_defaults | default({}) |
+      combine(ssh_policy | default({}), recursive=True) }}"
+    _ssh_principals_effective: "{{ ssh_principals | default({}) }}"
   delegate_to: localhost
   run_once: true
+  tags:
+    - ssh
+    - ssh-validate
 
-- name: Validate RSA key bits when using RSA
+# -----------------------------------------------------------------------------
+# Controller tooling
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Check required controller commands
+  ansible.builtin.shell: "command -v {{ item }}"
+  args:
+    executable: /bin/bash
+  register: _ssh_required_command_check
+  changed_when: false
+  failed_when: false
+  loop:
+    - ssh
+    - ssh-keygen
+    - ssh-keyscan
+  loop_control:
+    label: "{{ item }}"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-tools
+
+- name: SSH | Validate | Assert required controller commands exist
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: "Required SSH controller command was not found: {{ item.item }}"
+    success_msg: "Required SSH controller command is available: {{ item.item }}"
+  loop: "{{ _ssh_required_command_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-tools
+
+# -----------------------------------------------------------------------------
+# Supported key type metadata
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert supported key types are valid
+  ansible.builtin.assert:
+    that:
+      - _ssh_supported_key_types is sequence
+      - _ssh_supported_key_types is not string
+      - _ssh_supported_key_types | length > 0
+      - ssh_key_type in _ssh_supported_key_types
+    fail_msg: >-
+      Unsupported ssh_key_type={{ ssh_key_type | default('undefined') }}.
+      Supported key types: {{ _ssh_supported_key_types | join(', ') }}.
+    success_msg: "SSH key type is supported."
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-keys
+
+- name: SSH | Validate | Assert user RSA key bits are strong enough
   ansible.builtin.assert:
     that:
       - ssh_key_bits is defined
-      - ssh_key_bits | int >= 2048
-    fail_msg: "ssh_key_bits must be defined and >= 2048 when using RSA"
-  when: ssh_key_type == 'rsa'
+      - ssh_key_bits | int >= (_ssh_key_type_defaults.rsa.minimum_bits |
+        default(3072) | int)
+    fail_msg: >-
+      ssh_key_bits must be >= {{ _ssh_key_type_defaults.rsa.minimum_bits |
+      default(3072) }} when ssh_key_type=rsa.
+    success_msg: "RSA user key size is valid."
+  when: ssh_key_type == "rsa"
   delegate_to: localhost
   run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-keys
 
-- name: Validate ssh_role_users structure
+- name: SSH | Validate | Assert user ECDSA key bits are valid
   ansible.builtin.assert:
     that:
-      - ssh_role_users is defined
-      - ssh_role_users is iterable
-    fail_msg: "ssh_role_users must be a list of user definitions"
+      - ssh_key_bits is defined
+      - ssh_key_bits | int in (_ssh_key_type_defaults.ecdsa.allowed_bits |
+        default([256, 384, 521]))
+    fail_msg: >-
+      ssh_key_bits must be one of {{ _ssh_key_type_defaults.ecdsa.allowed_bits |
+      default([256, 384, 521]) | join(', ') }} when ssh_key_type=ecdsa.
+    success_msg: "ECDSA user key size is valid."
+  when: ssh_key_type == "ecdsa"
   delegate_to: localhost
   run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-keys
 
-- name: Validate each ssh_role_users entry
+- name: SSH | Validate | Assert key file modes are valid
+  ansible.builtin.assert:
+    that:
+      - ssh_key_mode_private is match('^0[0-7]{3}$')
+      - ssh_key_mode_public is match('^0[0-7]{3}$')
+      - ssh_key_mode_certificate is not defined or ssh_key_mode_certificate is
+        match('^0[0-7]{3}$')
+    fail_msg: "SSH key modes must be quoted four-digit octal strings such as '0600'
+      or '0644'."
+    success_msg: "SSH key modes are valid."
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-keys
+
+# -----------------------------------------------------------------------------
+# Role user structure
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert ssh_role_users is a list
+  ansible.builtin.assert:
+    that:
+      - _ssh_role_users is defined
+      - _ssh_role_users is sequence
+      - _ssh_role_users is not string
+      - _ssh_role_users is not mapping
+    fail_msg: "ssh_role_users must be a list of user definitions."
+    success_msg: "ssh_role_users is a valid list."
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-users
+
+- name: SSH | Validate | Assert each ssh_role_users entry is a mapping
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+    fail_msg: "Each ssh_role_users entry must be a mapping/dictionary."
+  loop: "{{ _ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-users
+
+- name: SSH | Validate | Assert each SSH user has a valid name
   ansible.builtin.assert:
     that:
       - item.name is defined
+      - item.name is string
       - item.name | length > 0
-    fail_msg: "Each user entry must define a non-empty 'name' field"
-  loop: "{{ ssh_role_users }}"
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+    fail_msg: "Each SSH user entry must define a valid Linux username."
+  loop: "{{ _ssh_role_users }}"
   loop_control:
-    label: "{{ item.name | default('undefined') }}"
+    label: "{{ item.name | default('undefined-user') }}"
   delegate_to: localhost
   run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-users
 
-- name: Validate SSH output paths are defined
+- name: SSH | Validate | Build SSH user name list
+  ansible.builtin.set_fact:
+    _ssh_role_user_names: "{{ _ssh_role_users | map(attribute='name') | list }}"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-users
+
+- name: SSH | Validate | Assert SSH user names are unique
+  ansible.builtin.assert:
+    that:
+      - _ssh_role_user_names | length == _ssh_role_user_names | unique | length
+    fail_msg: "Duplicate user names detected in ssh_role_users."
+    success_msg: "SSH user names are unique."
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-users
+
+- name: SSH | Validate | Assert SSH user state values are valid
+  ansible.builtin.assert:
+    that:
+      - item.state is not defined or item.state in ["present", "absent"]
+    fail_msg: "User {{ item.name }} has invalid state={{ item.state |
+      default('undefined') }}."
+  loop: "{{ _ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-users
+
+# -----------------------------------------------------------------------------
+# User SSH principals
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert ssh_principals is a mapping
+  ansible.builtin.assert:
+    that:
+      - _ssh_principals_effective is mapping
+    fail_msg: "ssh_principals must be a mapping of username to principal list."
+    success_msg: "ssh_principals mapping is valid."
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-principals
+
+- name: SSH | Validate | Assert per-user ssh_principals are lists
+  ansible.builtin.assert:
+    that:
+      - item.ssh_principals is not defined or item.ssh_principals is sequence
+      - item.ssh_principals is not defined or item.ssh_principals is not string
+      - item.ssh_principals is not defined or item.ssh_principals is not mapping
+    fail_msg: "User {{ item.name }} ssh_principals must be a list when defined."
+  loop: "{{ _ssh_role_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-principals
+
+- name: SSH | Validate | Assert per-user SSH principal values are valid
+  ansible.builtin.assert:
+    that:
+      - principal is string
+      - principal | length > 0
+      - principal is not search('\\s')
+    fail_msg: "User {{ item.0.name }} has invalid SSH principal: {{ principal }}"
+  loop: "{{ _ssh_role_users | subelements('ssh_principals', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }} -> {{ item.1 }}"
+  vars:
+    principal: "{{ item.1 }}"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-principals
+
+- name: SSH | Validate | Assert principal map values are lists
+  ansible.builtin.assert:
+    that:
+      - item.value is sequence
+      - item.value is not string
+      - item.value is not mapping
+    fail_msg: "ssh_principals.{{ item.key }} must be a list of principal names."
+  loop: "{{ _ssh_principals_effective | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-principals
+
+- name: SSH | Validate | Assert principal map keys reference managed users
+  ansible.builtin.assert:
+    that:
+      - item.key in _ssh_role_user_names
+    fail_msg: >-
+      ssh_principals defines {{ item.key }}, but that user is not present in
+      ssh_role_users.
+    success_msg: "ssh_principals.{{ item.key }} references a managed user."
+  loop: "{{ _ssh_principals_effective | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: ssh_validate_principal_map_users | default(true) | bool
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-principals
+
+- name: SSH | Validate | Assert principal map values are valid strings
+  ansible.builtin.assert:
+    that:
+      - principal is string
+      - principal | length > 0
+      - principal is not search('\\s')
+    fail_msg: "ssh_principals.{{ item.0.key }} contains invalid principal: {{
+      principal }}"
+  loop: "{{ _ssh_principals_effective | dict2items | subelements('value') }}"
+  loop_control:
+    label: "{{ item.0.key }} -> {{ item.1 }}"
+  vars:
+    principal: "{{ item.1 }}"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-principals
+
+# -----------------------------------------------------------------------------
+# Output paths
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert SSH output paths are defined and absolute
   ansible.builtin.assert:
     that:
       - ssh_output_root is defined
+      - ssh_output_root is string
+      - ssh_output_root is match('^/')
+      - ssh_output_root | length > 1
       - ssh_output_base is defined
-    fail_msg: "SSH output paths (ssh_output_root, ssh_output_base) must be defined"
+      - ssh_output_base is string
+      - ssh_output_base is match('^/')
+      - ssh_output_base | length > 1
+      - ssh_ca_output_dir is defined
+      - ssh_ca_output_dir is string
+      - ssh_ca_output_dir is match('^/')
+      - ssh_ca_output_dir | length > 1
+    fail_msg: >-
+      SSH output paths must be defined as absolute paths: ssh_output_root,
+      ssh_output_base, ssh_ca_output_dir.
+    success_msg: "SSH output paths are valid."
   delegate_to: localhost
   run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-paths
 
-- name: Validate SSH CA configuration when enabled
+- name: SSH | Validate | Assert SSH output paths are not dangerous system paths
   ansible.builtin.assert:
     that:
-      - ssh_ca_key_type in ssh_supported_key_types
-      - ssh_ca_output_dir is defined
+      - ssh_output_root not in ["/", "/etc", "/usr", "/var", "/tmp", "/root",
+        "/home"]
+      - ssh_output_base not in ["/", "/etc", "/usr", "/var", "/tmp", "/root",
+        "/home"]
+      - ssh_ca_output_dir not in ["/", "/etc", "/usr", "/var", "/tmp", "/root",
+        "/home"]
+    fail_msg: "SSH output paths must not point directly at dangerous system directories."
+    success_msg: "SSH output paths are not dangerous system directories."
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-paths
+
+# -----------------------------------------------------------------------------
+# SSH CA validation
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert SSH CA configuration is valid when enabled
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_enabled is defined
+      - ssh_ca_key_type in _ssh_supported_key_types
+      - ssh_ca_private_key_path is defined
+      - ssh_ca_private_key_path is string
+      - ssh_ca_private_key_path is match('^/')
+      - ssh_ca_public_key_path is defined
+      - ssh_ca_public_key_path is string
+      - ssh_ca_public_key_path is match('^/')
       - ssh_ca_cert_validity is defined
-    fail_msg: "SSH CA configuration is incomplete or invalid"
+      - ssh_ca_cert_validity is string
+      - ssh_ca_cert_validity | length > 0
+    fail_msg: "SSH CA configuration is incomplete or invalid."
+    success_msg: "SSH CA configuration is valid."
   when: ssh_ca_enabled | bool
   delegate_to: localhost
   run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-ca
 
-- name: Validate CA RSA key bits when using RSA
+- name: SSH | Validate | Assert CA RSA key bits are strong enough
   ansible.builtin.assert:
     that:
       - ssh_ca_key_bits is defined
-      - ssh_ca_key_bits | int >= 2048
-    fail_msg: "ssh_ca_key_bits must be defined and >= 2048 when using RSA CA keys"
+      - ssh_ca_key_bits | int >= (_ssh_key_type_defaults.rsa.minimum_bits |
+        default(3072) | int)
+    fail_msg: >-
+      ssh_ca_key_bits must be >= {{ _ssh_key_type_defaults.rsa.minimum_bits |
+      default(3072) }} when ssh_ca_key_type=rsa.
+    success_msg: "RSA CA key size is valid."
   when:
     - ssh_ca_enabled | bool
-    - ssh_ca_key_type == 'rsa'
+    - ssh_ca_key_type == "rsa"
   delegate_to: localhost
   run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-ca
 
-- name: Validate CA certificate extensions list
+- name: SSH | Validate | Assert CA ECDSA key bits are valid
   ansible.builtin.assert:
     that:
-      - ssh_ca_cert_extensions is iterable
-    fail_msg: "ssh_ca_cert_extensions must be a list"
+      - ssh_ca_key_bits is defined
+      - ssh_ca_key_bits | int in (_ssh_key_type_defaults.ecdsa.allowed_bits |
+        default([256, 384, 521]))
+    fail_msg: >-
+      ssh_ca_key_bits must be one of {{
+      _ssh_key_type_defaults.ecdsa.allowed_bits | default([256, 384, 521]) |
+      join(', ') }} when ssh_ca_key_type=ecdsa.
+    success_msg: "ECDSA CA key size is valid."
+  when:
+    - ssh_ca_enabled | bool
+    - ssh_ca_key_type == "ecdsa"
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-ca
+
+- name: SSH | Validate | Assert CA key file modes are valid
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_key_mode_private is match('^0[0-7]{3}$')
+      - ssh_ca_key_mode_public is match('^0[0-7]{3}$')
+    fail_msg: "SSH CA key modes must be quoted four-digit octal strings."
+    success_msg: "SSH CA key modes are valid."
   when: ssh_ca_enabled | bool
   delegate_to: localhost
   run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-ca
+
+- name: SSH | Validate | Assert CA certificate extensions are a list
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_cert_extensions is defined
+      - ssh_ca_cert_extensions is sequence
+      - ssh_ca_cert_extensions is not string
+      - ssh_ca_cert_extensions is not mapping
+    fail_msg: "ssh_ca_cert_extensions must be a list."
+    success_msg: "SSH CA certificate extension list is valid."
+  when: ssh_ca_enabled | bool
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-ca
+
+- name: SSH | Validate | Assert CA certificate extension values are valid
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | length > 0
+      - item is match('^[A-Za-z0-9_-]+$')
+    fail_msg: "Invalid SSH certificate extension: {{ item }}"
+  loop: "{{ ssh_ca_cert_extensions }}"
+  loop_control:
+    label: "{{ item }}"
+  when: ssh_ca_enabled | bool
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-ca
+
+- name: SSH | Validate | Warn when broad certificate forwarding extensions are
+    enabled
+  ansible.builtin.debug:
+    msg:
+      - "SSH certificate extension {{ item }} is enabled globally."
+      - "This is powerful and should be intentional."
+  loop:
+    - permit-X11-forwarding
+    - permit-agent-forwarding
+    - permit-port-forwarding
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - ssh_ca_enabled | bool
+    - item in ssh_ca_cert_extensions
+    - ssh_validate_warn_on_broad_extensions | default(true) | bool
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-ca
+
+- name: SSH | Validate | Assert CA critical options are valid
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_cert_critical_options is defined
+      - ssh_ca_cert_critical_options is sequence
+      - ssh_ca_cert_critical_options is not string
+      - ssh_ca_cert_critical_options is not mapping
+    fail_msg: "ssh_ca_cert_critical_options must be a list."
+    success_msg: "SSH CA certificate critical options list is valid."
+  when: ssh_ca_enabled | bool
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-ca
+
+# -----------------------------------------------------------------------------
+# Host certificate validation
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert host certificate settings are valid
+  ansible.builtin.assert:
+    that:
+      - ssh_host_key_type in _ssh_supported_key_types
+      - ssh_host_private_key_path is defined
+      - ssh_host_private_key_path is string
+      - ssh_host_private_key_path is match('^/')
+      - ssh_host_public_key_path is defined
+      - ssh_host_public_key_path is string
+      - ssh_host_public_key_path is match('^/')
+      - ssh_host_certificate_path is defined
+      - ssh_host_certificate_path is string
+      - ssh_host_certificate_path is match('^/')
+      - ssh_host_certificate_validity is defined
+      - ssh_host_certificate_validity is string
+      - ssh_host_certificate_validity | length > 0
+      - ssh_host_certificate_principals is sequence
+      - ssh_host_certificate_principals is not string
+      - ssh_host_certificate_principals is not mapping
+      - ssh_host_certificate_principals | length > 0
+    fail_msg: "SSH host certificate configuration is incomplete or invalid."
+    success_msg: "SSH host certificate configuration is valid."
+  when: ssh_host_certificates_enabled | default(true) | bool
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-host-certs
+
+# -----------------------------------------------------------------------------
+# Managed-node SSH paths
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert managed-node SSH paths are valid
+  ansible.builtin.assert:
+    that:
+      - ssh_trusted_user_ca_keys_path is defined
+      - ssh_trusted_user_ca_keys_path is string
+      - ssh_trusted_user_ca_keys_path is match('^/')
+      - ssh_authorized_principals_dir is defined
+      - ssh_authorized_principals_dir is string
+      - ssh_authorized_principals_dir is match('^/')
+      - ssh_authorized_principals_file is defined
+      - ssh_authorized_principals_file is string
+      - ssh_authorized_principals_file is match('^/')
+    fail_msg: "Managed-node SSH CA/principal paths are invalid."
+    success_msg: "Managed-node SSH CA/principal paths are valid."
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-paths
+
+# -----------------------------------------------------------------------------
+# sshd policy validation
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert sshd authentication policy is valid
+  ansible.builtin.assert:
+    that:
+      - ssh_server_pubkey_authentication in [true, false]
+      - ssh_server_password_authentication in [true, false]
+      - ssh_server_kbd_interactive_authentication in [true, false]
+      - ssh_server_keyboard_interactive_authentication in [true, false]
+      - ssh_server_challenge_response_authentication in [true, false]
+      - ssh_server_permit_empty_passwords in [true, false]
+      - ssh_server_permit_root_login in ssh_sshd_valid_permit_root_login_values
+      - ssh_server_authentication_methods is string
+      - ssh_server_authentication_methods | length > 0
+    fail_msg: "sshd authentication policy contains invalid values."
+    success_msg: "sshd authentication policy is valid."
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-sshd
+
+- name: SSH | Validate | Assert password authentication is disabled when policy
+    requires it
+  ansible.builtin.assert:
+    that:
+      - not (_ssh_policy_effective.require_password_authentication_disabled |
+        default(true) | bool) or not (ssh_server_password_authentication | bool)
+      - not (_ssh_policy_effective.require_keyboard_interactive_disabled |
+        default(true) | bool) or not (ssh_server_kbd_interactive_authentication
+        | bool)
+      - not (_ssh_policy_effective.require_keyboard_interactive_disabled |
+        default(true) | bool) or not
+        (ssh_server_keyboard_interactive_authentication | bool)
+      - not (_ssh_policy_effective.require_root_password_login_disabled |
+        default(true) | bool) or ssh_server_permit_root_login in ["no",
+        "prohibit-password", "forced-commands-only", "without-password"]
+    fail_msg: "SSH policy requires password/root-password login to be disabled."
+    success_msg: "SSH password authentication policy is compliant."
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-policy
+
+- name: SSH | Validate | Assert sshd connection policy is valid
+  ansible.builtin.assert:
+    that:
+      - ssh_server_port | int > 0
+      - ssh_server_port | int <= 65535
+      - ssh_server_listen_addresses is sequence
+      - ssh_server_listen_addresses is not string
+      - ssh_server_address_family in ssh_sshd_valid_address_family_values
+      - ssh_server_gateway_ports in ssh_sshd_valid_gateway_ports_values
+      - ssh_server_permit_tunnel in ssh_sshd_valid_permit_tunnel_values
+      - ssh_server_compression in ssh_sshd_valid_compression_values
+      - ssh_server_log_level in ssh_sshd_valid_log_levels
+      - ssh_server_syslog_facility in ssh_sshd_valid_syslog_facilities
+      - ssh_server_client_alive_interval | int >= 0
+      - ssh_server_client_alive_count_max | int >= 0
+      - ssh_server_login_grace_time | int >= 0
+      - ssh_server_max_auth_tries | int > 0
+      - ssh_server_max_sessions | int >= 0
+    fail_msg: "sshd connection/session policy contains invalid values."
+    success_msg: "sshd connection/session policy is valid."
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-sshd
+
+- name: SSH | Validate | Assert sshd allow lists are valid lists
+  ansible.builtin.assert:
+    that:
+      - ssh_server_allow_users is sequence
+      - ssh_server_allow_users is not string
+      - ssh_server_allow_users is not mapping
+      - ssh_server_allow_groups is sequence
+      - ssh_server_allow_groups is not string
+      - ssh_server_allow_groups is not mapping
+    fail_msg: "ssh_server_allow_users and ssh_server_allow_groups must be lists."
+    success_msg: "sshd allow-list values are valid."
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-sshd
+
+# -----------------------------------------------------------------------------
+# SSH login banner
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert banner policy is valid
+  ansible.builtin.assert:
+    that:
+      - ssh_server_banner_enabled in [true, false]
+      - not (ssh_server_banner_enabled | bool) or ssh_server_banner_path is
+        match('^/')
+      - not (ssh_server_banner_enabled | bool) or ssh_server_banner_content is
+        string
+      - not (ssh_server_banner_enabled | bool) or ssh_server_banner_content |
+        length > 0
+    fail_msg: "SSH banner is enabled but banner path/content are invalid."
+    success_msg: "SSH banner policy is valid."
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-banner
+
+# -----------------------------------------------------------------------------
+# SSH client config validation
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert client config values are valid
+  ansible.builtin.assert:
+    that:
+      - ssh_client_config_enabled in [true, false]
+      - ssh_client_config_path is string
+      - ssh_client_config_path | length > 0
+      - ssh_client_identity_file is string
+      - ssh_client_identity_file | length > 0
+      - ssh_client_certificate_file is string
+      - ssh_client_certificate_file | length > 0
+      - ssh_client_identities_only in [true, false]
+      - ssh_client_pubkey_authentication in [true, false]
+      - ssh_client_password_authentication in [true, false]
+      - ssh_client_strict_host_key_checking in
+        ssh_client_valid_strict_host_key_checking_values
+      - ssh_client_server_alive_interval | int >= 0
+      - ssh_client_server_alive_count_max | int >= 0
+      - ssh_client_connect_timeout | int >= 0
+      - ssh_client_hosts is sequence
+      - ssh_client_hosts is not string
+      - ssh_client_hosts is not mapping
+    fail_msg: "SSH client config values are invalid."
+    success_msg: "SSH client config values are valid."
+  when: ssh_client_config_enabled | bool
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-client
+
+- name: SSH | Validate | Assert client host entries are valid
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.pattern is defined
+      - item.pattern is string
+      - item.pattern | length > 0
+      - item.strict_host_key_checking is not defined or
+        item.strict_host_key_checking in
+        ssh_client_valid_strict_host_key_checking_values
+    fail_msg: "Invalid SSH client host entry: {{ item }}"
+  loop: "{{ ssh_client_hosts }}"
+  loop_control:
+    label: "{{ item.pattern | default('undefined-pattern') }}"
+  when: ssh_client_config_enabled | bool
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-client
+
+# -----------------------------------------------------------------------------
+# Known hosts validation
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert known_hosts CA trust values are valid
+  ansible.builtin.assert:
+    that:
+      - ssh_known_hosts_enabled in [true, false]
+      - ssh_known_hosts_file is string
+      - ssh_known_hosts_file | length > 0
+      - ssh_known_hosts_cert_authority_patterns is sequence
+      - ssh_known_hosts_cert_authority_patterns is not string
+      - ssh_known_hosts_cert_authority_patterns is not mapping
+      - ssh_known_hosts_strict_host_key_checking in
+        ssh_client_valid_strict_host_key_checking_values
+    fail_msg: "SSH known_hosts configuration is invalid."
+    success_msg: "SSH known_hosts configuration is valid."
+  when: ssh_known_hosts_enabled | bool
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-known-hosts
+
+- name: SSH | Validate | Assert known_hosts CA patterns are valid
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | length > 0
+      - item is not search('\\s')
+    fail_msg: "Invalid known_hosts certificate authority pattern: {{ item }}"
+  loop: "{{ ssh_known_hosts_cert_authority_patterns }}"
+  loop_control:
+    label: "{{ item }}"
+  when: ssh_known_hosts_enabled | bool
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-known-hosts
+
+# -----------------------------------------------------------------------------
+# Policy cross-checks
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Assert protected users are managed
+  ansible.builtin.assert:
+    that:
+      - protected_user in _ssh_role_user_names
+    fail_msg: "Protected SSH user {{ protected_user }} is listed in policy but not
+      managed by ssh_role_users."
+  loop: "{{ _ssh_policy_effective.protected_users | default([]) }}"
+  loop_control:
+    loop_var: protected_user
+    label: "{{ protected_user }}"
+  when: ssh_validate_policy_users | default(true) | bool
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-policy
+
+- name: SSH | Validate | Assert managed certificate users are managed
+  ansible.builtin.assert:
+    that:
+      - managed_cert_user in _ssh_role_user_names
+    fail_msg: >-
+      Managed certificate user {{ managed_cert_user }} is listed in policy but
+      not managed by ssh_role_users.
+  loop: "{{ _ssh_policy_effective.managed_certificate_users | default([]) }}"
+  loop_control:
+    loop_var: managed_cert_user
+    label: "{{ managed_cert_user }}"
+  when: ssh_validate_policy_users | default(true) | bool
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-validate-policy
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Validate | Show validation summary
+  ansible.builtin.debug:
+    msg:
+      - "SSH role input validation complete."
+      - "Users declared: {{ _ssh_role_users | length }}"
+      - "User names: {{ _ssh_role_user_names | join(', ') }}"
+      - "User key type: {{ ssh_key_type }}"
+      - "CA enabled: {{ ssh_ca_enabled | bool }}"
+      - "CA key type: {{ ssh_ca_key_type if ssh_ca_enabled | bool else
+        'disabled' }}"
+      - "Host certificates enabled: {{ ssh_host_certificates_enabled |
+        default(true) | bool }}"
+      - "Password authentication disabled: {{ not
+        (ssh_server_password_authentication | bool) }}"
+      - "SSH output base: {{ ssh_output_base }}"
+  when: ssh_role_show_validation_summary | default(true)
+  delegate_to: localhost
+  run_once: true
+  tags:
+    - ssh
+    - ssh-validate
+    - ssh-summary

@@ -1,64 +1,619 @@
 ---
 # =============================================================================
-# Sign SSH User Keys with SSH CA (Local Only)
+# SSH Role - Sign User SSH Keys with SSH CA
 # -----------------------------------------------------------------------------
-# Signs generated user public keys using the SSH Certificate Authority.
-# Runs ONLY on the Ansible control node.
+# Purpose:
+#   Signs generated user public keys with the SSH Certificate Authority.
+#
+# Execution:
+#   - Runs only once.
+#   - Delegates to localhost.
+#   - Never signs keys on managed hosts.
 #
 # Produces:
-#   {{ ssh_output_base }}/<username>/id_<type>-cert.pub
+#   {{ ssh_user_materials_output_dir | default(ssh_output_base) }}/<username>/id_<type>-cert.pub
 #
-# This task assumes:
-# - User keys already exist (generate-keys.yaml)
-# - SSH CA keys already exist (generate-ca.yaml)
+# Assumes:
+#   - User keys already exist from generate-keys.yaml.
+#   - SSH CA keypair already exists from generate-ca.yaml.
+#
+# Safety:
+#   - Skips absent users.
+#   - Skips users with manage_ssh=false.
+#   - Refuses symlinked CA keys, public keys, and certificates.
+#   - Does not re-sign existing certificates unless ssh_ca_force_resign=true.
+#   - Backs up existing certificates before forced re-signing.
+#   - Supports ssh.principals user mappings and per-user ssh_principals.
 # =============================================================================
 
-- name: Ensure SSH CA signing is enabled
+# -----------------------------------------------------------------------------
+# Normalize inputs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Normalize signing inputs
+  ansible.builtin.set_fact:
+    ssh_sign_output_base_effective: "{{ ssh_user_materials_output_dir | default(ssh_output_base) }}"
+    ssh_sign_users_effective: "{{ ssh_role_users | default([]) }}"
+    ssh_sign_ca_private_key_path_effective: "{{ ssh_ca_private_key_path | default(ssh_ca_output_dir ~ '/ssh_ca') }}"
+    ssh_sign_ca_public_key_path_effective: "{{ ssh_ca_public_key_path | default(ssh_ca_output_dir ~ '/ssh_ca.pub') }}"
+    ssh_sign_force_resign_effective: "{{ ssh_ca_force_resign | default(false) | bool }}"
+    ssh_sign_backup_enabled_effective: "{{ ssh_sign_backup_before_resign | default(true) | bool }}"
+    ssh_sign_principals_map_effective: "{{ ssh_principals | default(ssh.principals |
+      default({}) if ssh is defined else {}) }}"
+    ssh_sign_owner_effective: >-
+      {{
+        ssh_outputs_owner
+        | default(
+            ssh_controller_local_user
+            | default(lookup('ansible.builtin.pipe', 'id -un') | trim)
+          )
+      }}
+    ssh_sign_group_effective: >-
+      {{
+        ssh_outputs_group
+        | default(
+            ssh_controller_local_group
+            | default(lookup('ansible.builtin.pipe', 'id -gn') | trim)
+          )
+      }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+# -----------------------------------------------------------------------------
+# Validate
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Assert SSH CA signing is enabled
   ansible.builtin.assert:
     that:
       - ssh_ca_enabled | bool
-    fail_msg: "SSH CA signing is disabled (ssh_ca_enabled=false)"
+    fail_msg: "SSH CA signing is disabled because ssh_ca_enabled=false."
+    success_msg: "SSH CA signing is enabled."
   delegate_to: localhost
+  become: false
   run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
 
-- name: Sign SSH user keys with CA
-  ansible.builtin.command: >
-    ssh-keygen
-    -s {{ ssh_ca_output_dir }}/ssh_ca
-    -I {{ item.name }}
-    -n {{ (item.ssh_principals | default([item.name])) | join(',') }}
-    -V {{ ssh_ca_cert_validity }}
-    {% if ssh_ca_cert_extensions | length > 0 %}
-    -O {{ ssh_ca_cert_extensions | join(' -O ') }}
-    {% endif %}
-    {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub
+- name: SSH | Sign | Validate signing configuration
+  ansible.builtin.assert:
+    that:
+      - ssh_sign_output_base_effective is string
+      - ssh_sign_output_base_effective is match('^/')
+      - ssh_sign_output_base_effective | length > 1
+      - ssh_sign_output_base_effective not in ['/', '/etc', '/usr', '/var',
+        '/tmp', '/root', '/home']
+      - ssh_sign_users_effective is sequence
+      - ssh_sign_users_effective is not string
+      - ssh_sign_users_effective is not mapping
+      - ssh_key_type is defined
+      - ssh_key_type in ssh_supported_key_types
+      - ssh_ca_cert_validity is defined
+      - ssh_ca_cert_validity is string
+      - ssh_ca_cert_validity | length > 0
+      - ssh_ca_cert_extensions is sequence
+      - ssh_ca_cert_extensions is not string
+      - ssh_ca_cert_extensions is not mapping
+      - ssh_ca_cert_critical_options is sequence
+      - ssh_ca_cert_critical_options is not string
+      - ssh_ca_cert_critical_options is not mapping
+      - ssh_sign_principals_map_effective is mapping
+    fail_msg: "SSH certificate signing configuration is invalid."
+    success_msg: "SSH certificate signing configuration is valid."
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Validate user entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+    fail_msg: "Each ssh_role_users entry must be a mapping with a valid Linux username."
+  loop: "{{ ssh_sign_users_effective }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+# -----------------------------------------------------------------------------
+# Build signing jobs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Build user certificate signing jobs
+  ansible.builtin.set_fact:
+    ssh_sign_jobs: >-
+      {%- set jobs = [] -%} {%- for user in ssh_sign_users_effective -%}
+        {%- set state = user.state | default('present') -%}
+        {%- set manage_ssh = user.manage_ssh | default(users_default_manage_ssh | default(true)) -%}
+        {%- if state == 'present' and manage_ssh | bool -%}
+          {%- set key_dir = ssh_sign_output_base_effective ~ '/' ~ user.name -%}
+          {%- set key_name = 'id_' ~ ssh_key_type -%}
+          {%- set mapped_principals = ssh_sign_principals_map_effective[user.name] | default([]) -%}
+          {%- set user_principals = user.ssh_principals | default([]) -%}
+          {%- set final_principals = (
+                user_principals
+                if user_principals | length > 0
+                else (
+                  mapped_principals
+                  if mapped_principals | length > 0
+                  else (
+                    ssh_ca_default_principals
+                    if ssh_ca_default_principals | default([]) | length > 0
+                    else [user.name]
+                  )
+                )
+              )
+          -%}
+          {%- set _ = jobs.append({
+            'name': user.name,
+            'key_id': user.ssh_certificate_key_id | default(user.name),
+            'directory': key_dir,
+            'public_key_path': key_dir ~ '/' ~ key_name ~ '.pub',
+            'certificate_path': key_dir ~ '/' ~ key_name ~ '-cert.pub',
+            'principals': final_principals | unique | list,
+            'validity': user.ssh_certificate_validity | default(ssh_ca_cert_validity),
+            'extensions': user.ssh_certificate_extensions | default(ssh_ca_cert_extensions | default([])),
+            'critical_options': user.ssh_certificate_critical_options | default(ssh_ca_cert_critical_options | default([]))
+          }) -%}
+        {%- endif -%}
+      {%- endfor -%} {{ jobs }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Validate signing jobs
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.key_id is string
+      - item.key_id | length > 0
+      - item.directory is match('^/')
+      - item.public_key_path is match('^/')
+      - item.certificate_path is match('^/')
+      - item.public_key_path.startswith(item.directory ~ '/')
+      - item.certificate_path.startswith(item.directory ~ '/')
+      - item.principals is sequence
+      - item.principals is not string
+      - item.principals is not mapping
+      - item.principals | length > 0
+      - item.validity is string
+      - item.validity | length > 0
+      - item.extensions is sequence
+      - item.extensions is not string
+      - item.extensions is not mapping
+      - item.critical_options is sequence
+      - item.critical_options is not string
+      - item.critical_options is not mapping
+    fail_msg: "Invalid SSH certificate signing job: {{ item }}"
+  loop: "{{ ssh_sign_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Validate signing job principals
+  ansible.builtin.assert:
+    that:
+      - principal is string
+      - principal | length > 0
+      - principal is not search('\\s')
+    fail_msg: "Invalid SSH certificate principal for {{ item.0.name }}: {{ principal }}"
+  loop: "{{ ssh_sign_jobs | subelements('principals') }}"
+  loop_control:
+    label: "{{ item.0.name }} -> {{ item.1 }}"
+  vars:
+    principal: "{{ item.1 }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+# -----------------------------------------------------------------------------
+# CA key inspection
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Stat SSH CA private key
+  ansible.builtin.stat:
+    path: "{{ ssh_sign_ca_private_key_path_effective }}"
+    follow: false
+  register: ssh_sign_ca_private_key_stat
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Stat SSH CA public key
+  ansible.builtin.stat:
+    path: "{{ ssh_sign_ca_public_key_path_effective }}"
+    follow: false
+  register: ssh_sign_ca_public_key_stat
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Assert SSH CA keypair exists
+  ansible.builtin.assert:
+    that:
+      - ssh_sign_ca_private_key_stat.stat.exists | default(false) | bool
+      - ssh_sign_ca_public_key_stat.stat.exists | default(false) | bool
+      - not (ssh_sign_ca_private_key_stat.stat.islnk | default(false) | bool)
+      - not (ssh_sign_ca_public_key_stat.stat.islnk | default(false) | bool)
+    fail_msg: >-
+      SSH CA keypair is missing or symlinked. Expected private={{
+      ssh_sign_ca_private_key_path_effective }}, public={{
+      ssh_sign_ca_public_key_path_effective }}. Run generate-ca.yaml first.
+    success_msg: "SSH CA keypair exists and is not symlinked."
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+# -----------------------------------------------------------------------------
+# User public key / certificate inspection
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Stat user public keys
+  ansible.builtin.stat:
+    path: "{{ item.public_key_path }}"
+    follow: false
+  loop: "{{ ssh_sign_jobs }}"
+  loop_control:
+    label: "{{ item.name }} public key"
+  register: ssh_sign_public_key_stats
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Stat existing user certificates
+  ansible.builtin.stat:
+    path: "{{ item.certificate_path }}"
+    follow: false
+  loop: "{{ ssh_sign_jobs }}"
+  loop_control:
+    label: "{{ item.name }} certificate"
+  register: ssh_sign_certificate_stats
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Assert public keys exist and are not symlinks
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false) | bool
+      - not (item.stat.islnk | default(false) | bool)
+    fail_msg: >-
+      Public key for {{ item.item.name }} is missing or symlinked: {{
+      item.item.public_key_path }}. Run generate-keys.yaml first.
+  loop: "{{ ssh_sign_public_key_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Refuse symlinked existing certificates
+  ansible.builtin.fail:
+    msg: >-
+      SSH certificate for {{ item.item.name }} is a symlink: {{
+      item.item.certificate_path }}. Refusing to overwrite symlinked certificate
+      material.
+  when: item.stat.islnk | default(false) | bool
+  loop: "{{ ssh_sign_certificate_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+# -----------------------------------------------------------------------------
+# Forced re-sign backup / removal
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Create timestamp for forced certificate backup
+  ansible.builtin.set_fact:
+    ssh_sign_backup_timestamp: "{{ lookup('ansible.builtin.pipe', 'date +%Y%m%d%H%M%S') | trim }}"
+  when:
+    - ssh_sign_force_resign_effective | bool
+    - ssh_sign_backup_enabled_effective | bool
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Ensure forced re-sign backup directories exist
+  ansible.builtin.file:
+    path: "{{ item.directory }}/backup-{{ ssh_sign_backup_timestamp }}"
+    state: directory
+    owner: "{{ ssh_sign_owner_effective }}"
+    group: "{{ ssh_sign_group_effective }}"
+    mode: "0700"
+  loop: "{{ ssh_sign_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - ssh_sign_force_resign_effective | bool
+    - ssh_sign_backup_enabled_effective | bool
+    - ssh_sign_backup_timestamp is defined
+  delegate_to: localhost
+  become: "{{ ssh_sign_fix_permissions_with_become | default(false) | bool }}"
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Backup existing certificates before forced re-sign
+  ansible.builtin.copy:
+    src: "{{ item.item.certificate_path }}"
+    dest: "{{ item.item.directory }}/backup-{{ ssh_sign_backup_timestamp }}/{{
+      item.item.certificate_path | basename }}"
+    remote_src: true
+    owner: "{{ ssh_sign_owner_effective }}"
+    group: "{{ ssh_sign_group_effective }}"
+    mode: "{{ ssh_key_mode_certificate | default(ssh_key_mode_public |
+      default('0644')) }}"
+  when:
+    - ssh_sign_force_resign_effective | bool
+    - ssh_sign_backup_enabled_effective | bool
+    - ssh_sign_backup_timestamp is defined
+    - item.stat.exists | default(false) | bool
+  loop: "{{ ssh_sign_certificate_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: "{{ ssh_sign_fix_permissions_with_become | default(false) | bool }}"
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+- name: SSH | Sign | Remove existing certificates before forced re-sign
+  ansible.builtin.file:
+    path: "{{ item.certificate_path }}"
+    state: absent
+  loop: "{{ ssh_sign_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ssh_sign_force_resign_effective | bool
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+# -----------------------------------------------------------------------------
+# Build ssh-keygen signing command
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Build signing commands
+  ansible.builtin.set_fact:
+    ssh_sign_commands: >-
+      {%- set commands = [] -%} {%- for job in ssh_sign_jobs -%}
+        {%- set cmd = [
+          'ssh-keygen',
+          '-s', ssh_sign_ca_private_key_path_effective,
+          '-I', job.key_id,
+          '-n', job.principals | join(','),
+          '-V', job.validity
+        ] -%}
+
+        {%- for extension in job.extensions -%}
+          {%- set _ = cmd.extend(['-O', extension]) -%}
+        {%- endfor -%}
+
+        {%- for critical_option in job.critical_options -%}
+          {%- set _ = cmd.extend(['-O', critical_option]) -%}
+        {%- endfor -%}
+
+        {%- set _ = cmd.append(job.public_key_path) -%}
+        {%- set _ = commands.append({
+          'name': job.name,
+          'certificate_path': job.certificate_path,
+          'public_key_path': job.public_key_path,
+          'command': cmd
+        }) -%}
+      {%- endfor -%} {{ commands }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+# -----------------------------------------------------------------------------
+# Sign certificates
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Sign SSH user public keys with CA
+  ansible.builtin.command:
+    argv: "{{ item.command }}"
   args:
-    creates: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}-cert.pub"
-  loop: "{{ ssh_role_users }}"
+    creates: "{{ item.certificate_path }}"
+  loop: "{{ ssh_sign_commands }}"
   loop_control:
     label: "{{ item.name }}"
+  register: ssh_sign_results
   delegate_to: localhost
+  become: false
   run_once: true
-  when:
-    - ssh_ca_enabled | bool
-    - not ssh_ca_force_resign
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
 
-- name: Force Re-sign SSH user keys with CA
-  ansible.builtin.command: >
-    ssh-keygen
-    -s {{ ssh_ca_output_dir }}/ssh_ca
-    -I {{ item.name }}
-    -n {{ (item.ssh_principals | default([item.name])) | join(',') }}
-    -V {{ ssh_ca_cert_validity }}
-    {% if ssh_ca_cert_extensions | length > 0 %}
-    -O {{ ssh_ca_cert_extensions | join(' -O ') }}
-    {% endif %}
-    {{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub
-  loop: "{{ ssh_role_users }}"
+# -----------------------------------------------------------------------------
+# Permissions
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Set certificate permissions
+  ansible.builtin.file:
+    path: "{{ item.certificate_path }}"
+    state: file
+    owner: "{{ ssh_sign_owner_effective }}"
+    group: "{{ ssh_sign_group_effective }}"
+    mode: "{{ ssh_key_mode_certificate | default(ssh_key_mode_public |
+      default('0644')) }}"
+  loop: "{{ ssh_sign_jobs }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
+  become: "{{ ssh_sign_fix_permissions_with_become | default(false) | bool }}"
   run_once: true
-  when:
-    - ssh_ca_enabled | bool
-    - ssh_ca_force_resign
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+
+# -----------------------------------------------------------------------------
+# Verify certificates
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Read generated SSH certificates
+  ansible.builtin.command:
+    cmd: "ssh-keygen -L -f {{ item.certificate_path }}"
+  loop: "{{ ssh_sign_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: ssh_sign_certificate_verify_results
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+    - ssh-certificates-verify
+
+- name: SSH | Sign | Assert generated SSH certificates are readable
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | length > 0
+      - "'Type: ssh-' in item.stdout"
+      - "'Signing CA:' in item.stdout"
+    fail_msg: "Generated SSH certificate is not readable for {{ item.item.name }}."
+  loop: "{{ ssh_sign_certificate_verify_results.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-certificates
+    - ssh-certificates-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Sign | Show SSH signing summary
+  ansible.builtin.debug:
+    msg:
+      - "SSH user certificate signing complete."
+      - "CA private key: {{ ssh_sign_ca_private_key_path_effective }}"
+      - "Output base: {{ ssh_sign_output_base_effective }}"
+      - >-
+        Signed users: {{
+          ssh_sign_jobs
+          | map(attribute='name')
+          | list
+          | join(', ')
+          if ssh_sign_jobs | length > 0
+          else 'none'
+        }}
+      - "Validity: {{ ssh_ca_cert_validity }}"
+      - "Forced re-sign: {{ ssh_sign_force_resign_effective }}"
+      - "Backups enabled: {{ ssh_sign_backup_enabled_effective }}"
+      - "Backup timestamp: {{ ssh_sign_backup_timestamp | default('none') }}"
+      - >-
+        Signed/changed this run: {{
+          ssh_sign_results.results
+          | default([])
+          | selectattr('changed', 'equalto', true)
+          | list
+          | length
+        }}
+  when: ssh_role_show_summary | default(true)
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-sign
+    - ssh-summary

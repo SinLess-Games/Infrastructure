@@ -1,50 +1,287 @@
 ---
 # =============================================================================
-# Set Default Login Shell (OPT-IN)
+# shell-config — set-default-shell
 # -----------------------------------------------------------------------------
-# - Changes the user's login shell to zsh
-# - Skips system / nologin users
-# - Requires explicit enable flag
-# - Idempotent and safe
+# Purpose:
+#   Sets login shells for explicitly managed interactive users.
 #
-# Controlled by:
-#   shell_set_default_shell: true
+# Safety:
+#   - Controlled by shell_set_default_shell.
+#   - Skips absent users.
+#   - Skips system users by default.
+#   - Skips non-interactive shells by default.
+#   - Validates desired shell binaries exist before changing users.
+#   - Uses shell__home_users/shell__resolved_users from validate.yaml.
+#
+# Notes:
+#   - This task should be the canonical place for login-shell changes.
+#   - Avoid also changing shells in configure.yaml unless intentionally desired.
 # =============================================================================
 
-- name: Assert shell switching is explicitly enabled
+# -----------------------------------------------------------------------------
+# Normalize inputs
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Default Shell | Normalize inputs
+  ansible.builtin.set_fact:
+    shell__default_shell_enabled: "{{ shell_set_default_shell | default(false) | bool }}"
+    shell__default_shell_users_source: "{{ shell__home_users | default(shell__resolved_users | default([])) }}"
+    shell__default_shell_skip_system_users: "{{ shell_skip_system_users | default(true) | bool }}"
+    shell__default_shell_noninteractive_safe: "{{ shell_noninteractive_safe | default(true) | bool }}"
+    shell__default_shell_noninteractive_shells: >-
+      {{
+        shell_noninteractive_shells
+        | default(['/usr/sbin/nologin', '/sbin/nologin', '/bin/false', '/usr/bin/false'])
+      }}
+    shell__default_shell_fallback: "{{ shell_default_shell | default('/usr/bin/zsh') }}"
+  changed_when: false
+  tags:
+    - shell
+    - shell-default-shell
+
+# -----------------------------------------------------------------------------
+# Validate controls
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Default Shell | Validate controls
   ansible.builtin.assert:
     that:
-      - shell_set_default_shell | default(false) | bool
-    fail_msg: >
-      Default shell changes are disabled by default.
-      Set shell_set_default_shell=true to enable.
-  when: shell_set_default_shell is defined
+      - shell_set_default_shell | default(false) | type_debug == 'bool'
+      - shell__default_shell_users_source is sequence
+      - shell__default_shell_users_source is not string
+      - shell__default_shell_users_source is not mapping
+      - shell__default_shell_fallback is string
+      - shell__default_shell_fallback is match('^/')
+    fail_msg: "Default shell configuration inputs are invalid."
+    success_msg: "Default shell configuration inputs are valid."
+  tags:
+    - shell
+    - shell-default-shell
+    - shell-validate
 
-- name: Ensure zsh exists at expected path
+# -----------------------------------------------------------------------------
+# Build shell change jobs
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Default Shell | Build default shell jobs
+  ansible.builtin.set_fact:
+    shell__default_shell_jobs: >-
+      {%- set jobs = [] -%} {%- for user in shell__default_shell_users_source
+      -%}
+        {%- set state = user.state | default('present') -%}
+        {%- set desired_shell = user.shell | default(shell__default_shell_fallback) -%}
+        {%- set is_system = user.system | default(false) | bool -%}
+        {%- set is_noninteractive = desired_shell in shell__default_shell_noninteractive_shells -%}
+
+        {%- if state == 'present' -%}
+          {%- if not (shell__default_shell_skip_system_users and is_system) -%}
+            {%- if not (shell__default_shell_noninteractive_safe and is_noninteractive) -%}
+              {%- set _ = jobs.append({
+                'name': user.name,
+                'shell': desired_shell,
+                'home_directory': user.home_directory | default('/root' if user.name == 'root' else '/home/' ~ user.name)
+              }) -%}
+            {%- endif -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%} {{ jobs }}
+  changed_when: false
+  tags:
+    - shell
+    - shell-default-shell
+
+- name: Shell Config | Default Shell | Validate default shell jobs
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.shell is defined
+      - item.shell is string
+      - item.shell is match('^/')
+      - item.shell not in shell__default_shell_noninteractive_shells
+    fail_msg: "Invalid default shell job: {{ item }}"
+  loop: "{{ shell__default_shell_jobs }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') }}"
+  when: shell__default_shell_enabled | bool
+  tags:
+    - shell
+    - shell-default-shell
+    - shell-validate
+
+# -----------------------------------------------------------------------------
+# Validate desired shell binaries
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Default Shell | Build desired shell binary list
+  ansible.builtin.set_fact:
+    shell__default_shell_binaries: >-
+      {{
+        shell__default_shell_jobs
+        | map(attribute='shell')
+        | unique
+        | sort
+        | list
+      }}
+  changed_when: false
+  when: shell__default_shell_enabled | bool
+  tags:
+    - shell
+    - shell-default-shell
+
+- name: Shell Config | Default Shell | Stat desired shell binaries
   ansible.builtin.stat:
-    path: /usr/bin/zsh
-  register: zsh_binary
-  when: shell_set_default_shell | default(false) | bool
+    path: "{{ item }}"
+    follow: false
+  register: shell__default_shell_binary_stats
+  loop: "{{ shell__default_shell_binaries | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  when: shell__default_shell_enabled | bool
+  tags:
+    - shell
+    - shell-default-shell
+    - shell-validate
 
-- name: Fail if zsh binary is missing
-  ansible.builtin.fail:
-    msg: "zsh is not installed at /usr/bin/zsh"
+- name: Shell Config | Default Shell | Assert desired shell binaries exist
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false) | bool
+      - item.stat.isreg | default(false) | bool
+      - not (item.stat.islnk | default(false) | bool)
+    fail_msg: >-
+      Desired shell binary is missing, not a regular file, or symlinked: {{
+      item.item }}. Install the shell package first or correct the user shell
+      path.
+    success_msg: "Desired shell binary is valid: {{ item.item }}"
+  loop: "{{ shell__default_shell_binary_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: shell__default_shell_enabled | bool
+  tags:
+    - shell
+    - shell-default-shell
+    - shell-validate
+
+# -----------------------------------------------------------------------------
+# Ensure shells are listed in /etc/shells
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Default Shell | Ensure desired shells are listed in
+    /etc/shells
+  ansible.builtin.lineinfile:
+    path: /etc/shells
+    line: "{{ item }}"
+    state: present
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ shell__default_shell_binaries | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  become: true
   when:
-    - shell_set_default_shell | default(false) | bool
-    - not zsh_binary.stat.exists
+    - shell__default_shell_enabled | bool
+    - shell_manage_etc_shells | default(true) | bool
+  tags:
+    - shell
+    - shell-default-shell
 
 # -----------------------------------------------------------------------------
-# Change default shell
+# Apply shell changes
 # -----------------------------------------------------------------------------
 
-- name: Set default shell for explicitly configured users
+- name: Shell Config | Default Shell | Set login shell for managed users
   ansible.builtin.user:
     name: "{{ item.name }}"
     shell: "{{ item.shell }}"
-  loop: "{{ shell__resolved_users }}"
+  loop: "{{ shell__default_shell_jobs }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.shell }}"
+  become: true
+  when: shell__default_shell_enabled | bool
+  tags:
+    - shell
+    - shell-default-shell
+
+# -----------------------------------------------------------------------------
+# Verify
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Default Shell | Read passwd entries after shell changes
+  ansible.builtin.command:
+    argv:
+      - getent
+      - passwd
+      - "{{ item.name }}"
+  register: shell__default_shell_passwd_results
+  changed_when: false
+  failed_when: false
+  loop: "{{ shell__default_shell_jobs }}"
   loop_control:
     label: "{{ item.name }}"
   when:
-    - shell_set_default_shell | default(false) | bool
-    - item.shell is defined
-    - item.shell != '/usr/sbin/nologin'
+    - shell__default_shell_enabled | bool
+    - shell_verify_default_shell | default(true) | bool
+  tags:
+    - shell
+    - shell-default-shell
+    - shell-verify
+
+- name: Shell Config | Default Shell | Assert login shells were applied
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout.split(':') | length >= 7
+      - item.stdout.split(':')[6] == item.item.shell
+    fail_msg: >-
+      Login shell was not applied for {{ item.item.name }}. Expected={{
+      item.item.shell }}, actual={{ item.stdout.split(':')[6] if
+      item.stdout.split(':') | length >= 7 else 'unknown' }}.
+    success_msg: "Login shell is correct for {{ item.item.name }}."
+  loop: "{{ shell__default_shell_passwd_results.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - shell__default_shell_enabled | bool
+    - shell_verify_default_shell | default(true) | bool
+  tags:
+    - shell
+    - shell-default-shell
+    - shell-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Default Shell | Show default shell summary
+  ansible.builtin.debug:
+    msg:
+      - "Default shell phase complete."
+      - "Enabled: {{ shell__default_shell_enabled | bool }}"
+      - >-
+        Users updated: {{
+          shell__default_shell_jobs
+          | map(attribute='name')
+          | list
+          | join(', ')
+          if shell__default_shell_jobs | length > 0
+          else 'none'
+        }}
+      - >-
+        Shell binaries: {{
+          shell__default_shell_binaries
+          | default([])
+          | join(', ')
+          if shell__default_shell_binaries | default([]) | length > 0
+          else 'none'
+        }}
+  when: shell_config_show_summary | default(true) | bool
+  tags:
+    - shell
+    - shell-default-shell
+    - shell-summary

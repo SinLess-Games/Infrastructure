@@ -1,87 +1,201 @@
 # =====================================================================
 # zshenv — minimal, fast, non-interactive safe environment setup
-# This file is sourced by *every* zsh (login, interactive, non-interactive).
-# Keep it tiny: exports and PATH only. Heavy logic goes in .zshrc/.zprofile.
+# ---------------------------------------------------------------------
+# This file is sourced by every zsh invocation:
+#   - login shells
+#   - interactive shells
+#   - non-interactive shells
+#   - scripts using zsh
+#
+# Keep this file limited to:
+#   - exports
+#   - PATH setup
+#   - safe directory defaults
+#
+# Do not source plugins, prompts, completions, package managers, or tools here.
+# Heavy shell setup belongs in .zshrc or .zprofile.
 # =====================================================================
 
-# -------- Home shortcuts (templated by Ansible) -----------------------
-export HOME="{{ user.home_directory }}"
-export USER="{{ user.name }}"
+# ---------------------------------------------------------------------
+# User / Home
+# ---------------------------------------------------------------------
+# This template is rendered per managed user by Ansible.
+# Avoid changing HOME/USER when zsh is being invoked under sudo/root unless
+# the environment is missing those values.
 
-# -------- Locale ------------------------------------------------------
-export LANG="en_US.UTF-8"
-export LC_ALL="en_US.UTF-8"
+export HOME="${HOME:-{{ user.home_directory }}}"
+export USER="${USER:-{{ user.name }}}"
+export LOGNAME="${LOGNAME:-$USER}"
 
-# -------- XDG Base Directories ---------------------------------------
-export XDG_CONFIG_HOME="$HOME/.config"
-export XDG_CACHE_HOME="$HOME/.cache"
-export XDG_DATA_HOME="$HOME/.local/share"
-export XDG_STATE_HOME="$HOME/.local/state"
+# ---------------------------------------------------------------------
+# Locale
+# ---------------------------------------------------------------------
+# Avoid forcing LC_ALL globally. LC_ALL overrides all locale categories and
+# can break tools when the locale is not generated on a fresh system.
 
-[[ -d "$XDG_CONFIG_HOME" ]] || mkdir -p "$XDG_CONFIG_HOME"
-[[ -d "$XDG_CACHE_HOME"  ]] || mkdir -p "$XDG_CACHE_HOME"
-[[ -d "$XDG_DATA_HOME"   ]] || mkdir -p "$XDG_DATA_HOME"
-[[ -d "$XDG_STATE_HOME"  ]] || mkdir -p "$XDG_STATE_HOME"
+export LANG="${LANG:-en_US.UTF-8}"
+export LC_CTYPE="${LC_CTYPE:-en_US.UTF-8}"
 
-# -------- Editor / Pager defaults ------------------------------------
+# ---------------------------------------------------------------------
+# XDG Base Directories
+# ---------------------------------------------------------------------
+
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+
+# Create only lightweight user-owned directories.
+# This is intentionally quiet because .zshenv is used by non-interactive shells.
+
+for _zshenv_dir in \
+  "$XDG_CONFIG_HOME" \
+  "$XDG_CACHE_HOME" \
+  "$XDG_DATA_HOME" \
+  "$XDG_STATE_HOME" \
+  "$HOME/bin" \
+  "$HOME/.local/bin"
+do
+  if [[ -n "$_zshenv_dir" && ! -d "$_zshenv_dir" && -w "${_zshenv_dir:h}" ]]; then
+    command mkdir -p "$_zshenv_dir" 2>/dev/null || true
+  fi
+done
+unset _zshenv_dir
+
+# ---------------------------------------------------------------------
+# Editor / Pager Defaults
+# ---------------------------------------------------------------------
+
 export EDITOR="${EDITOR:-nvim}"
 export VISUAL="${VISUAL:-$EDITOR}"
 export PAGER="${PAGER:-less}"
 export LESS="${LESS:--RFM}"
 
-# -------- Common CLI preferences -------------------------------------
-export GPG_TTY="$(/usr/bin/tty 2>/dev/null || true)"
-export DOTNET_CLI_TELEMETRY_OPTOUT=1
-export HOMEBREW_NO_ENV_HINTS=1
+# ---------------------------------------------------------------------
+# Common CLI Preferences
+# ---------------------------------------------------------------------
 
-# -------- Vault Configuration ----------------------------------------
+export DOTNET_CLI_TELEMETRY_OPTOUT="${DOTNET_CLI_TELEMETRY_OPTOUT:-1}"
+export HOMEBREW_NO_ENV_HINTS="${HOMEBREW_NO_ENV_HINTS:-1}"
+export DIRENV_LOG_FORMAT="${DIRENV_LOG_FORMAT:-}"
+
+# Only set GPG_TTY when attached to a real terminal.
+# Avoid command substitution noise in non-interactive automation.
+
+if command tty -s 2>/dev/null; then
+  export GPG_TTY="$(command tty)"
+fi
+
+# ---------------------------------------------------------------------
+# Vault Configuration
+# ---------------------------------------------------------------------
+# Default to certificate verification for safer production behavior.
+# Override VAULT_SKIP_VERIFY=true only on systems that intentionally use
+# self-signed/internal certificates without a trusted CA bundle.
+
 export VAULT_ADDR="${VAULT_ADDR:-https://10.10.10.180:8200}"
-export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"
+export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-false}"
 
-# -------- Language & tooling homes (no managers executed here) --------
+if [[ -z "${VAULT_CACERT:-}" && -f "$HOME/.config/vault/ca.crt" ]]; then
+  export VAULT_CACERT="$HOME/.config/vault/ca.crt"
+fi
+
+# ---------------------------------------------------------------------
+# Language / Tooling Homes
+# ---------------------------------------------------------------------
+# Do not execute language managers here. Only define homes and PATH entries.
+
 export GOPATH="${GOPATH:-$HOME/go}"
-[[ -d "$GOPATH" ]] || mkdir -p "$GOPATH"
-
 export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-
+export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
 export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-$HOME/.npm-global}"
-[[ -d "$NPM_CONFIG_PREFIX/bin" ]] || mkdir -p "$NPM_CONFIG_PREFIX/bin"
-
 export PYTHONUSERBASE="${PYTHONUSERBASE:-$HOME/.local}"
-export PIP_USER=${PIP_USER:-1}
+export PIP_USER="${PIP_USER:-1}"
 
-# -------- Homebrew prefixes (Linux/macOS) ----------------------------
-_LINUXBREW="/home/linuxbrew/.linuxbrew"
-_MACBREW="/opt/homebrew"
-_MACBREW_INTEL="/usr/local"
+for _zshenv_dir in \
+  "$GOPATH" \
+  "$GOPATH/bin" \
+  "$CARGO_HOME" \
+  "$CARGO_HOME/bin" \
+  "$NPM_CONFIG_PREFIX" \
+  "$NPM_CONFIG_PREFIX/bin"
+do
+  if [[ -n "$_zshenv_dir" && ! -d "$_zshenv_dir" && -w "${_zshenv_dir:h}" ]]; then
+    command mkdir -p "$_zshenv_dir" 2>/dev/null || true
+  fi
+done
+unset _zshenv_dir
 
-# -------- Base PATH composition (idempotent) -------------------------
-typeset -Ua _path
-_path=(
+# ---------------------------------------------------------------------
+# Homebrew Prefixes
+# ---------------------------------------------------------------------
+
+_zshenv_linuxbrew="/home/linuxbrew/.linuxbrew"
+_zshenv_macbrew_arm="/opt/homebrew"
+_zshenv_macbrew_intel="/usr/local"
+
+# ---------------------------------------------------------------------
+# PATH
+# ---------------------------------------------------------------------
+# Use zsh's unique array behavior to keep PATH idempotent.
+# Existing PATH is included after preferred user/tool paths so system paths
+# remain available without creating duplicates.
+
+typeset -gU path
+
+path=(
   "$HOME/bin"
   "$HOME/.local/bin"
   "$NPM_CONFIG_PREFIX/bin"
-  "$_LINUXBREW/bin" "$_LINUXBREW/sbin"
-  "$_MACBREW/bin" "$_MACBREW/sbin"
-  "$_MACBREW_INTEL/bin" "$_MACBREW_INTEL/sbin"
-  "/usr/local/bin" "/usr/local/sbin"
-  "/usr/bin" "/usr/sbin"
-  "/bin" "/sbin"
+  "$CARGO_HOME/bin"
+  "$GOPATH/bin"
+
+  "$_zshenv_linuxbrew/bin"
+  "$_zshenv_linuxbrew/sbin"
+  "$_zshenv_macbrew_arm/bin"
+  "$_zshenv_macbrew_arm/sbin"
+  "$_zshenv_macbrew_intel/bin"
+  "$_zshenv_macbrew_intel/sbin"
+
+  /usr/local/bin
+  /usr/local/sbin
+  /usr/bin
+  /usr/sbin
+  /bin
+  /sbin
+
+  $path
 )
 
-[[ -d "$CARGO_HOME/bin" ]] && _path=("$CARGO_HOME/bin" $_path)
-[[ -d "$GOPATH/bin"   ]] && _path=("$GOPATH/bin" $_path)
+# Remove non-existent path entries to keep command lookup clean.
+for _zshenv_path_entry in "${path[@]}"; do
+  [[ -d "$_zshenv_path_entry" ]] && _zshenv_clean_path+=("$_zshenv_path_entry")
+done
 
-export PATH="${(j.:.)_path}"
+path=("${_zshenv_clean_path[@]}")
+export PATH
 
-# -------- Oh My Zsh hints (no sourcing here) -------------------------
-export ZSH="{{ user.home_directory }}/.oh-my-zsh"
-export DEFAULT_FONT='FiraCode NF'
-export HOMEBREW_NO_ENV_HINTS=1
-export DIRENV_LOG_FORMAT=
+unset _zshenv_path_entry
+unset _zshenv_clean_path
+unset _zshenv_linuxbrew
+unset _zshenv_macbrew_arm
+unset _zshenv_macbrew_intel
 
-# -------- Colors ------------------------------------------------------
-export CLICOLOR=1
+# ---------------------------------------------------------------------
+# Oh My Zsh / Font Hints
+# ---------------------------------------------------------------------
+# Only expose locations/defaults. Do not source Oh My Zsh from .zshenv.
+
+export ZSH="${ZSH:-$HOME/.oh-my-zsh}"
+export DEFAULT_FONT="${DEFAULT_FONT:-FiraCode NF}"
+
+# ---------------------------------------------------------------------
+# Colors
+# ---------------------------------------------------------------------
+
+export CLICOLOR="${CLICOLOR:-1}"
 export LS_COLORS="${LS_COLORS:-}"
 
-# -------- End of zshenv ----------------------------------------------
+# ---------------------------------------------------------------------
+# End of zshenv
+# ---------------------------------------------------------------------

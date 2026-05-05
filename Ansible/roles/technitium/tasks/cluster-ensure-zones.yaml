@@ -150,7 +150,7 @@
     _record_create.json.status is defined
     and _record_create.json.status != 'ok'
     and 'already' not in (_record_create.json.errorMessage | default('') | lower)
-  loop: "{{ groups.get('dns', []) }}"
+  loop: "{{ groups.get('dns', []) | difference(technitium_cluster_excluded_nodes | default([])) }}"
   run_once: true
   delegate_to: "{{ technitium_cluster_primary_host }}"
   when:

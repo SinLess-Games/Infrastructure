@@ -1,32 +1,141 @@
 ---
-- name: Run Technitium deploy phase
+# =============================================================================
+# Technitium DNS - Role Entrypoint
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Orchestrates the Technitium role phases.
+#
+# Supported phases:
+#   - deploy
+#       Renders and applies Terraform for Technitium VMs.
+#
+#   - configure
+#       Prepares OS, installs Technitium, initializes admin auth, configures
+#       DNS settings, zones, records, reverse zones, block lists, clustering,
+#       and firewall policy.
+#
+# Usage:
+#   technitium_role_phases:
+#     - deploy
+#     - configure
+#
+# Notes:
+#   - Deploy defaults are loaded only when the deploy phase is enabled.
+#   - Deploy defaults are applied only when a variable is not already defined.
+#   - Existing inventory, group_vars, host_vars, and extra_vars take precedence.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Phase normalization / validation
+# -----------------------------------------------------------------------------
+
+- name: Technitium | Normalize requested role phases
+  ansible.builtin.set_fact:
+    technitium_role_phases_effective: "{{ technitium_role_phases | default(['configure']) }}"
+
+- name: Technitium | Validate requested role phases
+  ansible.builtin.assert:
+    that:
+      - technitium_role_phases_effective is iterable
+      - technitium_role_phases_effective | length > 0
+      - technitium_role_phases_effective | difference(technitium_supported_role_phases) | length == 0
+    fail_msg: >-
+      Invalid technitium_role_phases value.
+      Supported phases are: {{ technitium_supported_role_phases | join(', ') }}.
+      Requested phases were: {{ technitium_role_phases_effective | join(', ') }}.
+    success_msg: "Technitium role phases passed validation."
+  vars:
+    technitium_supported_role_phases:
+      - deploy
+      - configure
+  tags:
+    - technitium
+    - always
+
+- name: Technitium | Show requested role phases
+  ansible.builtin.debug:
+    msg:
+      - "Technitium role starting."
+      - "Host: {{ inventory_hostname }}"
+      - "Requested phases: {{ technitium_role_phases_effective | join(', ') }}"
+  when: technitium_role_show_phase_summary | default(true)
+  tags:
+    - technitium
+    - always
+
+# =============================================================================
+# Deploy Phase
+# =============================================================================
+
+- name: Technitium | Check for deploy defaults file
+  ansible.builtin.stat:
+    path: "{{ role_path }}/defaults/deploy.yaml"
+  register: technitium_deploy_defaults_file
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: "'deploy' in technitium_role_phases_effective"
+  tags:
+    - technitium
+    - technitium-deploy
+    - deploy
+
+- name: Technitium | Load deploy defaults
   ansible.builtin.include_vars:
     file: "{{ role_path }}/defaults/deploy.yaml"
-    name: __technitium_deploy_defaults
-  when: "'deploy' in technitium_role_phases"
+    name: technitium_deploy_defaults
+  when:
+    - "'deploy' in technitium_role_phases_effective"
+    - technitium_deploy_defaults_file.stat.exists | default(false)
   tags:
     - technitium
+    - technitium-deploy
     - deploy
 
-- name: Apply Technitium deploy defaults
-  ansible.builtin.set_fact:
-    "{{ item.key }}": "{{ item.value }}"
-  loop: "{{ (__technitium_deploy_defaults | default({})) | dict2items }}"
-  when: "'deploy' in technitium_role_phases"
+- name: Technitium | Apply deploy defaults without overriding existing variables
+  ansible.builtin.set_fact: "{{ { item.key: item.value } }}"
+  loop: "{{ technitium_deploy_defaults | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - "'deploy' in technitium_role_phases_effective"
+    - vars[item.key] is not defined
   tags:
     - technitium
+    - technitium-deploy
     - deploy
 
-- name: Include Technitium deploy tasks
+- name: Technitium | Run deploy phase
   ansible.builtin.include_tasks: deploy.yaml
-  when: "'deploy' in technitium_role_phases"
+  when: "'deploy' in technitium_role_phases_effective"
   tags:
     - technitium
+    - technitium-deploy
     - deploy
 
-- name: Run Technitium configure phase
+# =============================================================================
+# Configure Phase
+# =============================================================================
+
+- name: Technitium | Run configure phase
   ansible.builtin.include_tasks: configure-main.yaml
-  when: "'configure' in technitium_role_phases"
+  when: "'configure' in technitium_role_phases_effective"
   tags:
     - technitium
+    - technitium-configure
     - configure
+
+# =============================================================================
+# Summary
+# =============================================================================
+
+- name: Technitium | Show role completion summary
+  ansible.builtin.debug:
+    msg:
+      - "Technitium role complete."
+      - "Host: {{ inventory_hostname }}"
+      - "Completed phases: {{ technitium_role_phases_effective | join(', ') }}"
+  when: technitium_role_show_completion_summary | default(true)
+  tags:
+    - technitium
+    - always

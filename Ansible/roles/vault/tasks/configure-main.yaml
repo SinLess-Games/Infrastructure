@@ -1207,10 +1207,10 @@
     method: POST
     headers:
       X-Vault-Token: "{{ hostvars['localhost'].vault_bootstrap_data.root_token }}"
+      Content-Type: "application/json"
     ca_path: "{{ vault_tls_local_dir }}/ca.crt"
-    body_format: json
-    body:
-      data: "{{ item.value.data | default({}) }}"
+    body_format: raw
+    body: "{{ {'data': item.value.data | default({})} | to_json }}"
     status_code:
       - 200
       - 204

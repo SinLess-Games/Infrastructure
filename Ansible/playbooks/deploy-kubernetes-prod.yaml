@@ -23,6 +23,7 @@
       - "kubernetes/common/access"
       - "kubernetes/production/bootstrap"
       - "kubernetes/production/integrations"
+      - "kubernetes/production/workloads"
       - "kubernetes/production/cluster"
 
   tasks:
@@ -83,6 +84,47 @@
         - preflight
         - deploy
 
+    - name: Build production node layout validation values
+      ansible.builtin.set_fact:
+        kubernetes_runtime_all_nodes: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+        kubernetes_runtime_expected_control_plane_count: "{{ kubernetes_control_plane.count | int }}"
+        kubernetes_runtime_expected_worker_count: "{{ kubernetes_workers.count | int }}"
+        kubernetes_runtime_expected_node_count: "{{ (kubernetes_control_plane.count | int) + (kubernetes_workers.count | int) }}"
+        kubernetes_runtime_vmids: "{{ (kubernetes_nodes.control_plane + kubernetes_nodes.workers) | map(attribute='vmid') | list }}"
+        kubernetes_runtime_ips: "{{ (kubernetes_nodes.control_plane + kubernetes_nodes.workers) | map(attribute='ip') | list }}"
+        kubernetes_runtime_names: "{{ (kubernetes_nodes.control_plane + kubernetes_nodes.workers) | map(attribute='name') | list }}"
+        kubernetes_runtime_target_nodes: "{{ (kubernetes_nodes.control_plane + kubernetes_nodes.workers) | map(attribute='target_node') | list }}"
+      tags:
+        - preflight
+        - validate
+
+    - name: Validate production Kubernetes VM layout before Terraform
+      ansible.builtin.assert:
+        that:
+          - kubernetes_environment == 'prod'
+          - kubernetes_cluster_name == 'rke2-prod'
+          - kubernetes_control_plane.count | int == 3
+          - kubernetes_workers.count | int == 8
+          - kubernetes_nodes.control_plane | length == 3
+          - kubernetes_nodes.workers | length == 8
+          - kubernetes_master_ips | length == 3
+          - kubernetes_worker_ips | length == 8
+          - kubernetes_runtime_all_nodes | length == 11
+          - kubernetes_runtime_vmids | unique | length == kubernetes_runtime_vmids | length
+          - kubernetes_runtime_ips | unique | length == kubernetes_runtime_ips | length
+          - kubernetes_runtime_names | unique | length == kubernetes_runtime_names | length
+          - kubernetes_runtime_target_nodes | difference(kubernetes_proxmox_target_nodes) | length == 0
+          - kubernetes_control_plane.memory_balloon_mb | int == 0
+          - kubernetes_workers.memory_balloon_mb | int == 0
+        fail_msg: >-
+          Production Kubernetes VM layout is invalid. Expected 3 control-plane
+          nodes and 8 workers with unique names, IPs, VMIDs, valid Proxmox
+          target nodes, and memory ballooning disabled.
+        success_msg: "Production Kubernetes VM layout validated: 3 control planes, 8 workers, 11 total nodes."
+      tags:
+        - preflight
+        - validate
+
     - name: Display runtime operation mode
       ansible.builtin.debug:
         msg:
@@ -93,6 +135,9 @@
           terraform_parallelism: "{{ kubernetes_runtime_tf_parallelism }}"
           terraform_lock_timeout: "{{ kubernetes_runtime_tf_lock_timeout }}"
           terraform_cli_args: "{{ kubernetes_runtime_tf_cli_args_common }}"
+          expected_control_planes: "{{ kubernetes_runtime_expected_control_plane_count }}"
+          expected_workers: "{{ kubernetes_runtime_expected_worker_count }}"
+          expected_total_nodes: "{{ kubernetes_runtime_expected_node_count }}"
       tags:
         - preflight
         - deploy
@@ -116,15 +161,26 @@
         - preflight
         - vault
 
+    - name: Check for repo-managed production SSH public key
+      ansible.builtin.stat:
+        path: "{{ kubernetes_repo_root }}/.outputs/ssh/sinless777/id_ed25519.pub"
+      register: kubernetes_runtime_repo_ssh_key_stat
+      tags:
+        - preflight
+        - vault
+
     - name: Ensure runtime SSH keys include the repo-managed production key
       ansible.builtin.set_fact:
         kubernetes_runtime_ssh_keys: >-
           {{
-            (kubernetes_runtime_ssh_keys | default([]))
-            + [lookup('file', kubernetes_repo_root ~ '/.outputs/ssh/sinless777/id_ed25519.pub') | trim]
+            (
+              (kubernetes_runtime_ssh_keys | default([]))
+              + [lookup('file', kubernetes_repo_root ~ '/.outputs/ssh/sinless777/id_ed25519.pub') | trim]
+            )
             | unique
             | list
           }}
+      when: kubernetes_runtime_repo_ssh_key_stat.stat.exists | default(false)
       no_log: true
       tags:
         - preflight
@@ -135,7 +191,7 @@
         kubernetes_runtime_rke2_server_token: >-
           {{
             kubernetes_vault_documents.get('kubernetes/production/bootstrap', {}).get('rke2_server_token', '')
-            | default(kubernetes_vault_data.get('rke2_server_token', ''))
+            | default(kubernetes_vault_data.get('rke2_server_token', ''), true)
           }}
       no_log: true
       tags:
@@ -154,7 +210,7 @@
     - name: Provide empty SSH keys fallback
       ansible.builtin.set_fact:
         kubernetes_runtime_ssh_keys: []
-      when: kubernetes_runtime_ssh_keys | length == 0
+      when: kubernetes_runtime_ssh_keys | default([]) | length == 0
       tags:
         - preflight
         - vault
@@ -166,7 +222,10 @@
           - kubernetes_runtime_rke2_server_token | length > 0
           - kubernetes_runtime_configure_serial | int > 0
           - kubernetes_runtime_tf_parallelism | int > 0
-        fail_msg: "Failed to populate localhost runtime cache from Vault."
+          - kubernetes_runtime_destroy | bool or kubernetes_runtime_ssh_keys | length >= 1
+        fail_msg: >-
+          Failed to populate localhost runtime cache from Vault or local SSH key.
+          Deploy/plan requires at least one SSH public key unless this is a destroy operation.
       tags:
         - preflight
         - vault
@@ -183,12 +242,12 @@
           plan_only: "{{ kubernetes_runtime_plan_only | default(false) | bool }}"
           destroy: "{{ kubernetes_runtime_destroy | default(false) | bool }}"
           force_apply: false
-          wait_for_ssh_timeout: 600
-          wait_for_kubeconfig_timeout: 300
-          wait_for_api_timeout: 600
-          wait_for_node_ready_timeout: 120
-          wait_for_node_ready_retries: 30
-          wait_for_node_ready_delay: 20
+          wait_for_ssh_timeout: 900
+          wait_for_kubeconfig_timeout: 600
+          wait_for_api_timeout: 900
+          wait_for_node_ready_timeout: 180
+          wait_for_node_ready_retries: 40
+          wait_for_node_ready_delay: 15
       environment:
         TF_IN_AUTOMATION: "1"
         TF_INPUT: "0"
@@ -231,6 +290,7 @@
         msg: >-
           Terraform has finished; waiting for Kubernetes production nodes to boot
           and accept SSH before configuration begins.
+      run_once: true
       tags:
         - wait
         - kubernetes
@@ -245,6 +305,8 @@
           -o UserKnownHostsFile=/dev/null \
           root@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] }} \
           /usr/sbin/qm guest exec {{ item.vmid }} -- /bin/bash -lc {{ ssh_key_remediation_script | quote }}
+      args:
+        executable: /bin/bash
       vars:
         kubernetes_node_login_user: "{{ hostvars[item.name].ansible_user | default(kubernetes_ansible.default_user | default('sinless777')) }}"
         ssh_key_remediation_script: |
@@ -309,8 +371,9 @@
       ansible.builtin.debug:
         msg: >-
           Kubernetes nodes are reachable; beginning OS and RKE2 configuration.
-          The first inventory host is configured alone so the bootstrap control
-          plane can start before secondary nodes attempt to join.
+          The first inventory host must be {{ kubernetes_control_plane_first_host }}
+          so the bootstrap control plane starts before secondary nodes join.
+      run_once: true
       tags:
         - configure
         - kubernetes
@@ -354,14 +417,13 @@
         rke2_server_token: >-
           {{
             (
-              (
-                kubernetes_bootstrap_token_file.stdout
-                | trim
-              )
-              if (kubernetes_bootstrap_token_file.rc | default(1)) == 0
-              and (kubernetes_bootstrap_token_file.stdout | default('') | trim | length > 0)
-              else hostvars['localhost'].kubernetes_runtime_rke2_server_token
+              kubernetes_bootstrap_token_file.stdout | trim
             )
+            if (
+              (kubernetes_bootstrap_token_file.rc | default(1)) == 0
+              and (kubernetes_bootstrap_token_file.stdout | default('') | trim | length > 0)
+            )
+            else hostvars['localhost'].kubernetes_runtime_rke2_server_token
           }}
         kubernetes_deploy_ssh_keys: "{{ hostvars['localhost'].kubernetes_runtime_ssh_keys }}"
       no_log: true
@@ -386,7 +448,7 @@
       ansible.builtin.set_fact:
         kubernetes_configure_node_role: >-
           {{
-            'master'
+            'control-plane'
             if inventory_hostname in groups['kubernetes_prod_control_plane']
             else 'worker'
           }}
@@ -481,6 +543,39 @@
         - kubernetes
 
 # =============================================================================
+# Validate Kubernetes Production Cluster
+# =============================================================================
+- name: Validate Kubernetes production cluster
+  hosts: kubernetes_prod_control_plane
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../group_vars/all/ansible.yaml
+    - ../group_vars/kubernetes/main.yaml
+    - ../group_vars/kubernetes/production/main.yaml
+    - ../group_vars/kubernetes/production/master.yaml
+    - ../group_vars/kubernetes/production/worker.yaml
+
+  pre_tasks:
+    - name: Skip cluster validation for plan or destroy operations
+      ansible.builtin.meta: end_play
+      when: not (hostvars['localhost'].kubernetes_runtime_apply_mode | default(true) | bool)
+      tags:
+        - validate
+        - kubernetes
+
+  tasks:
+    - name: Validate Kubernetes production cluster
+      become: true
+      ansible.builtin.import_role:
+        name: kubernetes
+      vars:
+        kubernetes_role_phases: ["validate"]
+      tags:
+        - validate
+        - kubernetes
+
+# =============================================================================
 # Save Local kubeconfig Copy
 # =============================================================================
 - name: Save production kubeconfig copy locally
@@ -563,88 +658,19 @@
           | from_yaml
         ).secrets | default({})
       }}
-    kubernetes_argocd_admin_password_raw: >-
-      {{
-        (
-          hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password', '')
-          | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password', ''), true)
-        )
-        if (
-          (
-            hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password', '')
-            | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password', ''), true)
-          ) | length > 0
-        )
-        else (
-          kubernetes_vault_seed_documents.get('kubernetes/production/integrations', {}).get('data', {}).get('argocd_admin_password', '')
-        )
-      }}
-    kubernetes_argocd_admin_password_bcrypt: >-
-      {{
-        (
-          (
-            hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password_bcrypt', '')
-            | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password_bcrypt', ''), true)
-          )
-          if (
-            (
-              hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password_bcrypt', '')
-              | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password_bcrypt', ''), true)
-            ) | length > 0
-          )
-          else (
-            kubernetes_vault_seed_documents.get('kubernetes/production/integrations', {}).get('data', {}).get('argocd_admin_password_bcrypt', '')
-          )
-        )
-        if (
-          (
-            (
-              hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password_bcrypt', '')
-              | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password_bcrypt', ''), true)
-            )
-            if (
-              (
-                hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password_bcrypt', '')
-                | default(hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password_bcrypt', ''), true)
-              ) | length > 0
-            )
-            else (
-              kubernetes_vault_seed_documents.get('kubernetes/production/integrations', {}).get('data', {}).get('argocd_admin_password_bcrypt', '')
-            )
-          ) | length > 0
-        ) else (
-          kubernetes_argocd_admin_password_raw
-          | password_hash('bcrypt')
-        )
-      }}
-    kubernetes_argocd_redis_password_raw: >-
-      {{
-        (
-          hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/workloads', {}).get('redis_password', '')
-          | default(hostvars['localhost'].kubernetes_vault_data.get('redis_password', ''), true)
-        )
-        if (
-          (
-            hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/workloads', {}).get('redis_password', '')
-            | default(hostvars['localhost'].kubernetes_vault_data.get('redis_password', ''), true)
-          ) | length > 0
-        )
-        else (
-          kubernetes_vault_seed_documents.get('kubernetes/production/workloads', {}).get('data', {}).get('redis_password', '')
-        )
-      }}
 
-  tasks:
+  pre_tasks:
     - name: Skip GitOps bootstrap when disabled or not in apply mode
       ansible.builtin.meta: end_play
-      when:
-        - not (kubernetes_gitops.bootstrap_enabled | default(true) | bool)
-          or not (hostvars['localhost'].kubernetes_runtime_apply_mode | default(true) | bool)
+      when: >
+        not (kubernetes_gitops.bootstrap_enabled | default(true) | bool)
+        or not (hostvars['localhost'].kubernetes_runtime_apply_mode | default(true) | bool)
       tags:
         - apps
         - gitops
         - bootstrap
 
+  tasks:
     - name: Verify kubeconfig exists before app bootstrap
       ansible.builtin.stat:
         path: "{{ kubernetes_kubeconfig_archive_path }}"
@@ -666,7 +692,47 @@
         - gitops
         - bootstrap
 
-    - name: Validate Argo CD admin bcrypt is available
+    - name: Resolve Argo CD admin password from Vault cache or seed file
+      ansible.builtin.set_fact:
+        kubernetes_argocd_admin_password_raw: >-
+          {{
+            hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password', '')
+            or hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password', '')
+            or kubernetes_vault_seed_documents.get('kubernetes/production/integrations', {}).get('data', {}).get('argocd_admin_password', '')
+          }}
+        kubernetes_argocd_admin_password_bcrypt_existing: >-
+          {{
+            hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/integrations', {}).get('argocd_admin_password_bcrypt', '')
+            or hostvars['localhost'].kubernetes_vault_data.get('argocd_admin_password_bcrypt', '')
+            or kubernetes_vault_seed_documents.get('kubernetes/production/integrations', {}).get('data', {}).get('argocd_admin_password_bcrypt', '')
+          }}
+        kubernetes_argocd_redis_password_raw: >-
+          {{
+            hostvars['localhost'].kubernetes_vault_documents.get('kubernetes/production/workloads', {}).get('redis_password', '')
+            or hostvars['localhost'].kubernetes_vault_data.get('redis_password', '')
+            or kubernetes_vault_seed_documents.get('kubernetes/production/workloads', {}).get('data', {}).get('redis_password', '')
+          }}
+      no_log: true
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Build Argo CD admin bcrypt password
+      ansible.builtin.set_fact:
+        kubernetes_argocd_admin_password_bcrypt: >-
+          {{
+            kubernetes_argocd_admin_password_bcrypt_existing
+            if (kubernetes_argocd_admin_password_bcrypt_existing | length > 0)
+            else (kubernetes_argocd_admin_password_raw | password_hash('bcrypt'))
+          }}
+      no_log: true
+      tags:
+        - apps
+        - gitops
+        - bootstrap
+
+    - name: Validate Argo CD bootstrap secrets are available
       ansible.builtin.assert:
         that:
           - kubernetes_argocd_admin_password_raw is defined
@@ -676,8 +742,8 @@
           - kubernetes_argocd_redis_password_raw is defined
           - kubernetes_argocd_redis_password_raw | length > 0
         fail_msg: >-
-          Missing argocd_admin_password or redis_password in the cached Vault data.
-          Update Ansible/group_vars/vault/vault-secrets.yaml and run task vault:update-secrets.
+          Missing argocd_admin_password, argocd_admin_password_bcrypt, or redis_password
+          in Vault cache or Ansible/group_vars/vault/vault-secrets.yaml.
       no_log: true
       tags:
         - apps

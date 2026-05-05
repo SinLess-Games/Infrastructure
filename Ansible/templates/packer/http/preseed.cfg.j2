@@ -1,0 +1,97 @@
+# Ansible/templates/packer/http/preseed.cfg.j2
+# {{ preseed_comment }}
+#
+# Debian preseed for Packer-built Proxmox templates.
+#
+# Rendered by Ansible into:
+#   Packer/{{ distro }}/http/preseed.cfg
+
+### Localization
+d-i debian-installer/locale string en_US.UTF-8
+d-i debian-installer/language string en
+d-i debian-installer/country string US
+d-i keyboard-configuration/xkb-keymap select us
+d-i keyboard-configuration/layoutcode string us
+
+### Network
+d-i netcfg/choose_interface select auto
+d-i netcfg/dhcp_timeout string 60
+d-i netcfg/get_hostname string {{ preseed_hostname }}
+d-i netcfg/get_domain string {{ preseed_domain }}
+d-i netcfg/wireless_wep string
+
+### Mirror
+d-i mirror/country string manual
+d-i mirror/http/hostname string {{ preseed_mirror_host }}
+d-i mirror/http/directory string {{ preseed_mirror_directory }}
+d-i mirror/http/proxy string
+
+### APT setup
+d-i apt-setup/use_mirror boolean true
+d-i apt-setup/cdrom/set-first boolean false
+d-i apt-setup/cdrom/set-next boolean false
+d-i apt-setup/cdrom/set-failed boolean false
+d-i apt-setup/security_path string {{ preseed_security_path }}
+d-i apt-setup/services-select multiselect security, updates
+d-i apt-setup/non-free boolean true
+d-i apt-setup/contrib boolean true
+d-i apt-setup/non-free-firmware boolean true
+
+### Firmware
+d-i hw-detect/load_firmware boolean true
+
+### Clock and timezone
+d-i clock-setup/utc boolean true
+d-i clock-setup/ntp boolean true
+d-i time/zone string UTC
+
+### Account setup
+d-i passwd/root-login boolean true
+d-i passwd/root-password password {{ preseed_root_password }}
+d-i passwd/root-password-again password {{ preseed_root_password }}
+d-i passwd/make-user boolean false
+d-i user-setup/allow-password-weak boolean true
+
+### Partitioning
+d-i partman-auto/disk string {{ preseed_disk }}
+d-i partman-auto/method string regular
+d-i partman-auto/choose_recipe select atomic
+
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-md/device_remove_md boolean true
+
+d-i partman-partitioning/confirm_write_new_table boolean true
+d-i partman/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+d-i partman-auto/confirm boolean true
+d-i partman-auto/confirm_nooverwrite boolean true
+
+### Base install
+tasksel tasksel/first multiselect standard
+d-i pkgsel/include string openssh-server sudo curl wget ca-certificates gnupg qemu-guest-agent cloud-init cloud-guest-utils
+d-i pkgsel/install-language-support boolean false
+d-i pkgsel/upgrade select full-upgrade
+popularity-contest popularity-contest/participate boolean false
+
+### GRUB
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean false
+d-i grub-installer/bootdev string {{ preseed_bootdev }}
+
+### Late command
+d-i preseed/late_command string \
+  in-target mkdir -p /etc/ssh/sshd_config.d; \
+  in-target sh -c "printf '%s\n' 'PermitRootLogin yes' 'PasswordAuthentication yes' 'PubkeyAuthentication yes' > /etc/ssh/sshd_config.d/99-packer.conf"; \
+  in-target systemctl enable ssh; \
+  in-target systemctl enable qemu-guest-agent; \
+  in-target mkdir -p /etc/cloud/cloud.cfg.d; \
+  in-target sh -c "printf '%s\n' 'datasource_list: [ NoCloud, ConfigDrive ]' > /etc/cloud/cloud.cfg.d/99-packer-proxmox.cfg"; \
+  in-target sh -c "printf '%s\n' 'network:' '  config: disabled' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg"; \
+  in-target sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200n8"/' /etc/default/grub; \
+  in-target update-grub
+
+### Finish
+d-i finish-install/keep-consoles boolean true
+d-i finish-install/reboot_in_progress note

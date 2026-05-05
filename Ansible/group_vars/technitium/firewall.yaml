@@ -1,3 +1,50 @@
+---
+# =============================================================================
+# Technitium DNS - Firewall Configuration
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Defines host firewall policy for Technitium DNS nodes.
+#
+# Design:
+#   - Default deny inbound.
+#   - Allow DNS from trusted internal networks.
+#   - Restrict admin/API access to management networks.
+#   - Restrict cluster traffic to Technitium nodes.
+#   - Keep optional services disabled unless intentionally enabled.
+#
+# Notes:
+#   - This file is role data only.
+#   - The role should translate these variables into UFW, nftables, iptables,
+#     or firewalld rules depending on your implementation.
+# =============================================================================
+
+# =============================================================================
+# Firewall State
+# =============================================================================
+
+technitium_firewall_enabled: true
+
+# Set to true only when Ansible fully owns the host firewall ruleset.
+# This is intentionally true for an appliance-style DNS VM role.
+technitium_firewall_reset: true
+
+technitium_firewall_interface: "eth0"
+
+technitium_firewall_default_incoming_policy: "deny"
+technitium_firewall_default_outgoing_policy: "allow"
+technitium_firewall_default_routed_policy: "deny"
+
+# =============================================================================
+# Trusted Networks
+# -----------------------------------------------------------------------------
+# VLANs:
+#   - 10.10.10.0/24 = infrastructure / management
+#   - 10.10.20.0/24 = development
+#   - 10.10.30.0/24 = staging
+#   - 10.10.40.0/24 = production
+#   - 10.10.50.0/24 = DMZ
+# =============================================================================
+
 technitium_firewall_allowed_cidrs:
   - "10.10.10.0/24"
   - "10.10.20.0/24"
@@ -5,6 +52,332 @@ technitium_firewall_allowed_cidrs:
   - "10.10.40.0/24"
   - "10.10.50.0/24"
 
-technitium_firewall_enabled: true
-technitium_firewall_reset: true
-technitium_firewall_interface: "eth0"
+# Networks allowed to query DNS.
+technitium_firewall_dns_allowed_cidrs: "{{ technitium_firewall_allowed_cidrs }}"
+
+# Networks allowed to access SSH and Technitium admin/API ports.
+technitium_firewall_management_allowed_cidrs:
+  - "10.10.10.0/24"
+  - "10.10.20.0/24"
+
+# Networks allowed to access Technitium from Kubernetes automation.
+technitium_firewall_automation_allowed_cidrs:
+  - "10.10.30.0/24"
+  - "10.10.40.0/24"
+
+# Technitium cluster nodes.
+technitium_firewall_cluster_allowed_ips:
+  - "10.10.10.20"
+  - "10.10.10.21"
+  - "10.10.10.22"
+
+# Optional standalone DNS Pi.
+technitium_firewall_dns_pi_ip: "10.10.10.12"
+
+# =============================================================================
+# Service Ports
+# =============================================================================
+
+technitium_firewall_ports:
+  ssh: 22
+
+  dns: 53
+
+  # Technitium web/API ports.
+  technitium_http: 5380
+  technitium_https: 53443
+
+  # Optional encrypted DNS ports.
+  dns_over_tls: 853
+  dns_over_https: 443
+  dns_over_quic: 853
+
+  # Optional DHCP service ports.
+  dhcp_server: 67
+  dhcp_client: 68
+
+# =============================================================================
+# Feature Toggles
+# =============================================================================
+
+technitium_firewall_allow_ssh: true
+technitium_firewall_allow_icmp: true
+
+technitium_firewall_allow_dns_udp: true
+technitium_firewall_allow_dns_tcp: true
+
+# Admin/API access.
+technitium_firewall_allow_technitium_http: true
+technitium_firewall_allow_technitium_https: true
+
+# Cluster traffic between Technitium nodes.
+technitium_firewall_allow_cluster_https: true
+
+# Optional encrypted DNS listeners.
+technitium_firewall_allow_dot: false
+technitium_firewall_allow_doh: false
+technitium_firewall_allow_doq: false
+
+# Optional DHCP support.
+# Leave false unless Technitium is acting as a DHCP server on this interface.
+technitium_firewall_allow_dhcp: false
+
+# =============================================================================
+# Firewall Rule Model
+# -----------------------------------------------------------------------------
+# Role implementation should loop over this list.
+#
+# Fields:
+#   - name: Human-readable rule name.
+#   - enabled: Whether to apply the rule.
+#   - direction: in/out/routed.
+#   - action: allow/deny/reject/limit.
+#   - interface: Network interface.
+#   - protocol: tcp/udp/icmp/any.
+#   - port: Destination port.
+#   - source_cidrs: List of allowed source CIDRs.
+#   - source_ips: List of allowed source IPs.
+#   - comment: Rule purpose.
+# =============================================================================
+
+technitium_firewall_rules:
+  # ---------------------------------------------------------------------------
+  # Baseline safety
+  # ---------------------------------------------------------------------------
+
+  - name: "allow-established-related"
+    enabled: true
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "any"
+    state:
+      - "established"
+      - "related"
+    comment: "Allow established and related inbound traffic."
+
+  - name: "allow-loopback"
+    enabled: true
+    direction: "in"
+    action: "allow"
+    interface: "lo"
+    protocol: "any"
+    source_cidrs:
+      - "127.0.0.0/8"
+    comment: "Allow loopback traffic."
+
+  - name: "allow-icmp-from-trusted-networks"
+    enabled: "{{ technitium_firewall_allow_icmp }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "icmp"
+    source_cidrs: "{{ technitium_firewall_allowed_cidrs }}"
+    comment: "Allow ping and basic ICMP diagnostics from trusted networks."
+
+  # ---------------------------------------------------------------------------
+  # SSH
+  # ---------------------------------------------------------------------------
+
+  - name: "allow-ssh-from-management-networks"
+    enabled: "{{ technitium_firewall_allow_ssh }}"
+    direction: "in"
+    action: "limit"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "tcp"
+    port: "{{ technitium_firewall_ports.ssh }}"
+    source_cidrs: "{{ technitium_firewall_management_allowed_cidrs }}"
+    comment: "Allow rate-limited SSH from management networks only."
+
+  # ---------------------------------------------------------------------------
+  # DNS service
+  # ---------------------------------------------------------------------------
+
+  - name: "allow-dns-udp-from-trusted-networks"
+    enabled: "{{ technitium_firewall_allow_dns_udp }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "udp"
+    port: "{{ technitium_firewall_ports.dns }}"
+    source_cidrs: "{{ technitium_firewall_dns_allowed_cidrs }}"
+    comment: "Allow standard UDP DNS queries from trusted internal networks."
+
+  - name: "allow-dns-tcp-from-trusted-networks"
+    enabled: "{{ technitium_firewall_allow_dns_tcp }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "tcp"
+    port: "{{ technitium_firewall_ports.dns }}"
+    source_cidrs: "{{ technitium_firewall_dns_allowed_cidrs }}"
+    comment: "Allow TCP DNS queries and larger DNS responses from trusted internal networks."
+
+  # ---------------------------------------------------------------------------
+  # Technitium admin/API
+  # ---------------------------------------------------------------------------
+
+  - name: "allow-technitium-http-from-management-networks"
+    enabled: "{{ technitium_firewall_allow_technitium_http }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "tcp"
+    port: "{{ technitium_firewall_ports.technitium_http }}"
+    source_cidrs: "{{ technitium_firewall_management_allowed_cidrs }}"
+    comment: "Allow Technitium HTTP admin/API access from management networks only."
+
+  - name: "allow-technitium-http-from-automation-networks"
+    enabled: "{{ technitium_firewall_allow_technitium_http }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "tcp"
+    port: "{{ technitium_firewall_ports.technitium_http }}"
+    source_cidrs: "{{ technitium_firewall_automation_allowed_cidrs }}"
+    comment: "Allow Technitium HTTP API access from Kubernetes automation networks."
+
+  - name: "allow-technitium-https-from-management-networks"
+    enabled: "{{ technitium_firewall_allow_technitium_https }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "tcp"
+    port: "{{ technitium_firewall_ports.technitium_https }}"
+    source_cidrs: "{{ technitium_firewall_management_allowed_cidrs }}"
+    comment: "Allow Technitium HTTPS admin/API access from management networks only."
+
+  # ---------------------------------------------------------------------------
+  # Technitium clustering
+  # ---------------------------------------------------------------------------
+
+  - name: "allow-technitium-cluster-https-between-dns-nodes"
+    enabled: "{{ technitium_firewall_allow_cluster_https }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "tcp"
+    port: "{{ technitium_firewall_ports.technitium_https }}"
+    source_ips: "{{ technitium_firewall_cluster_allowed_ips }}"
+    comment: "Allow Technitium cluster sync traffic between DNS nodes."
+
+  # ---------------------------------------------------------------------------
+  # Optional encrypted DNS
+  # ---------------------------------------------------------------------------
+
+  - name: "allow-dns-over-tls-from-trusted-networks"
+    enabled: "{{ technitium_firewall_allow_dot }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "tcp"
+    port: "{{ technitium_firewall_ports.dns_over_tls }}"
+    source_cidrs: "{{ technitium_firewall_dns_allowed_cidrs }}"
+    comment: "Allow DNS-over-TLS from trusted networks."
+
+  - name: "allow-dns-over-https-from-trusted-networks"
+    enabled: "{{ technitium_firewall_allow_doh }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "tcp"
+    port: "{{ technitium_firewall_ports.dns_over_https }}"
+    source_cidrs: "{{ technitium_firewall_dns_allowed_cidrs }}"
+    comment: "Allow DNS-over-HTTPS from trusted networks."
+
+  - name: "allow-dns-over-quic-from-trusted-networks"
+    enabled: "{{ technitium_firewall_allow_doq }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "udp"
+    port: "{{ technitium_firewall_ports.dns_over_quic }}"
+    source_cidrs: "{{ technitium_firewall_dns_allowed_cidrs }}"
+    comment: "Allow DNS-over-QUIC from trusted networks."
+
+  # ---------------------------------------------------------------------------
+  # Optional DHCP
+  # ---------------------------------------------------------------------------
+
+  - name: "allow-dhcp-server-requests"
+    enabled: "{{ technitium_firewall_allow_dhcp }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "udp"
+    port: "{{ technitium_firewall_ports.dhcp_server }}"
+    source_cidrs: "{{ technitium_firewall_allowed_cidrs }}"
+    comment: "Allow DHCP client requests when Technitium DHCP is enabled."
+
+  - name: "allow-dhcp-client-replies"
+    enabled: "{{ technitium_firewall_allow_dhcp }}"
+    direction: "in"
+    action: "allow"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "udp"
+    port: "{{ technitium_firewall_ports.dhcp_client }}"
+    source_cidrs: "{{ technitium_firewall_allowed_cidrs }}"
+    comment: "Allow DHCP replies when Technitium DHCP is enabled."
+
+# =============================================================================
+# Explicit Deny Rules
+# -----------------------------------------------------------------------------
+# These are useful when the role backend supports ordered rules.
+# They document intent even if the backend already has default-deny inbound.
+# =============================================================================
+
+technitium_firewall_deny_rules:
+  - name: "deny-technitium-admin-from-untrusted-networks"
+    enabled: true
+    direction: "in"
+    action: "deny"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "tcp"
+    ports:
+      - "{{ technitium_firewall_ports.technitium_http }}"
+      - "{{ technitium_firewall_ports.technitium_https }}"
+    comment: "Deny Technitium admin/API access from untrusted networks."
+
+  - name: "deny-dns-from-untrusted-networks"
+    enabled: true
+    direction: "in"
+    action: "deny"
+    interface: "{{ technitium_firewall_interface }}"
+    protocol: "any"
+    ports:
+      - "{{ technitium_firewall_ports.dns }}"
+    comment: "Deny DNS access from networks outside the trusted CIDR list."
+
+# =============================================================================
+# Validation
+# =============================================================================
+
+technitium_firewall_validation:
+  require_default_deny_incoming: true
+  require_dns_udp: true
+  require_dns_tcp: true
+  require_management_restriction: true
+  require_cluster_restriction: true
+  require_no_public_dns: true
+
+  denied_public_cidrs:
+    - "0.0.0.0/0"
+    - "::/0"
+
+  required_dns_ports:
+    - 53
+
+  required_admin_ports:
+    - 5380
+    - 53443
+
+# =============================================================================
+# Notes
+# -----------------------------------------------------------------------------
+# - DNS should be allowed from internal VLANs only.
+# - SSH and admin/API access should remain limited to infrastructure and dev.
+# - Kubernetes staging/prod networks can query DNS and use API automation.
+# - DHCP is disabled by default because clustered DHCP requires separate design.
+# - DoH/DoT/DoQ are disabled by default until certificates and client behavior
+#   are intentionally planned.
+# =============================================================================

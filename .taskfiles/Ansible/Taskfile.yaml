@@ -185,6 +185,18 @@ tasks:
           -i {{.ANSIBLE_DIR}}/inventory \
           {{.ANSIBLE_DIR}}/playbooks/deploy-wazuh.yaml \
           {{.CLI_ARGS}}
+
+  deploy-template-vms:
+    desc: "Render and deploy template VMs using Packer via Ansible"
+    deps: [init]
+    cmds:
+      - |
+        set -e
+        export ANSIBLE_CONFIG={{.ANSIBLE_DIR}}/ansible.cfg
+        {{.VENV_DIR}}/bin/ansible-playbook \
+          -i {{.ANSIBLE_DIR}}/inventory \
+          {{.ANSIBLE_DIR}}/playbooks/deploy-template-vms.yaml \
+          {{.CLI_ARGS}}
   # =============================================================================
   # Kubernetes Deployment Tasks
   # =============================================================================

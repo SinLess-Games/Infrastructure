@@ -1,110 +1,332 @@
 ---
 # =============================================================================
-# Zsh / Oh My Zsh Configuration (Global Defaults)
+# Global Zsh / Oh My Zsh Configuration
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Defines global shell defaults for interactive infrastructure users.
+#
+# Ownership boundaries:
+#   - Users are defined in:
+#       Ansible/group_vars/all/users.yaml
+#   - Package installation is handled by:
+#       Ansible/group_vars/all/packages.yaml
+#       Ansible/roles/packages
+#   - This file defines shell behavior, Oh My Zsh behavior, plugins,
+#     completion behavior, prompt behavior, and shell safety defaults.
+#
+# Security / safety:
+#   - System and non-interactive users are skipped.
+#   - Plugin updates are disabled during normal playbook runs.
+#   - Plugin clones are shallow and pinned-capable.
+#   - Default shell changes are limited to explicitly listed users.
 # =============================================================================
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Core shell behavior
-# -----------------------------------------------------------------------------
+# =============================================================================
 
 zsh_default_shell: /usr/bin/zsh
-zsh_theme: robbyrussell
 
 shell_install_zsh: true
 shell_install_oh_my_zsh: true
-shell_install_starship: false
+shell_install_starship: true
 shell_set_default_shell: true
 
-# -----------------------------------------------------------------------------
+# Skip users that should not receive interactive shell configuration.
+zsh_skip_for_system_users: true
+zsh_skip_locked_users: true
+zsh_noninteractive_safe: true
+
+# Shells treated as non-interactive.
+zsh_noninteractive_shells:
+  - /usr/sbin/nologin
+  - /sbin/nologin
+  - /bin/false
+  - /usr/bin/false
+
+# =============================================================================
 # Users that should receive shell configuration
-# (must exist already via users role)
 # -----------------------------------------------------------------------------
+# Keep this explicit. Do not apply Oh My Zsh to root, automation, or breakglass
+# by default.
+# =============================================================================
 
-shell_config_users: "{{ users }}"
+shell_config_users:
+  - name: sinless777
+    home_directory: /home/sinless777
+    shell: /usr/bin/zsh
+    install_oh_my_zsh: true
+    install_starship: true
+    set_default_shell: true
 
-# -----------------------------------------------------------------------------
-# Oh My Zsh Plugins (Git-managed, deterministic)
+  - name: ansible
+    home_directory: /home/ansible
+    shell: /bin/bash
+    install_oh_my_zsh: false
+    install_starship: false
+    set_default_shell: false
+
+# =============================================================================
+# Oh My Zsh
+# =============================================================================
+
+oh_my_zsh_install_url: https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
+oh_my_zsh_dir: ".oh-my-zsh"
+oh_my_zsh_custom_dir: ".oh-my-zsh/custom"
+oh_my_zsh_plugins_dir: ".oh-my-zsh/custom/plugins"
+
+zsh_theme: robbyrussell
+
+# Base plugins loaded in .zshrc.
+zsh_base_plugins:
+  - git
+  - sudo
+  - docker
+  - docker-compose
+  - kubectl
+  - helm
+  - terraform
+  - ansible
+  - history
+  - colored-man-pages
+  - command-not-found
+
+# =============================================================================
+# Oh My Zsh custom plugins
 # -----------------------------------------------------------------------------
 # These are cloned under:
 #   ~/.oh-my-zsh/custom/plugins/<name>
 #
-# They are merged with base plugins defined in .zshrc.j2
-# -----------------------------------------------------------------------------
+# Plugin updates are disabled by default for deterministic playbook runs.
+# =============================================================================
 
-plugins:
-  # -------------------------- UX / Safety ------------------------------
+zsh_plugins:
+  # ---------------------------------------------------------------------------
+  # UX / safety
+  # ---------------------------------------------------------------------------
+
   - name: zsh-syntax-highlighting
     repo: https://github.com/zsh-users/zsh-syntax-highlighting.git
+    version: master
+    enabled: true
 
   - name: zsh-autosuggestions
     repo: https://github.com/zsh-users/zsh-autosuggestions.git
+    version: master
+    enabled: true
 
   - name: zsh-completions
     repo: https://github.com/zsh-users/zsh-completions.git
+    version: master
+    enabled: true
 
   - name: you-should-use
     repo: https://github.com/MichaelAquilina/zsh-you-should-use.git
+    version: master
+    enabled: true
 
-  # -------------------------- History & Navigation ---------------------
+  # ---------------------------------------------------------------------------
+  # History / navigation
+  # ---------------------------------------------------------------------------
+
   - name: history-substring-search
     repo: https://github.com/zsh-users/zsh-history-substring-search.git
+    version: master
+    enabled: true
 
   - name: z
     repo: https://github.com/rupa/z.git
+    version: master
+    enabled: true
 
-  # -------------------------- Tooling Enhancements ---------------------
+  # ---------------------------------------------------------------------------
+  # Tooling enhancements
+  # ---------------------------------------------------------------------------
+
   - name: zsh-bat
     repo: https://github.com/fdellwing/zsh-bat.git
-
-  - name: thefuck
-    repo: https://github.com/nvbn/thefuck
+    version: main
+    enabled: true
 
   - name: fzf
     repo: https://github.com/junegunn/fzf.git
+    version: master
+    enabled: true
 
-# -----------------------------------------------------------------------------
+# Backward-compatible alias for roles/templates still referencing `plugins`.
+plugins: "{{ zsh_plugins }}"
+
+# =============================================================================
 # Plugin install behavior
-# -----------------------------------------------------------------------------
+# =============================================================================
 
-zsh_plugin_update: false        # never auto-update during playbooks
-zsh_plugin_depth: 1             # shallow clones for speed
+zsh_plugin_update: false
+zsh_plugin_depth: 1
+zsh_plugin_force: false
+zsh_plugin_accept_hostkey: true
 
-# -----------------------------------------------------------------------------
+# =============================================================================
+# Starship prompt
+# =============================================================================
+
+starship_enabled: true
+starship_config_file: ".config/starship.toml"
+
+# Keep native prompt support available for hosts where starship is disabled.
+zsh_prompt_enabled: true
+zsh_prompt_file: ".zsh_prompt"
+
+# =============================================================================
 # fzf integration
-# -----------------------------------------------------------------------------
+# =============================================================================
 
 fzf_install_shell_integration: true
 fzf_key_bindings: true
 fzf_completion: true
 
-# -----------------------------------------------------------------------------
-# Native Zsh prompt
-# -----------------------------------------------------------------------------
+fzf_default_opts:
+  - "--height=40%"
+  - "--layout=reverse"
+  - "--border"
+  - "--inline-info"
 
-zsh_prompt_enabled: true
-zsh_prompt_file: ".zsh_prompt"
-
-# -----------------------------------------------------------------------------
-# Oh My Zsh Custom Paths
-# -----------------------------------------------------------------------------
-
-oh_my_zsh_custom_dir: ".oh-my-zsh/custom"
-oh_my_zsh_plugins_dir: ".oh-my-zsh/custom/plugins"
-
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Completion tuning
-# -----------------------------------------------------------------------------
+# =============================================================================
 
 zsh_enable_extra_completions: true
 zsh_completion_cache_dir: ".cache/zcompdump"
-
-# -----------------------------------------------------------------------------
-# Safety / CI compatibility
-# -----------------------------------------------------------------------------
-
-zsh_skip_for_system_users: true   # skip users with shell=/usr/sbin/nologin
-zsh_noninteractive_safe: true
+zsh_completion_dump_prefix: ".zcompdump"
+zsh_completion_rebuild: false
 
 # =============================================================================
-# End of zsh.yaml
+# History behavior
+# =============================================================================
+
+zsh_history_file: ".zsh_history"
+zsh_history_size: 50000
+zsh_save_history: 50000
+
+zsh_history_options:
+  - HIST_IGNORE_DUPS
+  - HIST_IGNORE_ALL_DUPS
+  - HIST_IGNORE_SPACE
+  - HIST_REDUCE_BLANKS
+  - HIST_VERIFY
+  - SHARE_HISTORY
+  - INC_APPEND_HISTORY
+
+# =============================================================================
+# Shell options
+# =============================================================================
+
+zsh_shell_options:
+  - AUTO_CD
+  - AUTO_PUSHD
+  - PUSHD_IGNORE_DUPS
+  - PUSHD_MINUS
+  - COMPLETE_IN_WORD
+  - ALWAYS_TO_END
+  - EXTENDED_GLOB
+  - NO_CASE_GLOB
+
+# =============================================================================
+# Environment defaults for interactive shells
+# =============================================================================
+
+zsh_environment:
+  EDITOR: vim
+  VISUAL: vim
+  PAGER: less
+  LESS: "-R"
+  LANG: en_US.UTF-8
+  LC_ALL: en_US.UTF-8
+
+# =============================================================================
+# Aliases
+# =============================================================================
+
+zsh_aliases:
+  ll: "ls -lah"
+  la: "ls -A"
+  l: "ls -CF"
+
+  grep: "grep --color=auto"
+
+  k: kubectl
+  kgp: "kubectl get pods"
+  kgn: "kubectl get nodes"
+  kctx: kubectx
+  kns: kubens
+
+  tf: terraform
+  tfi: "terraform init"
+  tfp: "terraform plan"
+  tfa: "terraform apply"
+
+  dc: "docker compose"
+  dps: "docker ps"
+  dlog: "docker logs"
+
+  gs: "git status --short --branch"
+  gl: "git log --graph --decorate --oneline --all"
+  gp: "git pull --ff-only"
+
+# =============================================================================
+# PATH additions
+# -----------------------------------------------------------------------------
+# Paths are added only if they exist by the shell template/role.
+# =============================================================================
+
+zsh_path_entries:
+  - "$HOME/.local/bin"
+  - "$HOME/bin"
+  - "/home/linuxbrew/.linuxbrew/bin"
+  - "/home/linuxbrew/.linuxbrew/sbin"
+  - "/opt/homebrew/bin"
+  - "/opt/homebrew/sbin"
+
+# =============================================================================
+# Direnv integration
+# =============================================================================
+
+zsh_direnv_enabled: true
+zsh_direnv_hook: true
+
+# =============================================================================
+# NVM integration
+# =============================================================================
+
+zsh_nvm_enabled: true
+zsh_nvm_dir: "$HOME/.nvm"
+zsh_nvm_auto_use: true
+
+# =============================================================================
+# Validation / policy metadata
+# =============================================================================
+
+zsh_policy:
+  configure_only_interactive_users: true
+  skip_root_by_default: true
+  skip_system_users: true
+  skip_locked_users: true
+  require_explicit_shell_config_users: true
+
+  allowed_shells:
+    - /bin/zsh
+    - /usr/bin/zsh
+    - /bin/bash
+    - /usr/bin/bash
+
+  managed_users:
+    - sinless777
+    - ansible
+
+  excluded_users:
+    - root
+    - automation
+    - breakglass
+
+# =============================================================================
+# End
 # =============================================================================

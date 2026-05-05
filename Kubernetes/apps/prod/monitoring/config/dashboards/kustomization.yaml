@@ -1,3 +1,4 @@
+# Kubernetes/apps/prod/monitoring/config/dashboards/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -7,10 +8,43 @@ generatorOptions:
   disableNameSuffixHash: true
   labels:
     grafana_dashboard: "1"
-  annotations:
-    grafana_folder: /dashboards
 
 configMapGenerator:
   - name: grafana-dashboards-root
     files:
       - home.json
+    options:
+      annotations:
+        grafana_folder: /dashboards
+
+  - name: grafana-dashboards-infrastructure
+    files:
+      - infrastructure/cert_manager.json
+      - infrastructure/cilium_metrics.json
+      - infrastructure/node_exporter_full.json
+    options:
+      annotations:
+        grafana_folder: /dashboards/infrastructure
+
+  - name: grafana-dashboards-infrastructure-gitops
+    files:
+      - infrastructure/gitops/actions_runner_controller.json
+      - infrastructure/gitops/argocd.json
+    options:
+      annotations:
+        grafana_folder: /dashboards/infrastructure/gitops
+
+  - name: grafana-dashboards-infrastructure-network
+    files:
+      - infrastructure/network/cloudflared_tunnels.json
+    options:
+      annotations:
+        grafana_folder: /dashboards/infrastructure/network
+
+  - name: grafana-dashboards-infrastructure-network-istio
+    files:
+      - infrastructure/network/istio/isti_loki.json
+      - infrastructure/network/istio/istio_cp.json
+    options:
+      annotations:
+        grafana_folder: /dashboards/infrastructure/network/istio

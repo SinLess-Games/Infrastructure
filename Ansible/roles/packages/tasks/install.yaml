@@ -1,31 +1,256 @@
 ---
 # =============================================================================
 # packages — install
+# -----------------------------------------------------------------------------
+# Installs grouped APT packages from packages_role_catalog.
+#
+# Design:
+#   - Builds a deterministic package list from enabled groups.
+#   - Supports extra APT packages.
+#   - Filters empty/null rendered values.
+#   - Updates apt cache with retry handling.
+#   - Installs packages non-interactively.
+#   - Supports explicit package removal.
 # =============================================================================
 
-- name: Build flattened package list
+# -----------------------------------------------------------------------------
+# Build resolved package list
+# -----------------------------------------------------------------------------
+
+- name: Packages | Build selected APT package groups
+  ansible.builtin.set_fact:
+    packages__selected_groups: >-
+      {{
+        packages_role_groups
+        | default([])
+        | select('string')
+        | map('trim')
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+  changed_when: false
+  tags:
+    - packages
+    - packages-apt
+
+- name: Packages | Build flattened APT package list
+  ansible.builtin.set_fact:
+    packages__resolved_apt_packages_raw: >-
+      {%- set packages = [] -%} {%- for group_name in packages__selected_groups
+      -%}
+        {%- if group_name in packages_role_catalog -%}
+          {%- for package_name in packages_role_catalog[group_name] -%}
+            {%- set _ = packages.append(package_name) -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%} {%- for package_name in packages_extra_apt_packages |
+      default([]) -%}
+        {%- set _ = packages.append(package_name) -%}
+      {%- endfor -%} {{ packages }}
+  changed_when: false
+  tags:
+    - packages
+    - packages-apt
+
+- name: Packages | Normalize flattened APT package list
   ansible.builtin.set_fact:
     packages__resolved_apt_packages: >-
       {{
-        packages_role_groups
-        | map('extract', packages_role_catalog)
-        | flatten
+        packages__resolved_apt_packages_raw
+        | default([])
+        | map('string')
+        | map('trim')
+        | reject('equalto', '')
         | unique
+        | sort
+        | list
+        if packages_filter_empty_items | default(true) | bool
+        else
+        packages__resolved_apt_packages_raw
+        | default([])
+        | map('string')
+        | unique
+        | sort
+        | list
       }}
+  changed_when: false
+  tags:
+    - packages
+    - packages-apt
 
-- name: Show packages to be installed (debug)
+- name: Packages | Normalize APT removal package list
+  ansible.builtin.set_fact:
+    packages__remove_apt_packages: >-
+      {{
+        packages_remove_apt_packages
+        | default([])
+        | map('string')
+        | map('trim')
+        | reject('equalto', '')
+        | unique
+        | sort
+        | list
+      }}
+  changed_when: false
+  tags:
+    - packages
+    - packages-apt
+
+# -----------------------------------------------------------------------------
+# Debug
+# -----------------------------------------------------------------------------
+
+- name: Packages | Show resolved APT package plan
   ansible.builtin.debug:
-    var: packages__resolved_apt_packages
-  when: ansible_verbosity | int >= 2
+    msg:
+      - "Enabled groups: {{ packages__selected_groups | join(', ') if
+        packages__selected_groups | length > 0 else 'none' }}"
+      - "Packages to install: {{ packages__resolved_apt_packages | join(', ') if
+        packages__resolved_apt_packages | length > 0 else 'none' }}"
+      - "Packages to remove: {{ packages__remove_apt_packages | join(', ') if
+        packages__remove_apt_packages | length > 0 else 'none' }}"
+  when: ansible_verbosity | int >= 1
+  tags:
+    - packages
+    - packages-apt
+    - packages-summary
 
-- name: Install APT packages
+# -----------------------------------------------------------------------------
+# APT cache
+# -----------------------------------------------------------------------------
+
+- name: Packages | Update APT cache
   ansible.builtin.apt:
-    name: "{{ packages__resolved_apt_packages }}"
-    state: present
     update_cache: true
-    cache_valid_time: 3600
-    dpkg_options: "force-confdef,force-confold"
+    cache_valid_time: "{{ packages_cache_valid_time | default(3600) | int }}"
+  register: packages__apt_cache_update
+  retries: "{{ packages_apt_retries | default(3) | int }}"
+  delay: "{{ packages_apt_delay | default(5) | int }}"
+  until: packages__apt_cache_update is succeeded
   environment:
     DEBIAN_FRONTEND: noninteractive
     NEEDRESTART_MODE: a
-  when: (packages__resolved_apt_packages | length) > 0
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages_update_cache | default(true) | bool
+  tags:
+    - packages
+    - packages-apt
+
+# -----------------------------------------------------------------------------
+# Remove packages
+# -----------------------------------------------------------------------------
+
+- name: Packages | Remove explicitly disabled APT packages
+  ansible.builtin.apt:
+    name: "{{ packages__remove_apt_packages }}"
+    state: "{{ packages_remove_apt_state | default('absent') }}"
+    purge: "{{ packages_remove_apt_purge | default(false) | bool }}"
+    autoremove: "{{ packages_autoremove | default(false) | bool }}"
+    dpkg_options: "force-confdef,force-confold"
+  register: packages__apt_remove
+  retries: "{{ packages_apt_retries | default(3) | int }}"
+  delay: "{{ packages_apt_delay | default(5) | int }}"
+  until: packages__apt_remove is succeeded
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__remove_apt_packages | length > 0
+  tags:
+    - packages
+    - packages-apt
+
+# -----------------------------------------------------------------------------
+# Install packages
+# -----------------------------------------------------------------------------
+
+- name: Packages | Install APT packages
+  ansible.builtin.apt:
+    name: "{{ packages__resolved_apt_packages }}"
+    state: "{{ packages_apt_state | default('present') }}"
+    install_recommends: "{{ packages_install_recommends | default(false) | bool }}"
+    dpkg_options: "force-confdef,force-confold"
+  register: packages__apt_install
+  retries: "{{ packages_apt_retries | default(3) | int }}"
+  delay: "{{ packages_apt_delay | default(5) | int }}"
+  until: packages__apt_install is succeeded
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__resolved_apt_packages | length > 0
+  tags:
+    - packages
+    - packages-apt
+
+# -----------------------------------------------------------------------------
+# Optional cleanup
+# -----------------------------------------------------------------------------
+
+- name: Packages | Autoremove unused APT packages
+  ansible.builtin.apt:
+    autoremove: true
+  register: packages__apt_autoremove
+  retries: "{{ packages_apt_retries | default(3) | int }}"
+  delay: "{{ packages_apt_delay | default(5) | int }}"
+  until: packages__apt_autoremove is succeeded
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages_autoremove | default(false) | bool
+  tags:
+    - packages
+    - packages-apt
+    - packages-cleanup
+
+- name: Packages | Autoclean APT cache
+  ansible.builtin.apt:
+    autoclean: true
+  register: packages__apt_autoclean
+  retries: "{{ packages_apt_retries | default(3) | int }}"
+  delay: "{{ packages_apt_delay | default(5) | int }}"
+  until: packages__apt_autoclean is succeeded
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages_autoclean | default(false) | bool
+  tags:
+    - packages
+    - packages-apt
+    - packages-cleanup
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Packages | Show APT install summary
+  ansible.builtin.debug:
+    msg:
+      - "APT package processing complete."
+      - "APT enabled: {{ packages_manage_apt | default(true) | bool }}"
+      - "Cache update enabled: {{ packages_update_cache | default(true) | bool
+        }}"
+      - "Enabled groups: {{ packages__selected_groups | join(', ') if
+        packages__selected_groups | length > 0 else 'none' }}"
+      - "Installed package count: {{ packages__resolved_apt_packages | length }}"
+      - "Removed package count: {{ packages__remove_apt_packages | length }}"
+      - "Autoremove enabled: {{ packages_autoremove | default(false) | bool }}"
+      - "Autoclean enabled: {{ packages_autoclean | default(false) | bool }}"
+  when: packages_show_summary | default(true) | bool
+  tags:
+    - packages
+    - packages-apt
+    - packages-summary

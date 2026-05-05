@@ -1,4 +1,26 @@
 ---
+# =============================================================================
+# Kubernetes Node Configuration
+# =============================================================================
+
+- name: Build Kubernetes GPU worker compatibility list
+  ansible.builtin.set_fact:
+    kubernetes_role_gpu_worker_names: >-
+      {{
+        (
+          kubernetes_rke2_gpu_worker_names | default([])
+          +
+          (
+            [kubernetes_rke2_gpu_worker_name]
+            if (
+              kubernetes_rke2_gpu_worker_name is defined
+              and (kubernetes_rke2_gpu_worker_name | string | length > 0)
+            )
+            else []
+          )
+        ) | unique | list
+      }}
+
 - name: Create required kernel module config
   ansible.builtin.copy:
     dest: /etc/modules-load.d/rke2.conf
@@ -115,18 +137,88 @@
     - inventory_hostname in groups[kubernetes_rke2_agents_group_name]
     - kubernetes_rke2_reset_agent_state | default(false) | bool
 
-- name: Enable Debian non-free APT components on dedicated GPU worker
-  ansible.builtin.replace:
+# =============================================================================
+# NVIDIA Host Driver Support
+# =============================================================================
+# Supports multiple GPU workers:
+#   - rke2-prod-wk-01
+#   - rke2-prod-wk-02
+#
+# Normal worker nodes skip these tasks.
+
+- name: Check for legacy Debian APT sources file on GPU workers
+  ansible.builtin.stat:
     path: /etc/apt/sources.list
-    regexp: '^(deb(?:-src)?\s+\S+\s+\S+\s+)main(?:\s+non-free-firmware)?$'
-    replace: '\1{{ kubernetes_gpu_host_driver_management.apt_components | join(" ") }}'
-  register: kubernetes_gpu_sources
+  register: kubernetes_gpu_legacy_sources_file
   when:
+    - kubernetes_gpu_host_driver_management is defined
     - kubernetes_gpu_host_driver_management.enabled | bool
-    - inventory_hostname == kubernetes_rke2_gpu_worker_name
+    - inventory_hostname in kubernetes_role_gpu_worker_names
     - ansible_facts['distribution'] == 'Debian'
 
-- name: Install NVIDIA host driver packages on dedicated GPU worker
+- name: Check for Debian deb822 APT sources file on GPU workers
+  ansible.builtin.stat:
+    path: /etc/apt/sources.list.d/debian.sources
+  register: kubernetes_gpu_deb822_sources_file
+  when:
+    - kubernetes_gpu_host_driver_management is defined
+    - kubernetes_gpu_host_driver_management.enabled | bool
+    - inventory_hostname in kubernetes_role_gpu_worker_names
+    - ansible_facts['distribution'] == 'Debian'
+
+- name: Enable Debian non-free APT components in legacy sources on GPU workers
+  ansible.builtin.replace:
+    path: /etc/apt/sources.list
+    regexp: '^(deb(?:-src)?\s+\S+\s+\S+\s+)main(?:\s+.*)?$'
+    replace: '\1{{ kubernetes_gpu_host_driver_management.apt_components | join(" ") }}'
+  register: kubernetes_gpu_legacy_sources
+  when:
+    - kubernetes_gpu_host_driver_management is defined
+    - kubernetes_gpu_host_driver_management.enabled | bool
+    - inventory_hostname in kubernetes_role_gpu_worker_names
+    - ansible_facts['distribution'] == 'Debian'
+    - kubernetes_gpu_legacy_sources_file.stat.exists | default(false)
+
+- name: Enable Debian non-free APT components in deb822 sources on GPU workers
+  ansible.builtin.lineinfile:
+    path: /etc/apt/sources.list.d/debian.sources
+    regexp: '^Components:\s+.*$'
+    line: "Components: {{ kubernetes_gpu_host_driver_management.apt_components | join(' ') }}"
+  register: kubernetes_gpu_deb822_sources
+  when:
+    - kubernetes_gpu_host_driver_management is defined
+    - kubernetes_gpu_host_driver_management.enabled | bool
+    - inventory_hostname in kubernetes_role_gpu_worker_names
+    - ansible_facts['distribution'] == 'Debian'
+    - kubernetes_gpu_deb822_sources_file.stat.exists | default(false)
+
+- name: Blacklist nouveau on GPU workers
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/blacklist-nouveau.conf
+    mode: "0644"
+    content: |
+      blacklist nouveau
+      blacklist lbm-nouveau
+      options nouveau modeset=0
+      alias nouveau off
+      alias lbm-nouveau off
+  register: kubernetes_gpu_blacklist_nouveau
+  when:
+    - kubernetes_gpu_host_driver_management is defined
+    - kubernetes_gpu_host_driver_management.enabled | bool
+    - inventory_hostname in kubernetes_role_gpu_worker_names
+
+- name: Update initramfs after nouveau blacklist change on GPU workers
+  ansible.builtin.command: update-initramfs -u
+  register: kubernetes_gpu_update_initramfs
+  changed_when: true
+  when:
+    - kubernetes_gpu_host_driver_management is defined
+    - kubernetes_gpu_host_driver_management.enabled | bool
+    - inventory_hostname in kubernetes_role_gpu_worker_names
+    - kubernetes_gpu_blacklist_nouveau is changed
+
+- name: Install NVIDIA host driver packages on GPU workers
   ansible.builtin.apt:
     name: "{{ kubernetes_gpu_host_driver_management.packages }}"
     state: present
@@ -138,10 +230,11 @@
     NEEDRESTART_MODE: a
   register: kubernetes_gpu_driver_packages
   when:
+    - kubernetes_gpu_host_driver_management is defined
     - kubernetes_gpu_host_driver_management.enabled | bool
-    - inventory_hostname == kubernetes_rke2_gpu_worker_name
+    - inventory_hostname in kubernetes_role_gpu_worker_names
 
-- name: Detect NVIDIA PCI devices on dedicated GPU worker
+- name: Detect NVIDIA PCI devices on GPU workers
   ansible.builtin.shell: |
     set -euo pipefail
     count=0
@@ -157,22 +250,27 @@
   register: kubernetes_gpu_nvidia_pci_count
   changed_when: false
   when:
+    - kubernetes_gpu_host_driver_management is defined
     - kubernetes_gpu_host_driver_management.enabled | bool
-    - inventory_hostname == kubernetes_rke2_gpu_worker_name
+    - inventory_hostname in kubernetes_role_gpu_worker_names
 
-- name: Reboot dedicated GPU worker after NVIDIA driver installation
+- name: Reboot GPU workers after NVIDIA driver installation
   ansible.builtin.reboot:
     reboot_timeout: "{{ kubernetes_gpu_host_driver_management.reboot_timeout }}"
     msg: "Rebooting after NVIDIA host driver installation"
   when:
+    - kubernetes_gpu_host_driver_management is defined
     - kubernetes_gpu_host_driver_management.enabled | bool
-    - inventory_hostname == kubernetes_rke2_gpu_worker_name
+    - inventory_hostname in kubernetes_role_gpu_worker_names
     - >
-      kubernetes_gpu_sources is changed
-      or kubernetes_gpu_driver_packages is changed
+      (kubernetes_gpu_legacy_sources is defined and kubernetes_gpu_legacy_sources is changed)
+      or (kubernetes_gpu_deb822_sources is defined and kubernetes_gpu_deb822_sources is changed)
+      or (kubernetes_gpu_blacklist_nouveau is defined and kubernetes_gpu_blacklist_nouveau is changed)
+      or (kubernetes_gpu_update_initramfs is defined and kubernetes_gpu_update_initramfs is changed)
+      or (kubernetes_gpu_driver_packages is defined and kubernetes_gpu_driver_packages is changed)
       or (kubernetes_gpu_nvidia_pci_count.stdout | default('0') | int) == 0
 
-- name: Verify nvidia-smi on dedicated GPU worker
+- name: Verify nvidia-smi on GPU workers
   ansible.builtin.command: nvidia-smi
   register: kubernetes_gpu_nvidia_smi
   changed_when: false
@@ -180,8 +278,9 @@
   delay: 10
   until: kubernetes_gpu_nvidia_smi.rc == 0
   when:
+    - kubernetes_gpu_host_driver_management is defined
     - kubernetes_gpu_host_driver_management.enabled | bool
-    - inventory_hostname == kubernetes_rke2_gpu_worker_name
+    - inventory_hostname in kubernetes_role_gpu_worker_names
 
 - name: Re-apply Kubernetes sysctl values after potential GPU worker reboot
   ansible.posix.sysctl:
@@ -192,18 +291,61 @@
     reload: true
   loop: "{{ kubernetes_role_sysctl | dict2items }}"
 
+# =============================================================================
+# RKE2 Install and Configuration
+# =============================================================================
+
 - name: Ensure RKE2 configuration directory exists
   ansible.builtin.file:
     path: "{{ kubernetes_role_rke2_config_dir }}"
     state: directory
     mode: "0755"
 
-- name: Install RKE2
+- name: Check for installed RKE2 server service unit in /etc/systemd/system
+  ansible.builtin.stat:
+    path: /etc/systemd/system/rke2-server.service
+  register: kubernetes_role_rke2_server_unit_etc
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+
+- name: Check for installed RKE2 server service unit in /usr/local/lib/systemd/system
+  ansible.builtin.stat:
+    path: /usr/local/lib/systemd/system/rke2-server.service
+  register: kubernetes_role_rke2_server_unit_local
+  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+
+- name: Check for installed RKE2 agent service unit in /etc/systemd/system
+  ansible.builtin.stat:
+    path: /etc/systemd/system/rke2-agent.service
+  register: kubernetes_role_rke2_agent_unit_etc
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+
+- name: Check for installed RKE2 agent service unit in /usr/local/lib/systemd/system
+  ansible.builtin.stat:
+    path: /usr/local/lib/systemd/system/rke2-agent.service
+  register: kubernetes_role_rke2_agent_unit_local
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+
+- name: Install RKE2 server on control plane nodes
   ansible.builtin.shell: |
     set -euo pipefail
-    curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION="{{ kubernetes_rke2_version }}" sh -
+    curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="server" INSTALL_RKE2_VERSION="{{ kubernetes_rke2_version }}" sh -
   args:
-    creates: /usr/local/bin/rke2
+    executable: /bin/bash
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - not (kubernetes_role_rke2_server_unit_etc.stat.exists | default(false))
+    - not (kubernetes_role_rke2_server_unit_local.stat.exists | default(false))
+
+- name: Install RKE2 agent on worker nodes
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" INSTALL_RKE2_VERSION="{{ kubernetes_rke2_version }}" sh -
+  args:
+    executable: /bin/bash
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+    - not (kubernetes_role_rke2_agent_unit_etc.stat.exists | default(false))
+    - not (kubernetes_role_rke2_agent_unit_local.stat.exists | default(false))
 
 - name: Ensure RKE2 manifests directory exists on control plane nodes
   ansible.builtin.file:
@@ -249,79 +391,24 @@
     - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
     - kubernetes_kube_vip.enabled | bool
 
-- name: Check if RKE2 server is active on primary control plane
-  ansible.builtin.command:
-    argv:
-      - systemctl
-      - is-active
-      - rke2-server
-  register: kubernetes_role_rke2_server_active
-  changed_when: false
-  failed_when: false
-  when:
-    - inventory_hostname == kubernetes_control_plane_first_host
-    - kubernetes_kube_vip.enabled | bool
-    - kubernetes_role_kube_vip_manifest is defined
-    - kubernetes_role_kube_vip_manifest.changed | bool
-
-- name: Recreate kube-vip pod when manifest spec changes
-  ansible.builtin.command:
-    argv:
-      - /usr/local/bin/rke2
-      - kubectl
-      - --kubeconfig
-      - /etc/rancher/rke2/rke2.yaml
-      - delete
-      - pod
-      - kube-vip
-      - -n
-      - kube-system
-      - --ignore-not-found=true
-  changed_when: false
-  failed_when: false
-  when:
-    - inventory_hostname == kubernetes_control_plane_first_host
-    - kubernetes_kube_vip.enabled | bool
-    - kubernetes_role_kube_vip_manifest is defined
-    - kubernetes_role_kube_vip_manifest.changed | bool
-    - kubernetes_role_rke2_server_active is defined
-    - kubernetes_role_rke2_server_active.rc == 0
-
-- name: Apply kube-vip manifest after pod recreation
-  ansible.builtin.command:
-    argv:
-      - /usr/local/bin/rke2
-      - kubectl
-      - --kubeconfig
-      - /etc/rancher/rke2/rke2.yaml
-      - apply
-      - -f
-      - /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
-  changed_when: false
-  when:
-    - inventory_hostname == kubernetes_control_plane_first_host
-    - kubernetes_kube_vip.enabled | bool
-    - kubernetes_role_kube_vip_manifest is defined
-    - kubernetes_role_kube_vip_manifest.changed | bool
-    - kubernetes_role_rke2_server_active is defined
-    - kubernetes_role_rke2_server_active.rc == 0
-
 - name: Render RKE2 server configuration
   ansible.builtin.template:
     src: rke2-server-config.yaml.j2
     dest: "{{ kubernetes_role_rke2_config_dir }}/config.yaml"
     mode: "0600"
+  register: kubernetes_role_rke2_server_config
   when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
-  notify: Restart rke2-server
 
-- name: Clean stale bootstrap database on control plane nodes before start
+- name: Clean stale bootstrap database on secondary control plane nodes before start
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
     - /var/lib/rancher/rke2/server/db/state.db
     - /var/lib/rancher/rke2/server/db/etcd-tmp
-  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name] and inventory_hostname != kubernetes_control_plane_first_host
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - inventory_hostname != kubernetes_control_plane_first_host
   failed_when: false
 
 - name: Detect stale secondary control-plane join state
@@ -353,6 +440,124 @@
     - "'CA cert validation failed' in kubernetes_role_rke2_recent_journal.stdout or 'certificate signed by unknown authority' in kubernetes_role_rke2_recent_journal.stdout"
   failed_when: false
 
+# =============================================================================
+# Bootstrap Control Plane
+# =============================================================================
+
+- name: Check if RKE2 server is already active on bootstrap control plane
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ kubernetes_role_rke2_server_service }}"
+  register: kubernetes_role_rke2_bootstrap_server_pre_active
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Restart active bootstrap control plane when RKE2 server config changed
+  ansible.builtin.systemd:
+    name: "{{ kubernetes_role_rke2_server_service }}"
+    state: restarted
+    daemon_reload: true
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_role_rke2_server_config is defined
+    - kubernetes_role_rke2_server_config.changed | bool
+    - kubernetes_role_rke2_bootstrap_server_pre_active.rc | default(1) == 0
+
+- name: Ensure bootstrap RKE2 server service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ kubernetes_role_rke2_server_service }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  register: kubernetes_role_rke2_bootstrap_server_start
+  failed_when: false
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Wait for bootstrap RKE2 server service to become active
+  ansible.builtin.command: systemctl is-active {{ kubernetes_role_rke2_server_service }}
+  register: kubernetes_role_rke2_bootstrap_server_active
+  changed_when: false
+  retries: "{{ kubernetes_wait_for_rke2_active_retries | int }}"
+  delay: "{{ kubernetes_wait_for_rke2_active_delay | int }}"
+  until: kubernetes_role_rke2_bootstrap_server_active.stdout == 'active'
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Assert bootstrap RKE2 server service is active
+  ansible.builtin.assert:
+    that:
+      - kubernetes_role_rke2_bootstrap_server_active.stdout == 'active'
+    fail_msg: >-
+      bootstrap rke2-server failed to reach active state.
+      start_result={{ kubernetes_role_rke2_bootstrap_server_start | to_nice_json }}
+      active_result={{ kubernetes_role_rke2_bootstrap_server_active | to_nice_json }}
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Wait for kubeconfig on bootstrap control plane
+  ansible.builtin.wait_for:
+    path: /etc/rancher/rke2/rke2.yaml
+    timeout: "{{ kubernetes_wait_for_kubeconfig_timeout }}"
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Recreate kube-vip pod when manifest spec changes
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/rke2
+      - kubectl
+      - --kubeconfig
+      - /etc/rancher/rke2/rke2.yaml
+      - delete
+      - pod
+      - kube-vip
+      - -n
+      - kube-system
+      - --ignore-not-found=true
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_kube_vip.enabled | bool
+    - kubernetes_role_kube_vip_manifest is defined
+    - kubernetes_role_kube_vip_manifest.changed | bool
+
+- name: Apply kube-vip manifest after pod recreation
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/rke2
+      - kubectl
+      - --kubeconfig
+      - /etc/rancher/rke2/rke2.yaml
+      - apply
+      - -f
+      - /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
+  changed_when: false
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_kube_vip.enabled | bool
+    - kubernetes_role_kube_vip_manifest is defined
+    - kubernetes_role_kube_vip_manifest.changed | bool
+
+- name: Fetch admin kubeconfig from bootstrap node
+  ansible.builtin.fetch:
+    src: /etc/rancher/rke2/rke2.yaml
+    dest: "{{ kubernetes_role_local_kubeconfig_path }}"
+    flat: true
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Rewrite kubeconfig server endpoint to production API VIP
+  ansible.builtin.replace:
+    path: "{{ kubernetes_role_local_kubeconfig_path }}"
+    regexp: 'https://127.0.0.1:6443'
+    replace: "https://{{ kubernetes_rke2_api_ip }}:6443"
+  delegate_to: localhost
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+# =============================================================================
+# Secondary Control Planes and Workers
+# =============================================================================
+
 - name: Wait for bootstrap control plane supervisor port to become reachable
   ansible.builtin.wait_for:
     host: "{{ kubernetes_control_plane_first_ip }}"
@@ -364,42 +569,95 @@
     - inventory_hostname != kubernetes_control_plane_first_host
     - inventory_hostname in groups[kubernetes_rke2_cluster_group_name]
 
-- name: Render RKE2 agent configuration
-  ansible.builtin.template:
-    src: rke2-agent-config.yaml.j2
-    dest: "{{ kubernetes_role_rke2_config_dir }}/config.yaml"
-    mode: "0600"
-  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
-  notify: Restart rke2-agent
+- name: Check if RKE2 server is already active on secondary control plane nodes
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ kubernetes_role_rke2_server_service }}"
+  register: kubernetes_role_rke2_secondary_server_pre_active
+  changed_when: false
+  failed_when: false
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - inventory_hostname != kubernetes_control_plane_first_host
 
-- name: Ensure RKE2 server service is enabled and started
+- name: Restart active secondary control plane nodes when RKE2 server config changed
+  ansible.builtin.systemd:
+    name: "{{ kubernetes_role_rke2_server_service }}"
+    state: restarted
+    daemon_reload: true
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - inventory_hostname != kubernetes_control_plane_first_host
+    - kubernetes_role_rke2_server_config is defined
+    - kubernetes_role_rke2_server_config.changed | bool
+    - kubernetes_role_rke2_secondary_server_pre_active.rc | default(1) == 0
+
+- name: Ensure secondary RKE2 server services are enabled and started
   ansible.builtin.systemd:
     name: "{{ kubernetes_role_rke2_server_service }}"
     enabled: true
     state: started
     daemon_reload: true
-  register: kubernetes_role_rke2_server_start
+  register: kubernetes_role_rke2_secondary_server_start
   failed_when: false
-  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - inventory_hostname != kubernetes_control_plane_first_host
 
-- name: Wait for RKE2 server service to become active
+- name: Wait for secondary RKE2 server services to become active
   ansible.builtin.command: systemctl is-active {{ kubernetes_role_rke2_server_service }}
-  register: kubernetes_role_rke2_server_active
+  register: kubernetes_role_rke2_secondary_server_active
   changed_when: false
   retries: "{{ kubernetes_wait_for_rke2_active_retries | int }}"
   delay: "{{ kubernetes_wait_for_rke2_active_delay | int }}"
-  until: kubernetes_role_rke2_server_active.stdout == 'active'
-  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+  until: kubernetes_role_rke2_secondary_server_active.stdout == 'active'
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - inventory_hostname != kubernetes_control_plane_first_host
 
-- name: Assert RKE2 server service is active
+- name: Assert secondary RKE2 server services are active
   ansible.builtin.assert:
     that:
-      - kubernetes_role_rke2_server_active.stdout == 'active'
+      - kubernetes_role_rke2_secondary_server_active.stdout == 'active'
     fail_msg: >-
-      rke2-server failed to reach active state.
-      start_result={{ kubernetes_role_rke2_server_start | to_nice_json }}
-      active_result={{ kubernetes_role_rke2_server_active | to_nice_json }}
-  when: inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+      secondary rke2-server failed to reach active state.
+      start_result={{ kubernetes_role_rke2_secondary_server_start | to_nice_json }}
+      active_result={{ kubernetes_role_rke2_secondary_server_active | to_nice_json }}
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_servers_group_name]
+    - inventory_hostname != kubernetes_control_plane_first_host
+
+- name: Render RKE2 agent configuration
+  ansible.builtin.template:
+    src: rke2-agent-config.yaml.j2
+    dest: "{{ kubernetes_role_rke2_config_dir }}/config.yaml"
+    mode: "0600"
+  register: kubernetes_role_rke2_agent_config
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+
+- name: Check if RKE2 agent is already active on workers
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ kubernetes_role_rke2_agent_service }}"
+  register: kubernetes_role_rke2_agent_pre_active
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+
+- name: Restart active RKE2 agents when agent config changed
+  ansible.builtin.systemd:
+    name: "{{ kubernetes_role_rke2_agent_service }}"
+    state: restarted
+    daemon_reload: true
+  when:
+    - inventory_hostname in groups[kubernetes_rke2_agents_group_name]
+    - kubernetes_role_rke2_agent_config is defined
+    - kubernetes_role_rke2_agent_config.changed | bool
+    - kubernetes_role_rke2_agent_pre_active.rc | default(1) == 0
 
 - name: Ensure RKE2 agent service is enabled and started
   ansible.builtin.systemd:
@@ -430,26 +688,9 @@
       active_result={{ kubernetes_role_rke2_agent_active | to_nice_json }}
   when: inventory_hostname in groups[kubernetes_rke2_agents_group_name]
 
-- name: Wait for kubeconfig on bootstrap control plane
-  ansible.builtin.wait_for:
-    path: /etc/rancher/rke2/rke2.yaml
-    timeout: "{{ kubernetes_wait_for_kubeconfig_timeout }}"
-  when: inventory_hostname == kubernetes_control_plane_first_host
-
-- name: Fetch admin kubeconfig from bootstrap node
-  ansible.builtin.fetch:
-    src: /etc/rancher/rke2/rke2.yaml
-    dest: "{{ kubernetes_role_local_kubeconfig_path }}"
-    flat: true
-  when: inventory_hostname == kubernetes_control_plane_first_host
-
-- name: Rewrite kubeconfig server endpoint to production API VIP
-  ansible.builtin.replace:
-    path: "{{ kubernetes_role_local_kubeconfig_path }}"
-    regexp: 'https://127.0.0.1:6443'
-    replace: "https://{{ kubernetes_rke2_api_ip }}:6443"
-  delegate_to: localhost
-  when: inventory_hostname == kubernetes_control_plane_first_host
+# =============================================================================
+# Cluster Readiness
+# =============================================================================
 
 - name: Wait for current node to report Ready
   ansible.builtin.command:
@@ -466,6 +707,4 @@
   delay: "{{ kubernetes_wait_for_node_ready_delay | int }}"
   until: kubernetes_role_node_ready_wait.rc == 0
   delegate_to: "{{ kubernetes_control_plane_first_host }}"
-  when:
-    - inventory_hostname != kubernetes_control_plane_first_host
-    - inventory_hostname in groups[kubernetes_rke2_cluster_group_name]
+  when: inventory_hostname in groups[kubernetes_rke2_cluster_group_name]

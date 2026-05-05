@@ -11,3 +11,5 @@ dns:
       ansible_host: 10.10.10.11
     dns-03:
       ansible_host: 10.10.10.13
+    dns-04:
+      ansible_host: 10.10.10.21

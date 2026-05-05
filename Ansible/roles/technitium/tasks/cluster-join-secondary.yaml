@@ -18,6 +18,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 
 - name: Technitium Cluster Join | Check for Technitium container on secondary
   community.docker.docker_container_info:
@@ -27,6 +28,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 
 - name: Technitium Cluster Join | Set container existence flag
   ansible.builtin.set_fact:
@@ -34,6 +36,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 
 - name: Technitium Cluster Join | Assert Technitium container exists on secondary
   ansible.builtin.assert:
@@ -43,6 +46,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 
 - name: Technitium Cluster Join | Ensure Technitium container running on secondary
   ansible.builtin.command: "docker start {{ technitium_container_name | default('technitium') }}"
@@ -50,6 +54,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
     - _secondary_container_exists | bool
 
 - name: Technitium Cluster Join | Wait for secondary API
@@ -62,6 +67,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 
 - name: Technitium Cluster Join | Create API token on secondary
   ansible.builtin.uri:
@@ -80,6 +86,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 
 - name: Technitium Cluster Join | Set secondary API token
   ansible.builtin.set_fact:
@@ -92,6 +99,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 
 - name: Technitium Cluster Join | Assert secondary API token available
   ansible.builtin.assert:
@@ -104,7 +112,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
-
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 - name: Technitium Cluster Join | Delete cluster domain zone on secondary (if exists)
   ansible.builtin.uri:
     url: "{{ technitium_api_url }}/api/zones/delete"
@@ -120,6 +128,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 
 - name: Technitium Cluster Join | Join secondary node to cluster
   ansible.builtin.uri:
@@ -150,6 +159,7 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
 
 - name: Technitium Cluster Join | Display join result
   ansible.builtin.debug:
@@ -157,4 +167,5 @@
   when:
     - technitium_cluster_enabled | default(false) | bool
     - inventory_hostname != technitium_cluster_primary_host
+    - inventory_hostname not in technitium_cluster_excluded_nodes | default([])
     - _cluster_join is defined

@@ -1,7 +1,6 @@
----
 # =============================================================================
 # Technitium Deploy Role - Defaults
 # =============================================================================
 
-technitium_repo_root: "{{ playbook_dir | dirname | dirname }}"
-technitium_terraform_dir: "{{ technitium_repo_root }}/Terraform"
+technitium_repo_root: "{{ lookup('ansible.builtin.pipe', 'git rev-parse --show-toplevel') | trim }}"
+technitium_terraform_dir: "{{ lookup('ansible.builtin.pipe', 'git rev-parse --show-toplevel') | trim }}/Terraform"

@@ -2,20 +2,33 @@
 # =============================================================================
 # Ansible Galaxy Requirements
 # -----------------------------------------------------------------------------
-# Pinned collections and roles for deterministic infrastructure automation.
+# Purpose:
+#   Pinned Ansible Galaxy collections and roles for deterministic infrastructure
+#   automation in the Infrastructure repo.
 #
-# Goals supported by this repo:
-#   - Proxmox VE (cluster + Ceph) management
+# Supports:
 #   - Linux system baselining
-#   - Kubernetes via RKE2 (HA-ready)
-#   - Container tooling
-#   - DNS services (Technitium)
-#   - Cloudflare (DNS, records, tunnels, etc.)
+#   - Docker / container automation
+#   - Proxmox VE automation
+#   - RKE2 / Kubernetes management
+#   - Technitium DNS automation
+#   - Cloudflare DNS / tunnel automation
+#   - PostgreSQL automation
+#   - TLS / PKI workflows
 #
-# Notes on pinning:
-#   - Collections: pin to exact versions for reproducible installs.
-#   - Roles from Git: `version` MUST match a real git tag/branch/commit hash.
-#     (Commonly tags are "vX.Y.Z", not "X.Y.Z".)
+# Install:
+#   ansible-galaxy collection install -r Ansible/requirements.yaml \
+#     -p Ansible/.collections
+#
+#   ansible-galaxy role install -r Ansible/requirements.yaml \
+#     -p Ansible/.collections/roles
+#
+# Notes:
+#   - Collections are pinned to exact versions.
+#   - Git roles must use a real tag, branch, or commit hash.
+#   - This file is designed for ansible-core 2.20.x.
+#   - Python dependencies are installed separately from:
+#       Ansible/requirements.txt
 # =============================================================================
 
 collections:
@@ -23,136 +36,200 @@ collections:
   # Core / Utility
   # ---------------------------------------------------------------------------
 
-  # POSIX-level system management (users, mounts, sysctl, services)
+  # POSIX-level system management:
+  #   - sysctl
+  #   - mount
+  #   - authorized_key
+  #   - firewalld
+  #   - profile tasks used across Linux hosts
   - name: ansible.posix
-    version: "1.6.2"
+    version: "2.1.0"
 
-  # Filters, lookups, ipaddr, validation helpers
+  # Data manipulation helpers:
+  #   - ipaddr / network filters
+  #   - validation helpers
+  #   - CLI parsing helpers
   - name: ansible.utils
-    version: "5.1.2"
+    version: "6.0.0"
 
-  # Broad community modules:
-  # - filesystem, hardware, networking helpers
-  # - lots of glue modules you end up needing everywhere
+  # Broad community modules and plugins:
+  #   - filesystem helpers
+  #   - package/system utilities
+  #   - Proxmox inventory helpers
+  #   - general-purpose filters/lookups
   - name: community.general
-    version: "9.1.0"
+    version: "12.6.0"
 
-  # Cryptography:
-  # - TLS certs
-  # - SSH keys
-  # - PKI workflows
+  # Cryptography / PKI:
+  #   - certificate generation
+  #   - CSR handling
+  #   - SSH key operations
+  #   - local CA workflows
   - name: community.crypto
-    version: "2.22.3"
+    version: "3.2.0"
 
-  # Docker / container runtime management
+  # ---------------------------------------------------------------------------
+  # Docker / Container Runtime
+  # ---------------------------------------------------------------------------
+
+  # Docker automation:
+  #   - docker_container
+  #   - docker_image
+  #   - docker_container_info
+  #   - Docker network/volume helpers
+  #
+  # Used by:
+  #   - Technitium Docker deployment
+  #   - Local service/container roles
   - name: community.docker
-    version: "3.13.1"
+    version: "5.2.0"
 
-  # PostgreSQL automation
+  # ---------------------------------------------------------------------------
+  # Databases
+  # ---------------------------------------------------------------------------
+
+  # PostgreSQL automation:
+  #   - databases
+  #   - users/roles
+  #   - privileges
+  #   - extensions
+  #
+  # Useful for:
+  #   - app databases
+  #   - platform service databases
+  #   - future Helix AI infrastructure
   - name: community.postgresql
-    version: "3.6.0"
+    version: "4.2.0"
 
   # ---------------------------------------------------------------------------
-  # Kubernetes
+  # Kubernetes / RKE2
   # ---------------------------------------------------------------------------
 
-  # Canonical Kubernetes collection
-  # - k8s / k8s_info
-  # - Helm modules
-  # - CRDs
+  # Canonical Kubernetes collection:
+  #   - k8s
+  #   - k8s_info
+  #   - helm
+  #   - helm_repository
+  #   - k8s_json_patch
+  #
+  # Prefer this over the older community.kubernetes collection.
   - name: kubernetes.core
-    version: "5.0.0"
-
-  # Supplemental Kubernetes helpers
-  # NOTE: Prefer kubernetes.core when possible
-  - name: community.kubernetes
-    version: "2.0.1"
+    version: "6.4.0"
 
   # ---------------------------------------------------------------------------
-  # DNS Management (Technitium)
+  # DNS Management - Technitium
   # ---------------------------------------------------------------------------
 
-  # Technitium DNS Server management via its HTTP API
-  # - zones
-  # - records
-  # - server settings
-  # - blocklists (depending on role capabilities)
+  # Technitium DNS Server management modules:
+  #   - authentication
+  #   - zones
+  #   - records
+  #   - cluster state
+  #   - server settings
+  #
+  # The custom role currently uses direct API calls, but this collection is kept
+  # available for future module-backed refactors.
   - name: effectivelywild.technitium_dns
-    version: "1.1.1"
+    version: "1.1.2"
 
   # ---------------------------------------------------------------------------
   # Hypervisor / Proxmox
   # ---------------------------------------------------------------------------
 
-  # Proxmox API modules (create/manage VMs, users, pools, etc.)
-  # Best for day-2 operations and provisioning.
+  # Proxmox API modules:
+  #   - VM lifecycle
+  #   - containers
+  #   - storage
+  #   - pools
+  #   - users/tokens
+  #
+  # Terraform remains the primary provisioning path for new VM clusters, but
+  # this collection is useful for day-2 Proxmox automation.
   - name: community.proxmox
-    version: "1.4.0"
+    version: "1.6.0"
 
   # ---------------------------------------------------------------------------
   # Cloudflare
   # ---------------------------------------------------------------------------
 
-  # Cloudflare automation (DNS records, zones, etc.)
-  # Useful for:
-  # - public DNS records
-  # - internal automation around tunnels / DNS entries (depending on modules used)
+  # Cloudflare automation:
+  #   - DNS zones
+  #   - DNS records
+  #   - Cloudflare account resources
+  #   - tunnel-adjacent automation where supported by the collection
   - name: linuxhq.cloudflare
-    version: "2.0.3"
+    version: "2.0.5"
 
 # =============================================================================
 # Roles
 # =============================================================================
+
 roles:
   # ---------------------------------------------------------------------------
   # Kubernetes: RKE2
   # ---------------------------------------------------------------------------
 
-  # Rancher Kubernetes Engine 2 (RKE2)
-  # Used for:
-  # - HA production clusters
-  # - staging clusters
-  # - Proxmox-backed VMs or bare metal
-  - name: lablabs.rke2
-    version: "1.50.1"
-
-  # ---------------------------------------------------------------------------
-  # Proxmox VE: node/cluster configuration (Day-0 / Day-1)
-  # ---------------------------------------------------------------------------
-
-  # Proxmox VE management role (node/host configuration style)
+  # Rancher Kubernetes Engine 2 role.
   #
-  # IMPORTANT:
-  # - `version` must match an existing git tag/branch/commit.
-  # - If you previously used "1.10.0" and got:
-  #     "pathspec '1.10.0' did not match any file(s) known to git"
-  #   that means the repo does NOT have a tag/branch named "1.10.0".
-  # - Common tag format is "vX.Y.Z" (example: "v1.9.0").
+  # Used for:
+  #   - HA production RKE2 clusters
+  #   - staging clusters
+  #   - Proxmox-backed Kubernetes VMs
+  #
+  # Notes:
+  #   - Keep this pinned.
+  #   - Upgrade only with RKE2 version testing.
+  - name: lablabs.rke2
+    version: "1.51.0"
+
+  # ---------------------------------------------------------------------------
+  # Proxmox VE: node / cluster configuration
+  # ---------------------------------------------------------------------------
+
+  # Proxmox VE host/cluster configuration role.
+  #
+  # Notes:
+  #   - This is separate from Terraform VM provisioning.
+  #   - `version` must match a real git tag, branch, or commit hash.
+  #   - Keep this pinned unless you validate the role against your Proxmox nodes.
   #
   # To verify tags:
   #   git ls-remote --tags https://github.com/lae/ansible-role-proxmox.git
   #
-  # If you want maximum determinism, you can pin to a commit SHA instead.
+  # To pin harder:
+  #   Replace version with a commit SHA.
   - name: lae.proxmox
     src: git+https://github.com/lae/ansible-role-proxmox.git
     scm: git
     version: "v1.9.0"
 
 # =============================================================================
-# Notes / Python deps (install separately; you already do this via requirements.txt)
+# Removed / Replaced
+# -----------------------------------------------------------------------------
+# community.kubernetes:
+#   Removed from active requirements. Prefer kubernetes.core.
 #
-# Proxmox:
-#   - proxmoxer
-#   - requests
+# Older pins replaced:
+#   ansible.posix              1.6.2  -> 2.1.0
+#   ansible.utils              5.1.2  -> 6.0.0
+#   community.general          9.1.0  -> 12.6.0
+#   community.crypto           2.22.3 -> 3.2.0
+#   community.docker           3.13.1 -> 5.2.0
+#   community.postgresql       3.6.0  -> 4.2.0
+#   kubernetes.core            5.0.0  -> 6.4.0
+#   effectivelywild.technitium_dns 1.1.1 -> 1.1.2
+#   community.proxmox          1.4.0  -> 1.6.0
+#   linuxhq.cloudflare         2.0.3  -> 2.0.5
+#   lablabs.rke2               1.50.1 -> 1.51.0
 #
-# Kubernetes:
-#   - kubernetes
-#   - openshift
-#   - pyyaml
-#   - jmespath
+# Python dependencies:
+#   Install separately with:
+#     python -m pip install -r Ansible/requirements.txt
 #
-# DNS / Cloudflare:
-#   - requests/httpx (depending on libraries)
+# Validate after install:
+#   ansible-galaxy collection list
+#   ansible-galaxy role list
+#   ansible-lint Ansible/
 #
-# Last reviewed: 2025-12
+# Last reviewed: 2026-05
 # =============================================================================

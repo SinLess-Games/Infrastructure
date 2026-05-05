@@ -26,11 +26,22 @@ sources:
   - istio-gateway
   - istio-virtualservice
 
+# Required so DNSEndpoint can manage MX records.
+# ExternalDNS defaults to A, AAAA, and CNAME unless additional types are enabled.
+managedRecordTypes:
+  - A
+  - AAAA
+  - CNAME
+  - TXT
+  - MX
+
 extraArgs:
   - --cloudflare-dns-records-per-page=5000
   - --cloudflare-proxied
   - --events
   - --txt-wildcard-replacement=wildcard
+  - --crd-source-apiversion=externaldns.k8s.io/v1alpha1
+  - --crd-source-kind=DNSEndpoint
 
 serviceAccount:
   create: true

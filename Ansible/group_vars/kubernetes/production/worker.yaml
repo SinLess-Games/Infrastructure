@@ -7,8 +7,103 @@ kubernetes_rke2_cluster_group_name: "kubernetes_prod"
 kubernetes_rke2_servers_group_name: "kubernetes_prod_control_plane"
 kubernetes_rke2_agents_group_name: "kubernetes_prod_workers"
 
+# =============================================================================
+# RKE2 Agent Node Labels
+# =============================================================================
+# These labels are applied to all production worker nodes.
+# Host-specific labels such as topology.kubernetes.io/zone, GPU labels,
+# storage labels, and workload pool labels should come from the node-specific
+# inventory/group vars so each worker gets the correct placement metadata.
+
 kubernetes_rke2_agent_node_labels:
   - "sinlessgames.com/role=worker"
   - "sinlessgames.com/environment=prod"
+  - "sinlessgames.com/cluster=rke2-prod"
   - "sinlessgames.com/region=homelab-prod"
+  - "node.sinlessgames.io/role=worker"
+
+# =============================================================================
+# RKE2 Agent Node Taints
+# =============================================================================
+# Do not apply a global worker taint here. GPU-specific taints should only be
+# applied to GPU workers from node-specific vars:
+#
+#   nvidia.com/gpu=true:NoSchedule
+#
+# This keeps general workloads schedulable on normal worker nodes.
+
+kubernetes_rke2_agent_node_taints: []
+
+# =============================================================================
+# Production Worker GPU Nodes
+# =============================================================================
+# Backward-compatible singular value retained for roles/templates that expect
+# one GPU worker.
+#
+# Current production layout has two dedicated GPU workers on pve-01:
+#   - rke2-prod-wk-01: GTX 1060
+#   - rke2-prod-wk-02: RTX 3060
+
 kubernetes_rke2_gpu_worker_name: "rke2-prod-wk-01"
+
+kubernetes_rke2_gpu_worker_names:
+  - "rke2-prod-wk-01"
+  - "rke2-prod-wk-02"
+
+kubernetes_rke2_gpu_worker_taint: "nvidia.com/gpu=true:NoSchedule"
+
+kubernetes_rke2_gpu_worker_labels:
+  - "accelerator.nvidia.com/gpu=true"
+  - "node.kubernetes.io/gpu=true"
+  - "node.sinlessgames.io/pool=gpu"
+
+# =============================================================================
+# Production Worker Kubelet Reservations
+# =============================================================================
+# Workers are 6 vCPU / 16 GiB RAM.
+# These reservations protect the node OS, RKE2 agent, CNI, CSI, monitoring
+# agents, and critical DaemonSets from application workload pressure.
+
+kubernetes_rke2_agent_kubelet_args:
+  - "system-reserved=cpu=500m,memory=1Gi,ephemeral-storage=2Gi"
+  - "kube-reserved=cpu=500m,memory=1Gi,ephemeral-storage=2Gi"
+  - "eviction-hard=memory.available<750Mi,nodefs.available<10%,imagefs.available<10%,nodefs.inodesFree<5%,imagefs.inodesFree<5%"
+  - "eviction-soft=memory.available<1500Mi,nodefs.available<15%,imagefs.available<15%,nodefs.inodesFree<10%,imagefs.inodesFree<10%"
+  - "eviction-soft-grace-period=memory.available=1m,nodefs.available=2m,imagefs.available=2m,nodefs.inodesFree=2m,imagefs.inodesFree=2m"
+  - "max-pods=110"
+
+# =============================================================================
+# Production Worker Runtime Settings
+# =============================================================================
+
+kubernetes_rke2_agent_protect_kernel_defaults: true
+kubernetes_rke2_agent_selinux: false
+
+# =============================================================================
+# Production Worker Safety Defaults
+# =============================================================================
+# Keep these as policy/default values for automation. Workload-specific behavior
+# should be controlled with requests, limits, affinities, tolerations, and
+# topology spread constraints inside the Kubernetes manifests.
+
+kubernetes_worker_default_cpu_cores: 6
+kubernetes_worker_default_memory_mb: 16384
+kubernetes_worker_default_memory_balloon_mb: 0
+kubernetes_worker_default_disk_size: "150G"
+
+kubernetes_worker_scheduling_policy:
+  control_plane_workloads: false
+  gpu_workloads_require_toleration: true
+  prefer_spread_across_proxmox_hosts: true
+  avoid_heavy_workloads_on:
+    - "pve-05"
+
+kubernetes_worker_heavy_workload_pools:
+  - "observability"
+  - "security"
+  - "platform"
+  - "apps"
+  - "gpu"
+
+kubernetes_worker_light_workload_pools:
+  - "storage-light"

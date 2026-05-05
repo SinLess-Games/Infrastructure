@@ -1,12 +1,26 @@
 {# =====================================================================
-   .zshrc.j2 — Jinja-safe Zsh configuration (FIXED)
+   .zshrc.j2 — interactive Zsh configuration managed by Ansible
    ===================================================================== #}
 
 {% set oh_my_zsh_path = user.home_directory ~ "/.oh-my-zsh" %}
 {% set omz_builtin_plugins = [
-  'aliases', 'ansible', 'aws', 'azure', 'brew', 'docker', 'docker-compose',
-  'git', 'gh', 'helm', 'kubectl', 'terraform', 'sudo', 'systemd', 'vscode',
-  'ssh', 'ssh-agent', 'zoxide'
+  'aliases',
+  'ansible',
+  'aws',
+  'azure',
+  'brew',
+  'docker',
+  'docker-compose',
+  'git',
+  'gh',
+  'helm',
+  'kubectl',
+  'terraform',
+  'sudo',
+  'systemd',
+  'vscode',
+  'ssh',
+  'zoxide'
 ] %}
 {% set custom_plugin_names = plugins | default([]) | map(attribute='name') | list %}
 {% set rendered_plugins = (omz_builtin_plugins + custom_plugin_names) | unique | list %}
@@ -14,24 +28,71 @@
 # =====================================================================
 # Zsh Shell Configuration
 # =====================================================================
+# This file is for interactive shell behavior only.
+#
+# Keep exports and PATH defaults in .zshenv.
+# Keep login-only behavior in .zprofile.
+# Keep aliases in ~/.zsh_aliases.
+# Keep prompt rendering in ~/.zsh_prompt.
+# =====================================================================
 
-unset -f source 2>/dev/null || true
-unalias source 2>/dev/null || true
+# ---------------------------------------------------------------------
+# Guard: only run this file for interactive shells
+# ---------------------------------------------------------------------
 
-setopt nullglob
+case "$-" in
+  *i*) ;;
+  *) return 0 2>/dev/null || exit 0 ;;
+esac
 
-# -------------------------- General Zsh Options --------------------------
-setopt autocd interactivecomments magicequalsubst nonomatch notify numericglobsort promptsubst
+# ---------------------------------------------------------------------
+# Core Zsh Setup
+# ---------------------------------------------------------------------
+
+emulate -L zsh
+
+autoload -Uz add-zsh-hook
+autoload -Uz colors
+colors
+
+# ---------------------------------------------------------------------
+# General Zsh Options
+# ---------------------------------------------------------------------
+
+setopt auto_cd
+setopt auto_pushd
+setopt pushd_ignore_dups
+setopt pushd_silent
+
+setopt interactive_comments
+setopt magic_equal_subst
+setopt no_beep
+setopt no_nomatch
+setopt notify
+setopt numeric_glob_sort
+setopt prompt_subst
 setopt transient_rprompt
-WORDCHARS=${WORDCHARS//\\//}
+
+setopt extended_glob
+setopt null_glob
+
+WORDCHARS=${WORDCHARS//\/}
 PROMPT_EOL_MARK=""
 
-# -------------------------- Keybindings --------------------------
+# ---------------------------------------------------------------------
+# Keybindings
+# ---------------------------------------------------------------------
+
 bindkey -e
+
 bindkey ' '        magic-space
 bindkey '^U'       backward-kill-line
-bindkey '^[[3;5~'  kill-word
+bindkey '^K'       kill-line
+bindkey '^A'       beginning-of-line
+bindkey '^E'       end-of-line
+
 bindkey '^[[3~'    delete-char
+bindkey '^[[3;5~'  kill-word
 bindkey '^[[1;5C'  forward-word
 bindkey '^[[1;5D'  backward-word
 bindkey '^[[5~'    beginning-of-buffer-or-history
@@ -40,41 +101,84 @@ bindkey '^[[H'     beginning-of-line
 bindkey '^[[F'     end-of-line
 bindkey '^[[Z'     undo
 
-# -----------------------------------------------------------------------------
-# Base PATH setup
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------
+# PATH Cleanup
+# ---------------------------------------------------------------------
+# .zshenv builds the main PATH. This only adds interactive-only paths and
+# deduplicates everything.
 
-# User binaries first
-export PATH="$HOME/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
+typeset -gU path PATH
 
-# Python (pip user installs)
-export PATH="$HOME/.local/bin:$PATH"
+[[ -d /snap/bin ]] && path=(/snap/bin $path)
+[[ -d "$HOME/.venv/bin" ]] && path=("$HOME/.venv/bin" $path)
 
-# Homebrew (Linuxbrew)
-if [ -d "/home/linuxbrew/.linuxbrew/bin" ]; then
-  export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
-fi
+export PATH="${(j.:.)path}"
 
-# Snap
-if [ -d "/snap/bin" ]; then
-  export PATH="/snap/bin:$PATH"
-fi
+# ---------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------
 
-# Node / npm global configuration
-export NPM_CONFIG_PREFIX="$HOME/.npm-global"
-export PATH="$NPM_CONFIG_PREFIX/bin:$PATH"
-
-# Allow Python virtualenvs to override system python
-export PATH="$HOME/.venv/bin:$PATH"
-
-# Deduplicate PATH entries while preserving order
-typeset -U path PATH
-# -------------------------- Environment --------------------------
 export ZSH="{{ oh_my_zsh_path }}"
-export HOMEBREW_NO_ENV_HINTS=1
-export DIRENV_LOG_FORMAT=
+export HOMEBREW_NO_ENV_HINTS="${HOMEBREW_NO_ENV_HINTS:-1}"
+export DIRENV_LOG_FORMAT="${DIRENV_LOG_FORMAT:-}"
 
-# -------------------------- Oh My Zsh --------------------------
+# ---------------------------------------------------------------------
+# History
+# ---------------------------------------------------------------------
+
+export HISTFILE="${XDG_STATE_HOME:-$HOME/.local/state}/zsh/history"
+mkdir -p "${HISTFILE:h}" 2>/dev/null || true
+
+HISTSIZE=20000
+SAVEHIST=20000
+
+setopt append_history
+setopt extended_history
+setopt hist_expire_dups_first
+setopt hist_find_no_dups
+setopt hist_ignore_all_dups
+setopt hist_ignore_space
+setopt hist_reduce_blanks
+setopt hist_save_no_dups
+setopt hist_verify
+setopt inc_append_history
+setopt share_history
+
+# ---------------------------------------------------------------------
+# Completion
+# ---------------------------------------------------------------------
+
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':completion:*' group-name ''
+zstyle ':completion:*:descriptions' format '%F{green}-- %d --%f'
+zstyle ':completion:*:warnings' format '%F{yellow}No matches found%f'
+zstyle ':completion:*' verbose yes
+zstyle ':completion:*' rehash true
+zstyle ':completion:*' use-cache true
+zstyle ':completion:*' cache-path "${XDG_CACHE_HOME:-$HOME/.cache}/zsh/completion"
+
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/zsh" 2>/dev/null || true
+
+autoload -Uz compinit
+_compdump="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump-${ZSH_VERSION}"
+
+if [[ ! -f "$_compdump" || "$_compdump" -ot "$HOME/.zshrc" ]]; then
+  compinit -i -d "$_compdump"
+else
+  compinit -C -i -d "$_compdump"
+fi
+
+unset _compdump
+
+autoload -Uz bashcompinit
+bashcompinit 2>/dev/null || true
+
+# ---------------------------------------------------------------------
+# Oh My Zsh
+# ---------------------------------------------------------------------
+
 ZSH_THEME=""
 
 plugins=(
@@ -87,33 +191,69 @@ if [[ -s "$ZSH/oh-my-zsh.sh" ]]; then
   source "$ZSH/oh-my-zsh.sh"
 fi
 
-# -------------------------- Completion --------------------------
-autoload -Uz compinit
-mkdir -p ~/.cache
-compinit -d ~/.cache/zcompdump
+# ---------------------------------------------------------------------
+# Tool Completions
+# ---------------------------------------------------------------------
+
+if command -v kubectl >/dev/null 2>&1; then
+  source <(kubectl completion zsh) 2>/dev/null || true
+fi
+
+if command -v helm >/dev/null 2>&1; then
+  source <(helm completion zsh) 2>/dev/null || true
+fi
 
 if command -v istioctl >/dev/null 2>&1; then
-  source <(istioctl completion zsh)
+  source <(istioctl completion zsh) 2>/dev/null || true
 fi
 
-# -------------------------- History --------------------------
-HISTFILE=~/.zsh_history
-HISTSIZE=5000
-SAVEHIST=10000
-setopt hist_ignore_dups hist_ignore_space hist_verify share_history
+if command -v argocd >/dev/null 2>&1; then
+  source <(argocd completion zsh) 2>/dev/null || true
+fi
 
-# -------------------------- Aliases --------------------------
-source ~/.zsh_aliases 2>/dev/null || true
+if command -v terraform >/dev/null 2>&1; then
+  complete -o nospace -C terraform terraform 2>/dev/null || true
+fi
 
-# -------------------------- Prompt --------------------------
-source ~/.zsh_prompt 2>/dev/null || true
+if command -v tofu >/dev/null 2>&1; then
+  complete -o nospace -C tofu tofu 2>/dev/null || true
+fi
 
-# -------------------------- direnv --------------------------
+# ---------------------------------------------------------------------
+# Aliases
+# ---------------------------------------------------------------------
+
+if [[ -r "$HOME/.zsh_aliases" ]]; then
+  source "$HOME/.zsh_aliases"
+fi
+
+# ---------------------------------------------------------------------
+# Prompt
+# ---------------------------------------------------------------------
+
+if [[ -r "$HOME/.zsh_prompt" ]]; then
+  source "$HOME/.zsh_prompt"
+fi
+
+# ---------------------------------------------------------------------
+# direnv
+# ---------------------------------------------------------------------
+# Loads .envrc automatically when entering project directories.
+# This must run in .zshrc, not .zshenv, because direnv hooks are
+# interactive-shell behavior.
+
 if command -v direnv >/dev/null 2>&1; then
   eval "$(command direnv hook zsh)"
+  direnv allow 2>/dev/null || true
 fi
 
-# -------------------------- Virtualenv Sync --------------------------
+
+# ---------------------------------------------------------------------
+# Python Virtualenv Sync
+# ---------------------------------------------------------------------
+# Keeps direnv-managed virtualenv PATH changes stable and prevents duplicate
+# venv/bin entries from piling up.
+
 typeset -g _ZSH_MANAGED_VENV=""
 
 _sync_direnv_virtualenv() {
@@ -130,56 +270,112 @@ _sync_direnv_virtualenv() {
     export VIRTUAL_ENV="$desired_venv"
     _ZSH_MANAGED_VENV="$desired_venv"
   else
-    unset VIRTUAL_ENV
     _ZSH_MANAGED_VENV=""
   fi
 
   export PATH="${(j.:.)path}"
 }
 
-autoload -Uz add-zsh-hook
 add-zsh-hook precmd _sync_direnv_virtualenv
 add-zsh-hook chpwd _sync_direnv_virtualenv
 _sync_direnv_virtualenv
 
-# -------------------------- zoxide --------------------------
+# ---------------------------------------------------------------------
+# zoxide
+# ---------------------------------------------------------------------
+
 if command -v zoxide >/dev/null 2>&1; then
   eval "$(command zoxide init zsh)"
 fi
 
-# --------------------------- SSH Agent ---------------------------------------
-# Universal, cert-safe, idempotent SSH agent bootstrap
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------
+# fzf
+# ---------------------------------------------------------------------
 
-SSH_ENV="$HOME/.ssh/agent.env"
+if [[ -r "$HOME/.fzf.zsh" ]]; then
+  source "$HOME/.fzf.zsh"
+elif command -v fzf >/dev/null 2>&1; then
+  export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS:---height 40% --layout=reverse --border}"
+fi
+
+# ---------------------------------------------------------------------
+# SSH Agent
+# ---------------------------------------------------------------------
+# Idempotent SSH agent bootstrap.
+#
+# Set ZSH_AUTO_ADD_SSH_KEYS=0 to disable automatic key loading.
+# Set ZSH_AUTO_START_SSH_AGENT=0 to disable agent startup entirely.
+
+export ZSH_AUTO_START_SSH_AGENT="${ZSH_AUTO_START_SSH_AGENT:-1}"
+export ZSH_AUTO_ADD_SSH_KEYS="${ZSH_AUTO_ADD_SSH_KEYS:-1}"
+
+_ssh_agent_env_file="${XDG_STATE_HOME:-$HOME/.local/state}/ssh/agent.env"
 
 _ssh_agent_load() {
-  [[ -f "$SSH_ENV" ]] || return 1
-  source "$SSH_ENV" >/dev/null 2>&1
-  [[ -n "$SSH_AGENT_PID" ]] && kill -0 "$SSH_AGENT_PID" 2>/dev/null
+  [[ -f "$_ssh_agent_env_file" ]] || return 1
+  source "$_ssh_agent_env_file" >/dev/null 2>&1
+
+  [[ -n "${SSH_AUTH_SOCK:-}" && -S "$SSH_AUTH_SOCK" ]] || return 1
+
+  if [[ -n "${SSH_AGENT_PID:-}" ]]; then
+    kill -0 "$SSH_AGENT_PID" 2>/dev/null || return 1
+  fi
+
+  return 0
 }
 
 _ssh_agent_start() {
+  command -v ssh-agent >/dev/null 2>&1 || return 1
+
+  mkdir -p "${_ssh_agent_env_file:h}" 2>/dev/null || return 1
+
   umask 077
-  ssh-agent -s | sed 's/^echo/#echo/' >| "$SSH_ENV"
-  source "$SSH_ENV" >/dev/null 2>&1
+  ssh-agent -s | sed 's/^echo/#echo/' >| "$_ssh_agent_env_file"
+  source "$_ssh_agent_env_file" >/dev/null 2>&1
 }
 
-if ! _ssh_agent_load; then
-  _ssh_agent_start
-fi
+_ssh_agent_add_keys() {
+  command -v ssh-add >/dev/null 2>&1 || return 0
+  command -v ssh-keygen >/dev/null 2>&1 || return 0
 
-# Load keys only if agent is empty
-if ! ssh-add -l >/dev/null 2>&1; then
+  ssh-add -l >/dev/null 2>&1 && return 0
+
+  local key
   for key in "$HOME/.ssh"/id_* "$HOME/.ssh"/*_id_*; do
     [[ -f "$key" ]] || continue
     [[ "$key" == *.pub ]] && continue
     [[ "$key" == *-cert.pub ]] && continue
+    [[ "$key" == *.pem ]] && continue
+    [[ "$key" == *known_hosts* ]] && continue
+    [[ "$key" == *authorized_keys* ]] && continue
+    [[ "$key" == *config* ]] && continue
 
     if ssh-keygen -yf "$key" >/dev/null 2>&1; then
-      ssh-add "$key" >/dev/null 2>&1
+      ssh-add "$key" >/dev/null 2>&1 || true
     fi
   done
+}
+
+if [[ "$ZSH_AUTO_START_SSH_AGENT" == "1" ]]; then
+  _ssh_agent_load || _ssh_agent_start
+
+  if [[ "$ZSH_AUTO_ADD_SSH_KEYS" == "1" ]]; then
+    _ssh_agent_add_keys
+  fi
 fi
 
-unset SSH_ENV
+unset _ssh_agent_env_file
+unfunction _ssh_agent_load 2>/dev/null || true
+unfunction _ssh_agent_start 2>/dev/null || true
+unfunction _ssh_agent_add_keys 2>/dev/null || true
+
+# ---------------------------------------------------------------------
+# Final PATH Deduplication
+# ---------------------------------------------------------------------
+
+typeset -gU path PATH
+export PATH="${(j.:.)path}"
+
+# ---------------------------------------------------------------------
+# End of .zshrc
+# ---------------------------------------------------------------------

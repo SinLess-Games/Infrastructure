@@ -1,129 +1,527 @@
 ---
 # =============================================================================
-# Role: ssh
-# Task: proxmox/create-ssh-authorized-keys.yaml
-#
+# SSH Role - Proxmox Root authorized_keys Fallback
+# -----------------------------------------------------------------------------
 # Purpose:
-# - Manage authorized_keys using a template
-# - Provide a controlled fallback path (non-CA auth)
-# - Keep file deterministic and Ansible-managed
+#   Manages a deterministic authorized_keys file for Proxmox automation access.
 #
-# Notes:
-# - Certificate auth remains primary
-# - authorized_keys is intentionally minimal
+# Security model:
+#   - SSH certificate authentication remains primary.
+#   - authorized_keys is retained as a controlled bootstrap/recovery fallback.
+#   - Only public key material is copied/rendered.
+#   - Private keys are never copied by this task.
+#
+# Default output:
+#   /root/.ssh/authorized_keys
+#
+# Template variables provided:
+#   - authorized_key_paths
+#   - authorized_key_literals
+#   - authorized_keys_exclusive
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Variables (expected)
-# -----------------------------------------------------------------------------
-# ssh.authorized_keys:
-#   enabled: true|false
-#   path: /root/.ssh/authorized_keys
-#   owner: root
-#   group: root
-#   mode: "0600"
-#   keys:
-#     - "ssh-ed25519 AAAA... comment"
+# Normalize variables
 # -----------------------------------------------------------------------------
 
-- name: Set authorized_keys path
+- name: SSH | Proxmox authorized_keys | Normalize variables
   ansible.builtin.set_fact:
-    ssh__authorized_keys_path: >-
+    proxmox_authorized_keys_config_effective: >-
       {{
-        ssh.authorized_keys.path
-        | default('/root/.ssh/authorized_keys')
+        ssh.authorized_keys
+        | default({})
+        if ssh is defined and ssh.authorized_keys is defined
+        else {}
+      }}
+    proxmox_authorized_keys_path: >-
+      {{
+        ssh_authorized_keys_path
+        | default(
+            ssh.authorized_keys.path
+            | default('/root/.ssh/authorized_keys')
+            if ssh is defined and ssh.authorized_keys is defined
+            else '/root/.ssh/authorized_keys'
+          )
+      }}
+    proxmox_authorized_keys_owner: >-
+      {{
+        ssh.authorized_keys.owner
+        | default('root')
+        if ssh is defined and ssh.authorized_keys is defined
+        else 'root'
+      }}
+    proxmox_authorized_keys_group: >-
+      {{
+        ssh.authorized_keys.group
+        | default('root')
+        if ssh is defined and ssh.authorized_keys is defined
+        else 'root'
+      }}
+    proxmox_authorized_keys_mode: >-
+      {{
+        ssh.authorized_keys.mode
+        | default('0600')
+        if ssh is defined and ssh.authorized_keys is defined
+        else '0600'
+      }}
+    proxmox_authorized_keys_enabled: >-
+      {{
+        ssh.authorized_keys.enabled
+        | default(ssh_authorized_keys_fallback_enabled | default(true))
+        if ssh is defined and ssh.authorized_keys is defined
+        else ssh_authorized_keys_fallback_enabled | default(true)
+      }}
+    proxmox_authorized_keys_exclusive: >-
+      {{
+        ssh.authorized_keys.exclusive
+        | default(ssh_authorized_keys_default_exclusive | default(false))
+        if ssh is defined and ssh.authorized_keys is defined
+        else ssh_authorized_keys_default_exclusive | default(false)
+      }}
+    proxmox_authorized_keys_literal_keys: >-
+      {{
+        ssh.authorized_keys.keys
+        | default([])
+        if ssh is defined and ssh.authorized_keys is defined
+        else []
+      }}
+    proxmox_authorized_keys_extra_key_paths: >-
+      {{
+        ssh.authorized_keys.key_paths
+        | default([])
+        if ssh is defined and ssh.authorized_keys is defined
+        else []
+      }}
+    proxmox_authorized_keys_template_candidates:
+      - "{{ role_path }}/templates/authorized_keys.j2"
+      - "{{ role_path }}/templates/ssh_authorized_keys.j2"
+      - "{{ playbook_dir }}/../templates/ssh/authorized_keys.j2"
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+
+- name: SSH | Proxmox authorized_keys | Normalize controller root public key
+    candidates
+  ansible.builtin.set_fact:
+    proxmox_controller_root_pubkey_candidates: >-
+      {{
+        [
+          ssh_root_pubkey_path | default(''),
+          ssh_root_public_key_path | default(''),
+          ssh_root_materials_output_dir | default('') ~ '/id_' ~ (ssh_key_type | default('ed25519')) ~ '.pub',
+          ssh_output_base | default(playbook_dir ~ '/../../.outputs/ssh') ~ '/root/id_' ~ (ssh_key_type | default('ed25519')) ~ '.pub',
+          ssh_output_base | default(playbook_dir ~ '/../../.outputs/ssh') ~ '/users/root/id_' ~ (ssh_key_type | default('ed25519')) ~ '.pub',
+          ssh_controller_outputs_dir | default(playbook_dir ~ '/../../.outputs') ~ '/ssh/root/id_' ~ (ssh_key_type | default('ed25519')) ~ '.pub',
+          ssh_controller_outputs_dir | default(playbook_dir ~ '/../../.outputs') ~ '/ssh/users/root/id_' ~ (ssh_key_type | default('ed25519')) ~ '.pub'
+        ]
+        | reject('equalto', '')
+        | unique
+        | list
       }}
   changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
 
-- name: Resolve controller root public key path
-  ansible.builtin.set_fact:
-    ssh__controller_root_pubkey_path: >-
-      {{
-        ssh_root_pubkey_path
-          | default(
-              (ssh.controller.outputs_dir | default(playbook_dir ~ '/../../.outputs')) ~ '/ssh/root/id_ed25519.pub',
-              true
-            )
-      }}
-  changed_when: false
+# -----------------------------------------------------------------------------
+# Validate variables
+# -----------------------------------------------------------------------------
 
-- name: Assert controller root public key exists
+- name: SSH | Proxmox authorized_keys | Validate variables
+  ansible.builtin.assert:
+    that:
+      - proxmox_authorized_keys_path is string
+      - proxmox_authorized_keys_path is match('^/')
+      - proxmox_authorized_keys_path | length > 1
+      - proxmox_authorized_keys_owner is string
+      - proxmox_authorized_keys_owner | length > 0
+      - proxmox_authorized_keys_group is string
+      - proxmox_authorized_keys_group | length > 0
+      - proxmox_authorized_keys_mode is match('^0[0-7]{3}$')
+      - proxmox_authorized_keys_literal_keys is sequence
+      - proxmox_authorized_keys_literal_keys is not string
+      - proxmox_authorized_keys_literal_keys is not mapping
+      - proxmox_authorized_keys_extra_key_paths is sequence
+      - proxmox_authorized_keys_extra_key_paths is not string
+      - proxmox_authorized_keys_extra_key_paths is not mapping
+      - proxmox_controller_root_pubkey_candidates is sequence
+      - proxmox_controller_root_pubkey_candidates | length > 0
+    fail_msg: "Proxmox authorized_keys variables are invalid."
+    success_msg: "Proxmox authorized_keys variables are valid."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-validate
+
+# -----------------------------------------------------------------------------
+# Resolve template source
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox authorized_keys | Stat authorized_keys template candidates
   ansible.builtin.stat:
-    path: "{{ ssh__controller_root_pubkey_path }}"
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ proxmox_authorized_keys_template_candidates }}"
+  loop_control:
+    label: "{{ item }}"
+  delegate_to: localhost
+  register: proxmox_authorized_keys_template_candidate_stats
+  changed_when: false
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+
+- name: SSH | Proxmox authorized_keys | Select authorized_keys template source
+  ansible.builtin.set_fact:
+    proxmox_authorized_keys_template_src: >-
+      {{
+        ssh_authorized_keys_template_src
+        | default(
+            (
+              proxmox_authorized_keys_template_candidate_stats.results
+              | selectattr('stat.exists', 'equalto', true)
+              | selectattr('stat.isreg', 'equalto', true)
+              | map(attribute='item')
+              | list
+              | first
+            )
+            | default('')
+          )
+      }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+
+- name: SSH | Proxmox authorized_keys | Assert authorized_keys template exists
+  ansible.builtin.assert:
+    that:
+      - proxmox_authorized_keys_template_src is defined
+      - proxmox_authorized_keys_template_src | length > 0
+    fail_msg: >-
+      No authorized_keys template was found. Checked: {{
+      proxmox_authorized_keys_template_candidates | join(', ') }} Or set
+      ssh_authorized_keys_template_src.
+    success_msg: "authorized_keys template source is available."
+  delegate_to: localhost
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-validate
+
+# -----------------------------------------------------------------------------
+# Resolve controller root public key
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox authorized_keys | Stat controller root public key candidates
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ proxmox_controller_root_pubkey_candidates }}"
+  loop_control:
+    label: "{{ item }}"
+  delegate_to: localhost
+  register: proxmox_controller_root_pubkey_candidate_stats
+  changed_when: false
+  become: false
+  when: proxmox_authorized_keys_enabled | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-controller
+
+- name: SSH | Proxmox authorized_keys | Select controller root public key path
+  ansible.builtin.set_fact:
+    proxmox_controller_root_pubkey_path: >-
+      {{
+        (
+          proxmox_controller_root_pubkey_candidate_stats.results
+          | default([])
+          | selectattr('stat.exists', 'equalto', true)
+          | selectattr('stat.isreg', 'equalto', true)
+          | map(attribute='item')
+          | list
+          | first
+        )
+        | default('')
+      }}
+  changed_when: false
+  when: proxmox_authorized_keys_enabled | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-controller
+
+- name: SSH | Proxmox authorized_keys | Assert controller root public key exists
+  ansible.builtin.assert:
+    that:
+      - proxmox_controller_root_pubkey_path is defined
+      - proxmox_controller_root_pubkey_path | length > 0
+    fail_msg: >-
+      Controller root public key was not found. Checked: {{
+      proxmox_controller_root_pubkey_candidates | join(', ') }} Generate root
+      SSH key material first or set ssh_root_pubkey_path.
+    success_msg: "Controller root public key exists."
+  delegate_to: localhost
+  become: false
+  when: proxmox_authorized_keys_enabled | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-controller
+
+- name: SSH | Proxmox authorized_keys | Stat selected controller root public key
+  ansible.builtin.stat:
+    path: "{{ proxmox_controller_root_pubkey_path }}"
     follow: false
   delegate_to: localhost
-  register: ssh__controller_root_pubkey_stat
+  register: proxmox_controller_root_pubkey_stat
   changed_when: false
+  become: false
+  when: proxmox_authorized_keys_enabled | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-controller
 
-- name: Fail when controller root public key is missing
+- name: SSH | Proxmox authorized_keys | Refuse symlinked controller root public key
   ansible.builtin.fail:
-    msg: "Controller root public key not found: {{ ssh__controller_root_pubkey_path }}"
-  when: not ssh__controller_root_pubkey_stat.stat.exists
+    msg: >-
+      Controller root public key is a symlink: {{
+      proxmox_controller_root_pubkey_path }}. Refusing to use symlinked
+      authorized_keys material.
   delegate_to: localhost
+  become: false
+  when:
+    - proxmox_authorized_keys_enabled | bool
+    - proxmox_controller_root_pubkey_stat.stat.islnk | default(false) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-controller
 
 # -----------------------------------------------------------------------------
-# Ensure .ssh directory exists
+# Build authorized key source list
 # -----------------------------------------------------------------------------
 
-- name: Ensure SSH directory exists for authorized_keys
+- name: SSH | Proxmox authorized_keys | Build authorized key path list
+  ansible.builtin.set_fact:
+    proxmox_authorized_key_paths: >-
+      {{
+        (
+          [proxmox_controller_root_pubkey_path]
+          + proxmox_authorized_keys_extra_key_paths
+        )
+        | reject('equalto', '')
+        | unique
+        | sort
+        | list
+      }}
+  changed_when: false
+  when: proxmox_authorized_keys_enabled | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+
+- name: SSH | Proxmox authorized_keys | Stat authorized key source paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ proxmox_authorized_key_paths | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  delegate_to: localhost
+  register: proxmox_authorized_key_source_stats
+  changed_when: false
+  become: false
+  when: proxmox_authorized_keys_enabled | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-controller
+
+- name: SSH | Proxmox authorized_keys | Assert authorized key source paths are valid
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false) | bool
+      - item.stat.isreg | default(false) | bool
+      - not (item.stat.islnk | default(false) | bool)
+    fail_msg: >-
+      Authorized key source path is missing, invalid, or symlinked: {{ item.item
+      }}
+    success_msg: "Authorized key source path is valid: {{ item.item }}"
+  loop: "{{ proxmox_authorized_key_source_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  delegate_to: localhost
+  become: false
+  when: proxmox_authorized_keys_enabled | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-controller
+
+# -----------------------------------------------------------------------------
+# Prepare target path
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox authorized_keys | Ensure SSH directory exists
   ansible.builtin.file:
-    path: "{{ ssh__authorized_keys_path | dirname }}"
+    path: "{{ proxmox_authorized_keys_path | dirname }}"
     state: directory
-    owner: "{{ ssh.authorized_keys.owner | default('root') }}"
-    group: "{{ ssh.authorized_keys.group | default('root') }}"
-    mode: "0700"
+    owner: "{{ proxmox_authorized_keys_owner }}"
+    group: "{{ proxmox_authorized_keys_group }}"
+    mode: "{{ ssh_authorized_keys_owner_mode | default('0700') }}"
   become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+
+- name: SSH | Proxmox authorized_keys | Stat target authorized_keys path
+  ansible.builtin.stat:
+    path: "{{ proxmox_authorized_keys_path }}"
+    follow: false
+  register: proxmox_authorized_keys_target_stat
+  changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-validate
+
+- name: SSH | Proxmox authorized_keys | Refuse symlinked target authorized_keys
+  ansible.builtin.fail:
+    msg: >-
+      Target authorized_keys path is a symlink: {{ proxmox_authorized_keys_path
+      }}. Refusing to overwrite symlinked authorized_keys.
+  when: proxmox_authorized_keys_target_stat.stat.islnk | default(false) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-validate
 
 # -----------------------------------------------------------------------------
-# Deploy authorized_keys (template-managed)
+# Deploy/remove authorized_keys
 # -----------------------------------------------------------------------------
 
-- name: Deploy authorized_keys from template
+- name: SSH | Proxmox authorized_keys | Deploy authorized_keys from template
   ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/ssh/authorized_keys.j2"
-    dest: "{{ ssh__authorized_keys_path }}"
-    owner: "{{ ssh.authorized_keys.owner | default('root') }}"
-    group: "{{ ssh.authorized_keys.group | default('root') }}"
-    mode: "{{ ssh.authorized_keys.mode | default('0600') }}"
+    src: "{{ proxmox_authorized_keys_template_src }}"
+    dest: "{{ proxmox_authorized_keys_path }}"
+    owner: "{{ proxmox_authorized_keys_owner }}"
+    group: "{{ proxmox_authorized_keys_group }}"
+    mode: "{{ proxmox_authorized_keys_mode }}"
+    backup: "{{ ssh_authorized_keys_backup | default(false) }}"
+  register: proxmox_authorized_keys_template_result
   become: true
-  when:
-    - ssh.authorized_keys is defined
-    - ssh.authorized_keys.enabled | default(true)
+  when: proxmox_authorized_keys_enabled | bool
   vars:
-    authorized_key_paths:
-      - "{{ ssh__controller_root_pubkey_path }}"
+    ansible_template_src: "{{ proxmox_authorized_keys_template_src }}"
+    authorized_key_paths: "{{ proxmox_authorized_key_paths }}"
+    authorized_key_literals: "{{ proxmox_authorized_keys_literal_keys }}"
+    authorized_keys_exclusive: "{{ proxmox_authorized_keys_exclusive }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
 
-# -----------------------------------------------------------------------------
-# Optional: remove authorized_keys if disabled
-# -----------------------------------------------------------------------------
-
-- name: Remove authorized_keys when disabled
+- name: SSH | Proxmox authorized_keys | Remove authorized_keys when disabled
   ansible.builtin.file:
-    path: "{{ ssh__authorized_keys_path }}"
+    path: "{{ proxmox_authorized_keys_path }}"
     state: absent
+  register: proxmox_authorized_keys_remove_result
   become: true
   when:
-    - ssh.authorized_keys is defined
-    - not (ssh.authorized_keys.enabled | default(true))
+    - not (proxmox_authorized_keys_enabled | bool)
+    - ssh_remove_disabled_authorized_keys | default(true) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
 
 # -----------------------------------------------------------------------------
 # Validation
 # -----------------------------------------------------------------------------
 
-- name: Verify authorized_keys file exists (when enabled)
+- name: SSH | Proxmox authorized_keys | Stat rendered authorized_keys
   ansible.builtin.stat:
-    path: "{{ ssh__authorized_keys_path }}"
-  register: ssh__authorized_keys_stat
+    path: "{{ proxmox_authorized_keys_path }}"
+    follow: false
+  register: proxmox_authorized_keys_rendered_stat
+  changed_when: false
   become: true
-  when:
-    - ssh.authorized_keys is defined
-    - ssh.authorized_keys.enabled | default(true)
+  when: proxmox_authorized_keys_enabled | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-verify
 
-- name: Assert authorized_keys was deployed
+- name: SSH | Proxmox authorized_keys | Assert authorized_keys was deployed
   ansible.builtin.assert:
     that:
-      - ssh__authorized_keys_stat.stat.exists
-    fail_msg: "authorized_keys was not created as expected"
-  when:
-    - ssh.authorized_keys is defined
-    - ssh.authorized_keys.enabled | default(true)
+      - proxmox_authorized_keys_rendered_stat.stat.exists | default(false) | bool
+      - proxmox_authorized_keys_rendered_stat.stat.isreg | default(false) | bool
+      - not (proxmox_authorized_keys_rendered_stat.stat.islnk | default(false) |
+        bool)
+      - proxmox_authorized_keys_rendered_stat.stat.pw_name ==
+        proxmox_authorized_keys_owner
+      - proxmox_authorized_keys_rendered_stat.stat.gr_name ==
+        proxmox_authorized_keys_group
+      - proxmox_authorized_keys_rendered_stat.stat.mode ==
+        proxmox_authorized_keys_mode
+    fail_msg: "authorized_keys was not deployed correctly: {{
+      proxmox_authorized_keys_path }}"
+    success_msg: "authorized_keys was deployed correctly."
+  when: proxmox_authorized_keys_enabled | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-authorized-keys-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox authorized_keys | Show authorized_keys summary
+  ansible.builtin.debug:
+    msg:
+      - "Proxmox authorized_keys management complete."
+      - "Host: {{ inventory_hostname }}"
+      - "Enabled: {{ proxmox_authorized_keys_enabled | bool }}"
+      - "Path: {{ proxmox_authorized_keys_path }}"
+      - "Template: {{ proxmox_authorized_keys_template_src }}"
+      - "Controller root public key: {{ proxmox_controller_root_pubkey_path |
+        default('none') }}"
+      - "Key source count: {{ proxmox_authorized_key_paths | default([]) |
+        length }}"
+      - "Literal key count: {{ proxmox_authorized_keys_literal_keys | length }}"
+      - "Changed: {{ proxmox_authorized_keys_template_result is defined and
+        proxmox_authorized_keys_template_result is changed }}"
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-authorized-keys
+    - ssh-summary

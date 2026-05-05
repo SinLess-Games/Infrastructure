@@ -1,75 +1,311 @@
 ---
 # =============================================================================
-# Users Role – Ensure users and groups
+# Users Role - Ensure Users, Groups, and Sudoers
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Validate user role input.
+#   - Ensure required primary and supplementary groups exist.
+#   - Ensure user accounts are present/absent.
+#   - Manage sudoers entries safely with visudo validation.
+#
+# Expected inputs:
+#   - users_role_entries
+#
+# Compatible fallback:
+#   - users
+#
+# Optional inputs:
+#   - users_defaults
+#   - users_sudoers_dir
+#   - users_visudo_path
 # =============================================================================
 
-- name: Validate users configuration
-  ansible.builtin.import_tasks: validate.yaml
+# -----------------------------------------------------------------------------
+# Validate
+# -----------------------------------------------------------------------------
 
-- name: Build users role group list
+- name: Users | Validate configuration
+  ansible.builtin.import_tasks: validate.yaml
+  tags:
+    - users
+    - users-validate
+
+# -----------------------------------------------------------------------------
+# Normalize role inputs
+# -----------------------------------------------------------------------------
+
+- name: Users | Normalize role inputs
   ansible.builtin.set_fact:
-    users_role_groups: >-
+    users_role_entries_effective: "{{ users_role_entries | default(users | default([])) }}"
+    users_role_defaults_effective: "{{ users_role_defaults | default(users_defaults | default({})) }}"
+    users_role_sudoers_dir_effective: "{{ users_sudoers_dir | default('/etc/sudoers.d') }}"
+    users_role_visudo_path_effective: "{{ users_visudo_path | default('/usr/sbin/visudo') }}"
+  tags:
+    - users
+    - users-normalize
+
+# -----------------------------------------------------------------------------
+# Build required group list
+# -----------------------------------------------------------------------------
+
+- name: Users | Build required group names from user definitions
+  ansible.builtin.set_fact:
+    users_role_required_group_names: >-
+      {%- set out = [] -%} {%- for user in users_role_entries_effective -%}
+        {%- if user.state | default('present') == 'present' -%}
+          {%- if user.primary_group is defined and user.primary_group | length > 0 -%}
+            {%- set _ = out.append(user.primary_group) -%}
+          {%- endif -%}
+
+          {%- for group_name in user.groups | default([]) -%}
+            {%- if group_name is string and group_name | length > 0 -%}
+              {%- set _ = out.append(group_name) -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%} {{ out | unique | sort | list }}
+  tags:
+    - users
+    - users-groups
+
+- name: Users | Build primary group names
+  ansible.builtin.set_fact:
+    users_role_primary_group_names: >-
       {{
-        users_role_entries
-        | selectattr('groups', 'defined')
-        | map(attribute='groups')
-        | flatten
+        users_role_entries_effective
+        | selectattr('state', 'undefined')
+        | list
+        | union(users_role_entries_effective | selectattr('state', 'equalto', 'present') | list)
+        | selectattr('primary_group', 'defined')
+        | map(attribute='primary_group')
         | unique
         | list
       }}
+  tags:
+    - users
+    - users-groups
 
-- name: Ensure groups exist
+- name: Users | Build group creation jobs
+  ansible.builtin.set_fact:
+    users_role_group_jobs: >-
+      {%- set out = [] -%} {%- set primary_groups =
+      users_role_primary_group_names | default([]) -%} {%- for group_name in
+      users_role_required_group_names | default([]) -%}
+        {%- set matching_user = (
+              users_role_entries_effective
+              | selectattr('primary_group', 'defined')
+              | selectattr('primary_group', 'equalto', group_name)
+              | list
+              | first
+              | default({})
+            )
+        -%}
+        {%- set group_is_primary = group_name in primary_groups -%}
+        {%- set group_system = (
+              matching_user.system
+              | default(users_role_defaults_effective.system | default(false))
+            )
+            if group_is_primary
+            else true
+        -%}
+        {%- set _ = out.append({
+          'name': group_name,
+          'state': 'present',
+          'system': group_system
+        }) -%}
+      {%- endfor -%} {{ out }}
+  tags:
+    - users
+    - users-groups
+
+# -----------------------------------------------------------------------------
+# Groups
+# -----------------------------------------------------------------------------
+
+- name: Users | Ensure required groups exist
   ansible.builtin.group:
-    name: "{{ item }}"
-    state: present
-  loop: "{{ users_role_groups }}"
-  when:
-    - item is defined
-    - item | length > 0
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    system: "{{ item.system | default(true) }}"
+  loop: "{{ users_role_group_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+  tags:
+    - users
+    - users-groups
 
-- name: Ensure users exist
+# -----------------------------------------------------------------------------
+# Users
+# -----------------------------------------------------------------------------
+
+- name: Users | Ensure user accounts are managed
   ansible.builtin.user:
     name: "{{ item.name }}"
     comment: "{{ item.comment | default(omit) }}"
-    shell: "{{ item.shell | default(users_default_shell) }}"
-    system: "{{ item.system | default(false) }}"
-    create_home: "{{ item.create_home | default(users_create_home) }}"
+    shell: "{{ item.shell | default(users_role_defaults_effective.shell |
+      default('/bin/bash')) }}"
+    system: "{{ item.system | default(users_role_defaults_effective.system |
+      default(false)) }}"
+    create_home: "{{ item.create_home |
+      default(users_role_defaults_effective.create_home | default(true)) }}"
     move_home: "{{ item.move_home | default(omit) }}"
     home: "{{ item.home_directory | default(omit) }}"
     uid: "{{ item.uid | default(omit) }}"
     group: "{{ item.primary_group | default(omit) }}"
     groups: "{{ item.groups | default(omit) }}"
-    append: true
-    password: "{{ item.password | default(omit) }}"
-    password_lock: "{{ item.password_lock | default(omit) }}"
+    append: "{{ item.append_groups |
+      default(users_role_defaults_effective.append_groups | default(true)) }}"
+    password: "{{ item.password_hash | default(omit) }}"
+    password_lock: "{{ item.password_lock |
+      default(users_role_defaults_effective.password_lock | default(omit)) }}"
     expires: "{{ item.expires | default(omit) }}"
-    state: "{{ item.state | default('present') }}"
+    state: "{{ item.state | default(users_role_defaults_effective.state |
+      default('present')) }}"
     remove: "{{ item.remove | default(omit) }}"
-  loop: "{{ users_role_entries }}"
+  loop: "{{ users_role_entries_effective }}"
   loop_control:
     label: "{{ item.name }}"
+  become: true
+  no_log: "{{ users_role_no_log | default(false) or item.password_hash is defined }}"
+  tags:
+    - users
+    - users-accounts
 
-- name: Configure sudoers entries
+# -----------------------------------------------------------------------------
+# Sudoers
+# -----------------------------------------------------------------------------
+
+- name: Users | Ensure sudoers directory exists
+  ansible.builtin.file:
+    path: "{{ users_role_sudoers_dir_effective }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  become: true
+  when: users_role_entries_effective | selectattr('sudo', 'defined') | list |
+    length > 0
+  tags:
+    - users
+    - users-sudoers
+
+- name: Users | Check visudo path
+  ansible.builtin.stat:
+    path: "{{ users_role_visudo_path_effective }}"
+  register: users_role_visudo_stat
+  become: true
+  tags:
+    - users
+    - users-sudoers
+
+- name: Users | Assert visudo exists when sudoers are managed
+  ansible.builtin.assert:
+    that:
+      - users_role_visudo_stat.stat.exists | bool
+      - users_role_visudo_stat.stat.executable | bool
+    fail_msg: >-
+      visudo was not found or is not executable at {{
+      users_role_visudo_path_effective }}. Set users_visudo_path if your distro
+      uses a different path.
+    success_msg: "visudo is available for sudoers validation."
+  when: >-
+    users_role_entries_effective | selectattr('sudo', 'defined') |
+    selectattr('sudo', 'equalto', true) | list | length > 0
+  tags:
+    - users
+    - users-sudoers
+
+- name: Users | Configure sudoers entries
   ansible.builtin.copy:
-    dest: "{{ users_sudoers_dir }}/{{ item.name }}"
+    dest: "{{ users_role_sudoers_dir_effective }}/{{ item.sudoers_file |
+      default(item.name) }}"
     content: |
-      {{ item.name }} ALL=(ALL) {{ 'NOPASSWD:' if item.sudo_nopasswd | default(false) else '' }}ALL
+      # Managed by Ansible - users role
+      # User: {{ item.name }}
+      {{ item.name }} ALL=({{ item.sudo_runas | default('ALL:ALL') }}) {{ 'NOPASSWD:' if item.sudo_nopasswd | default(false) else '' }}{{ item.sudo_commands | default(['ALL']) | join(', ') }}
     owner: root
     group: root
     mode: "0440"
-  when:
-    - item.state | default('present') == 'present'
-    - item.sudo | default(false)
-  loop: "{{ users_role_entries }}"
+    validate: "{{ users_role_visudo_path_effective }} -cf %s"
+  loop: "{{ users_role_entries_effective }}"
   loop_control:
     label: "{{ item.name }}"
+  become: true
+  when:
+    - item.state | default(users_role_defaults_effective.state |
+      default('present')) == 'present'
+    - item.sudo | default(users_role_defaults_effective.sudo | default(false)) |
+      bool
+    - item.manage_sudoers | default(users_role_defaults_effective.manage_sudoers
+      | default(true)) | bool
+  tags:
+    - users
+    - users-sudoers
 
-- name: Remove sudoers entries for users without sudo access
+- name: Users | Remove sudoers entries for users without managed sudo access
   ansible.builtin.file:
-    path: "{{ users_sudoers_dir }}/{{ item.name }}"
+    path: "{{ users_role_sudoers_dir_effective }}/{{ item.sudoers_file |
+      default(item.name) }}"
     state: absent
-  when:
-    - item.state | default('present') != 'present' or not (item.sudo | default(false))
-  loop: "{{ users_role_entries }}"
+  loop: "{{ users_role_entries_effective }}"
   loop_control:
     label: "{{ item.name }}"
+  become: true
+  when:
+    - item.manage_sudoers | default(users_role_defaults_effective.manage_sudoers
+      | default(true)) | bool
+    - >-
+      item.state | default(users_role_defaults_effective.state |
+      default('present')) != 'present' or not (item.sudo |
+      default(users_role_defaults_effective.sudo | default(false)) | bool)
+  tags:
+    - users
+    - users-sudoers
+
+# -----------------------------------------------------------------------------
+# Optional home directory ownership correction
+# -----------------------------------------------------------------------------
+
+- name: Users | Ensure managed home directories have safe ownership
+  ansible.builtin.file:
+    path: "{{ item.home_directory }}"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.primary_group | default(item.name) }}"
+    mode: "{{ item.home_mode | default('0750') }}"
+  loop: "{{ users_role_entries_effective }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.home_directory | default('no-home') }}"
+  become: true
+  when:
+    - users_role_manage_home_permissions | default(true) | bool
+    - item.state | default(users_role_defaults_effective.state |
+      default('present')) == 'present'
+    - item.create_home | default(users_role_defaults_effective.create_home |
+      default(true)) | bool
+    - item.home_directory is defined
+    - item.home_directory != '/root'
+    - item.shell | default(users_role_defaults_effective.shell |
+      default('/bin/bash')) not in ['/usr/sbin/nologin', '/sbin/nologin',
+      '/bin/false', '/usr/bin/false']
+  tags:
+    - users
+    - users-home
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Users | Show role summary
+  ansible.builtin.debug:
+    msg:
+      - "Users role complete."
+      - "Users managed: {{ users_role_entries_effective | length }}"
+      - "Required groups: {{ users_role_required_group_names | join(', ') if
+        users_role_required_group_names | length > 0 else 'none' }}"
+      - "Sudoers directory: {{ users_role_sudoers_dir_effective }}"
+  when: users_role_show_summary | default(true)
+  tags:
+    - users
+    - users-summary

@@ -64,7 +64,9 @@ module "kubernetes_prod_control_plane" {
   resource_pool                 = ""
   cpu_cores                     = 4
   cpu_sockets                   = 1
-  memory_mb                     = 8192
+  cpu_type                      = "host"
+  memory_mb                     = 16384
+  memory_balloon_mb             = 8192
   disk_size                     = "150G"
   network_bridge                = "vmbr40"
   vlan_id                       = 0
@@ -158,7 +160,9 @@ module "kubernetes_prod_workers" {
   resource_pool                 = ""
   cpu_cores                     = 6
   cpu_sockets                   = 1
+  cpu_type                      = "host"
   memory_mb                     = 16384
+  memory_balloon_mb             = 8192
   disk_size                     = "150G"
   network_bridge                = "vmbr40"
   vlan_id                       = 0

@@ -2,53 +2,157 @@
 # =============================================================================
 # Technitium DNS - Block List Sources
 # -----------------------------------------------------------------------------
-# This file lists authoritative blocklist URLs intended to cover:
+# Purpose:
+#   Manage Technitium DNS block list sources through Ansible.
+#
+# Coverage:
 #   - Ads / trackers
 #   - Malware / phishing / scam domains
-#   - Telemetry / analytics (optional aggressiveness)
-#   - Combined community-maintained block sources
+#   - Telemetry / analytics
+#   - Optional aggressive policy lists
 #
-# Notes:
-# - Lists are regularly updated by their maintainers.
-# - Some lists overlap; remove any if you see breakage on certain domains.
-# - The "category" field is purely for human structure and automation clarity.
+# Design:
+#   - technitium_block_list_sources is the source-of-truth metadata list.
+#   - technitium_block_list_urls is kept for backward compatibility with role
+#     tasks that already expect a flat list of URLs.
+#   - Only enabled sources are included in technitium_block_list_urls.
+#
+# Operational guidance:
+#   - Start with the balanced defaults.
+#   - Enable aggressive lists only after monitoring false positives.
+#   - Avoid stacking too many large aggregator lists unless there is a clear
+#     reason; overlap increases memory and troubleshooting cost.
 # =============================================================================
 
-# group_vars/dns-pi/technitium.yml (or wherever you keep it)
-technitium_block_list_urls:
-  - "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
-  - "https://dbl.oisd.nl/"
-  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/easylist/list.txt"
-  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/easyprivacy/list.txt"
-  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/adguard-simplified/list.txt"
-  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/eth-phishing-detect/list.txt"
-  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/spam404.com/list.txt"
-  - "https://raw.githubusercontent.com/hectorm/hmirror/master/data/matomo.org-spammers/list.txt"
-  - "https://s3.amazonaws.com/lists.disconnect.me/simple_tracking.txt"
-  - "https://s3.amazonaws.com/lists.disconnect.me/simple_ad.txt"
-  - "https://gitlab.com/quidsup/notrack-blocklists/raw/master/notrack-malware.txt"
-  - "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-social/hosts"
-  - "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-social/hosts"
-  - "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
-  - "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/multi-onlydomains.txt"
+technitium_block_list_profile: balanced
 
+technitium_block_list_sources:
+  # ---------------------------------------------------------------------------
+  # Balanced default sources
+  # ---------------------------------------------------------------------------
+
+  - name: oisd-big
+    category: balanced
+    enabled: true
+    priority: 10
+    format: domains
+    url: "https://big.oisd.nl"
+    notes: >-
+      General-purpose privacy and security blocklist covering ads, app ads,
+      phishing, malvertising, malware, spyware, ransomware, cryptojacking,
+      and telemetry/tracking where blocking should not break normal use.
+
+  - name: hagezi-pro
+    category: balanced
+    enabled: true
+    priority: 20
+    format: wildcard-domains
+    url: "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt"
+    notes: >-
+      Recommended balanced HaGeZi tier for broad DNS-level protection.
+      Good default for admin-managed home and homelab networks.
+
+  - name: hagezi-tif-mini
+    category: security
+    enabled: true
+    priority: 30
+    format: wildcard-domains
+    url: "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/tif.mini-onlydomains.txt"
+    notes: >-
+      Resource-friendlier threat-intelligence feed for malware, spam, scam,
+      and phishing protection.
+
+  # ---------------------------------------------------------------------------
+  # Optional compatibility / fallback sources
+  # ---------------------------------------------------------------------------
+
+  - name: stevenblack-hosts
+    category: compatibility
+    enabled: false
+    priority: 100
+    format: hosts
+    url: "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+    notes: >-
+      Well-known hosts-file aggregator. Disabled by default because OISD and
+      HaGeZi already cover much of the same ground.
+
+  - name: hagezi-pro-mini
+    category: low-resource
+    enabled: false
+    priority: 110
+    format: wildcard-domains
+    url: "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro.mini-onlydomains.txt"
+    notes: >-
+      Smaller HaGeZi Pro variant for low-memory DNS hosts. Enable this instead
+      of hagezi-pro if the Technitium host is resource constrained.
+
+  # ---------------------------------------------------------------------------
+  # Optional aggressive sources
+  # ---------------------------------------------------------------------------
+
+  - name: hagezi-pro-plus-plus
+    category: aggressive
+    enabled: false
+    priority: 200
+    format: wildcard-domains
+    url: "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro.plus-onlydomains.txt"
+    notes: >-
+      More aggressive than HaGeZi Pro. Enable only if you are comfortable
+      troubleshooting and allowlisting false positives.
+
+  - name: hagezi-ultimate-mini
+    category: aggressive
+    enabled: false
+    priority: 210
+    format: wildcard-domains
+    url: "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/ultimate.mini-onlydomains.txt"
+    notes: >-
+      Aggressive mini variant. Use only for tightly controlled networks or
+      clients where stricter blocking is intentional.
+
+  # ---------------------------------------------------------------------------
+  # Optional policy / content-control sources
+  # ---------------------------------------------------------------------------
+
+  - name: oisd-nsfw
+    category: policy
+    enabled: false
+    priority: 300
+    format: domains
+    url: "https://nsfw.oisd.nl"
+    notes: >-
+      Adult-content policy list. Disabled by default because this is a
+      content-control decision, not a baseline security requirement.
 
 # =============================================================================
-# Considerations / Tuning
+# Backward-compatible flat URL list
+# -----------------------------------------------------------------------------
+# Existing role tasks can continue using:
 #
-# - The block lists above can be aggressive. Monitor false positives
-#   and adjust per your environment.
+#   technitium_block_list_urls
 #
-# - Some feeds (e.g., OISD) are extremely large and may be sufficient on their
-#   own. Additional lists may add little benefit beyond overlap.
-#   See community recommendations: multiple blocklist sources used but careful
-#   not to overload. :contentReference[oaicite:1]{index=1}
+# Newer role tasks should prefer:
 #
-# - Maintaining a smaller, *high-quality* list often yields fewer false
-#   positives than indiscriminately combining all lists.
-#
-# - You can group or tag block lists by category and enable/disable via
-#   playbooks without changing the underlying YAML structure.
+#   technitium_block_list_sources
 #
 # =============================================================================
 
+technitium_block_list_urls: >-
+  {{
+    technitium_block_list_sources
+    | selectattr('enabled', 'equalto', true)
+    | sort(attribute='priority')
+    | map(attribute='url')
+    | unique
+    | list
+  }}
+
+# =============================================================================
+# Local allowlist / denylist hooks
+# -----------------------------------------------------------------------------
+# These are intentionally empty by default. They give the role clean variables
+# to template into local Technitium allow/deny configuration later.
+# =============================================================================
+
+technitium_allow_domains: []
+technitium_deny_domains: []

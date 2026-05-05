@@ -2,69 +2,166 @@
 # =============================================================================
 # shell-config — main task dispatcher
 # -----------------------------------------------------------------------------
-# Execution order is intentional:
-#   0. derive users     → normalize role inputs
-#   1. validate        → fail fast, no mutation
-#   2. install         → system + shell tooling cleanup
-#   3. install-plugins → Oh My Zsh / Zsh plugins
-#   4. configure       → dotfiles, aliases, ~/bin commands
-#   5. set-default-shell → optional, explicit shell change
+# Purpose:
+#   Orchestrates interactive shell configuration for managed users.
+#
+# Execution order:
+#   1. Normalize role controls
+#   2. Validate inputs and derive managed user lists
+#   3. Install shell tooling
+#   4. Install Zsh / Oh My Zsh plugins
+#   5. Configure dotfiles, aliases, prompt, and ~/bin commands
+#   6. Set login shell as the final explicit phase
+#
+# Design:
+#   - validate.yaml owns user normalization.
+#   - install.yaml owns packages, Oh My Zsh, and Starship cleanup.
+#   - install-plugins.yaml owns plugin cloning.
+#   - configure.yaml owns dotfiles and user-local commands.
+#   - set-default-shell.yaml is the only canonical login-shell mutation phase.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Normalize shell role users
-# -----------------------------------------------------------------------------
-# - Accept explicit role inputs first
-# - Fall back to existing shell_config_users / users for compatibility
-# - home_directory is derived when omitted
+# Phase 0 — Normalize role controls
 # -----------------------------------------------------------------------------
 
-- name: Initialize resolved shell users
+- name: Shell Config | Main | Normalize role controls
   ansible.builtin.set_fact:
-    shell__resolved_users: []
-
-- name: Build resolved shell users from role input
-  ansible.builtin.set_fact:
-    shell__resolved_users: >-
+    shell_main_enabled: "{{ shell_config_enabled | default(true) | bool }}"
+    shell_main_validate_inputs: "{{ shell_config_validate_inputs | default(true) | bool }}"
+    shell_main_install_zsh: "{{ shell_install_zsh | default(true) | bool }}"
+    shell_main_install_oh_my_zsh: "{{ shell_install_oh_my_zsh | default(true) | bool }}"
+    shell_main_install_plugins: >-
       {{
-        shell__resolved_users + [
-          item | combine({
-            'home_directory': item.home_directory | default('/home/' ~ item.name)
-          })
-        ]
+        shell_install_oh_my_zsh | default(true) | bool
+        and (
+          shell_plugins
+          | default(plugins | default([]), true)
+          | length
+        ) > 0
       }}
-  loop: "{{ shell_role_users }}"
-  when:
-    - item.name is defined
-    - item.shell is not defined or item.shell is not search('nologin')
+    shell_main_configure_dotfiles: "{{ shell_configure_dotfiles | default(true) | bool }}"
+    shell_main_configure_bin_commands: "{{ shell_bin_commands_enabled | default(true) | bool }}"
+    shell_main_set_default_shell: "{{ shell_set_default_shell | default(true) | bool }}"
+    shell_main_show_summary: "{{ shell_config_show_summary | default(true) | bool }}"
+  changed_when: false
+  tags:
+    - shell
+    - shell-main
+
+- name: Shell Config | Main | Show selected orchestration mode
+  ansible.builtin.debug:
+    msg:
+      - "shell-config orchestration starting."
+      - "Host: {{ inventory_hostname }}"
+      - "Enabled: {{ shell_main_enabled | bool }}"
+      - "Validate inputs: {{ shell_main_validate_inputs | bool }}"
+      - "Install zsh: {{ shell_main_install_zsh | bool }}"
+      - "Install Oh My Zsh: {{ shell_main_install_oh_my_zsh | bool }}"
+      - "Install plugins: {{ shell_main_install_plugins | bool }}"
+      - "Configure dotfiles: {{ shell_main_configure_dotfiles | bool }}"
+      - "Configure bin commands: {{ shell_main_configure_bin_commands | bool }}"
+      - "Set default shell: {{ shell_main_set_default_shell | bool }}"
+  when: shell_main_show_summary | bool
+  tags:
+    - shell
+    - shell-main
+    - shell-summary
 
 # -----------------------------------------------------------------------------
-# Validation (fail fast)
+# Disabled mode
 # -----------------------------------------------------------------------------
 
-- name: Validate shell configuration inputs
+- name: Shell Config | Main | Stop when shell-config is disabled
+  ansible.builtin.meta: end_host
+  when: not (shell_main_enabled | bool)
+  tags:
+    - shell
+    - shell-main
+
+# -----------------------------------------------------------------------------
+# Phase 1 — Validation and user normalization
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Main | Validate shell configuration inputs
   ansible.builtin.import_tasks: validate.yaml
+  tags:
+    - shell
+    - shell-validate
 
 # -----------------------------------------------------------------------------
-# Installation
+# Phase 2 — Installation
 # -----------------------------------------------------------------------------
 
-- name: Install shell tooling and remove starship
+- name: Shell Config | Main | Install shell tooling
   ansible.builtin.import_tasks: install.yaml
+  when:
+    - shell_main_install_zsh | bool or shell_main_install_oh_my_zsh | bool or
+      shell_install_starship | default(false) | bool or shell_remove_starship |
+      default(true) | bool
+  tags:
+    - shell
+    - shell-install
 
-- name: Install Zsh / Oh My Zsh plugins
+# -----------------------------------------------------------------------------
+# Phase 3 — Plugins
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Main | Install Zsh and Oh My Zsh plugins
   ansible.builtin.import_tasks: install-plugins.yaml
+  when: shell_main_install_plugins | bool
+  tags:
+    - shell
+    - shell-plugins
 
 # -----------------------------------------------------------------------------
-# Configuration
+# Phase 4 — Dotfiles and user-local commands
+# -----------------------------------------------------------------------------
+# Login-shell changes are intentionally disabled for configure.yaml so
+# set-default-shell.yaml remains the only canonical shell mutation phase.
 # -----------------------------------------------------------------------------
 
-- name: Configure shell environment and dotfiles
+- name: Shell Config | Main | Configure shell environment and dotfiles
   ansible.builtin.import_tasks: configure.yaml
+  vars:
+    shell_set_default_shell: false
+  when:
+    - shell_main_configure_dotfiles | bool or shell_main_configure_bin_commands
+      | bool
+  tags:
+    - shell
+    - shell-configure
 
 # -----------------------------------------------------------------------------
-# Optional shell change
+# Phase 5 — Login shell
 # -----------------------------------------------------------------------------
 
-- name: Set default shell for users (optional)
+- name: Shell Config | Main | Set default shell for managed users
   ansible.builtin.import_tasks: set-default-shell.yaml
+  when: shell_main_set_default_shell | bool
+  tags:
+    - shell
+    - shell-default-shell
+
+# -----------------------------------------------------------------------------
+# Phase 6 — Summary
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Main | Show shell-config completion summary
+  ansible.builtin.debug:
+    msg:
+      - "shell-config orchestration complete."
+      - "Host: {{ inventory_hostname }}"
+      - "Input users: {{ shell__role_users_effective | default([]) | length }}"
+      - "Resolved users: {{ shell__resolved_users | default([]) | length }}"
+      - "Users with valid homes: {{ shell__home_users | default([]) | length }}"
+      - "Oh My Zsh users: {{ shell__oh_my_zsh_users | default([]) |
+        map(attribute='name') | list | join(', ') if shell__oh_my_zsh_users |
+        default([]) | length > 0 else 'none' }}"
+      - "Plugin jobs: {{ shell__plugin_install_jobs | default([]) | length }}"
+      - "Default shell changed: {{ shell_main_set_default_shell | bool }}"
+  when: shell_main_show_summary | bool
+  tags:
+    - shell
+    - shell-main
+    - shell-summary

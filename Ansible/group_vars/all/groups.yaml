@@ -2,71 +2,289 @@
 # =============================================================================
 # Global Group Definitions
 # -----------------------------------------------------------------------------
-# These groups are created on ALL managed hosts unless overridden.
-# Groups here are intended for:
+# Purpose:
+#   Defines global Linux groups managed across all baseline hosts.
+#
+# Intended use:
 #   - Privilege delegation
-#   - Service access (docker, monitoring, etc.)
-#   - Consistent GID usage across nodes
+#   - Service/runtime access
+#   - Automation ownership
+#   - Observability access
+#   - Consistent group names across infrastructure nodes
+#
+# Ownership boundaries:
+#   - This file defines groups only.
+#   - User membership should be defined in:
+#       Ansible/group_vars/all/users.yaml
+#   - Group creation should be handled by the users/common_groups role.
+#
+# Notes:
+#   - Avoid hardcoded GIDs unless required for shared storage, NFS, bind mounts,
+#     or cross-node file ownership consistency.
+#   - Environment-specific groups should live in environment-specific group_vars.
 # =============================================================================
 
-groups:
-
-  # ---------------------------------------------------------------------------
-  # Administrative / Privileged Groups
-  # ---------------------------------------------------------------------------
-
-  - name: sudo
-    system: true
-    state: present
-
-  - name: adm
-    system: true
-    state: present
-
-  # ---------------------------------------------------------------------------
-  # Container / Runtime Access
-  # ---------------------------------------------------------------------------
-
-  - name: docker
-    system: true
-    state: present
-
-  # ---------------------------------------------------------------------------
-  # Automation / Infrastructure
-  # ---------------------------------------------------------------------------
-
-  - name: automation
-    system: true
-    state: present
-
-  # ---------------------------------------------------------------------------
-  # Observability / Operations (future-safe)
-  # ---------------------------------------------------------------------------
-
-  - name: monitoring
-    system: true
-    state: present
-
-  - name: logging
-    system: true
-    state: present
-
 # =============================================================================
-# Defaults
+# Group defaults
 # =============================================================================
 
 group_defaults:
   state: present
+  system: true
+
+# =============================================================================
+# Global groups
+# =============================================================================
+
+groups:
+  # ---------------------------------------------------------------------------
+  # Administrative / privileged groups
+  # ---------------------------------------------------------------------------
+
+  - name: sudo
+    state: present
+    system: true
+    description: "Administrative sudo access group"
+    tags:
+      - admin
+      - privileged
+
+  - name: adm
+    state: present
+    system: true
+    description: "System log and administrative read-access group"
+    tags:
+      - admin
+      - logs
+
+  # ---------------------------------------------------------------------------
+  # Primary operator group
+  # ---------------------------------------------------------------------------
+
+  - name: sinless777
+    state: present
+    system: false
+    description: "Primary operator private group"
+    tags:
+      - operator
+      - user-private-group
+
+  # ---------------------------------------------------------------------------
+  # Container / runtime access
+  # ---------------------------------------------------------------------------
+
+  - name: docker
+    state: present
+    system: true
+    description: "Docker runtime access group"
+    tags:
+      - containers
+      - runtime
+
+  - name: container
+    state: present
+    system: true
+    description: "Generic container runtime access group"
+    tags:
+      - containers
+      - runtime
+
+  # ---------------------------------------------------------------------------
+  # Automation / infrastructure
+  # ---------------------------------------------------------------------------
+
+  - name: automation
+    state: present
+    system: true
+    description: "Automation service group for Ansible, GitOps, and Terraform"
+    tags:
+      - automation
+      - ci
+      - infrastructure
+
+  - name: ansible
+    state: present
+    system: true
+    description: "Ansible automation group"
+    tags:
+      - automation
+      - ansible
+
+  - name: gitops
+    state: present
+    system: true
+    description: "GitOps automation group"
+    tags:
+      - automation
+      - gitops
+
+  - name: terraform
+    state: present
+    system: true
+    description: "Terraform automation group"
+    tags:
+      - automation
+      - terraform
+
+  # ---------------------------------------------------------------------------
+  # Security / secrets / certificates
+  # ---------------------------------------------------------------------------
+
+  - name: security
+    state: present
+    system: true
+    description: "Security operations group"
+    tags:
+      - security
+
+  - name: vault
+    state: present
+    system: true
+    description: "Vault service and secret-management access group"
+    tags:
+      - security
+      - vault
+      - secrets
+
+  - name: certs
+    state: present
+    system: true
+    description: "Certificate material access group"
+    tags:
+      - security
+      - certificates
+
+  - name: shared-certs
+    state: present
+    system: true
+    description: "Shared certificate access group"
+    tags:
+      - security
+      - certificates
+      - shared
+
+  # ---------------------------------------------------------------------------
+  # Observability / operations
+  # ---------------------------------------------------------------------------
+
+  - name: monitoring
+    state: present
+    system: true
+    description: "Monitoring and metrics access group"
+    tags:
+      - observability
+      - monitoring
+
+  - name: logging
+    state: present
+    system: true
+    description: "Logging access group"
+    tags:
+      - observability
+      - logging
+
+  - name: tracing
+    state: present
+    system: true
+    description: "Tracing and telemetry access group"
+    tags:
+      - observability
+      - tracing
+
+  - name: operations
+    state: present
+    system: true
+    description: "General infrastructure operations group"
+    tags:
+      - operations
+
+  # ---------------------------------------------------------------------------
+  # Storage / backup
+  # ---------------------------------------------------------------------------
+
+  - name: storage
+    state: present
+    system: true
+    description: "Storage administration and service access group"
+    tags:
+      - storage
+
+  - name: backup
+    state: present
+    system: true
+    description: "Backup service and backup-data access group"
+    tags:
+      - backup
+      - storage
+
+  # ---------------------------------------------------------------------------
+  # Emergency access
+  # ---------------------------------------------------------------------------
+
+  - name: breakglass
+    state: present
+    system: false
+    description: "Emergency break-glass access group"
+    tags:
+      - breakglass
+      - emergency
+
+# =============================================================================
+# Group policy metadata
+# -----------------------------------------------------------------------------
+# Optional helper metadata for validation tasks.
+# =============================================================================
+
+groups_policy:
+  require_unique_names: true
+  require_explicit_state: true
+  require_explicit_system_flag: true
+  avoid_hardcoded_gids: true
+
+  protected_groups:
+    - root
+    - sudo
+    - adm
+    - docker
+    - sinless777
+    - automation
+    - breakglass
+
+  privileged_groups:
+    - sudo
+    - adm
+    - docker
+    - security
+    - vault
+    - certs
+    - shared-certs
+    - operations
+    - storage
+    - backup
+    - breakglass
+
+  service_groups:
+    - automation
+    - ansible
+    - gitops
+    - terraform
+    - monitoring
+    - logging
+    - tracing
+    - vault
+    - storage
+    - backup
+
+  user_private_groups:
+    - sinless777
 
 # =============================================================================
 # Notes
-# =============================================================================
-# - Group creation should be handled by a dedicated role:
-#     roles/common_groups
-#
-# - Do NOT place environment-specific groups here.
-#   Use:
-#     group_vars/<env>/groups.yaml
-#
-# - Avoid assigning GIDs unless required for NFS / shared storage.
+# -----------------------------------------------------------------------------
+# - Group membership should be assigned from user definitions, not here.
+# - Keep global groups broadly useful across all managed hosts.
+# - Place environment-specific or application-specific groups in:
+#     Ansible/group_vars/<environment>/groups.yaml
+#     Ansible/host_vars/<hostname>.yaml
+# - Add fixed GIDs only when shared filesystem ownership requires it.
 # =============================================================================

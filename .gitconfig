@@ -1,0 +1,107 @@
+# =============================================================================
+# Infrastructure repo Git configuration
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Repository-specific Git defaults for the Infrastructure repo.
+#
+# Enable once per clone with:
+#   git config --local include.path ../.gitconfig
+#
+# Optional private overrides:
+#   Create .gitconfig.local in the repo root.
+# =============================================================================
+
+[include]
+    path = .gitconfig.local
+
+[core]
+    autocrlf = false
+    eol = lf
+    whitespace = trailing-space,space-before-tab,indent-with-non-tab
+    ignorecase = false
+
+[init]
+    defaultBranch = main
+
+[fetch]
+    prune = true
+    pruneTags = true
+    all = true
+
+[pull]
+    ff = only
+
+[push]
+    default = current
+    autoSetupRemote = true
+    followTags = true
+
+[branch]
+    sort = -committerdate
+
+[tag]
+    sort = -version:refname
+
+[diff]
+    algorithm = histogram
+    renames = copies
+    colorMoved = default
+    submodule = log
+
+[merge]
+    conflictStyle = zdiff3
+    ff = false
+
+[merge "ours"]
+    name = Keep ours merge driver
+    driver = true
+
+[rerere]
+    enabled = true
+    autoupdate = true
+
+[status]
+    showStash = true
+    submoduleSummary = true
+    short = false
+    branch = true
+
+[log]
+    date = iso
+    decorate = short
+
+[commit]
+    verbose = true
+
+[rebase]
+    autoStash = true
+    autoSquash = true
+    updateRefs = true
+
+[stash]
+    showIncludeUntracked = true
+
+[clean]
+    requireForce = true
+
+[advice]
+    addIgnoredFile = false
+    detachedHead = false
+
+[alias]
+    s = status --short --branch
+    st = status
+    co = checkout
+    sw = switch
+    br = branch
+    ci = commit
+    amend = commit --amend
+    unstage = reset HEAD --
+    last = log -1 HEAD --stat
+    lg = log --graph --decorate --oneline --all
+    recent = branch --sort=-committerdate
+    cleanup = !git fetch --all --prune --prune-tags && git remote prune origin
+    root = rev-parse --show-toplevel
+    ignored = status --ignored --short
+    ours = checkout --ours --
+    theirs = checkout --theirs --

@@ -1,109 +1,490 @@
 ---
-- name: OS | Gather facts
-  ansible.builtin.setup:
-    gather_timeout: 30
+# =============================================================================
+# Technitium OS Preparation - Tasks
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Prepare Debian/Ubuntu hosts for Technitium DNS Server
+#   - Install required OS packages
+#   - Disable systemd-resolved DNS stub listener so Technitium can bind :53
+#   - Keep host DNS resolution functional during bootstrap
+#   - Configure UFW using Technitium firewall group variables
+#
+# Companion vars:
+#   - Ansible/group_vars/technitium/main.yaml
+#   - Ansible/group_vars/technitium/firewall.yaml
+# =============================================================================
 
-- name: OS | Update apt cache
-  ansible.builtin.apt:
-    update_cache: true
-    cache_valid_time: 3600
-  register: _apt_update
-  retries: 3
-  delay: 5
-  until: _apt_update is succeeded
+- name: OS | Prepare Technitium host
+  become: true
+  block:
+    # -------------------------------------------------------------------------
+    # Facts / validation
+    # -------------------------------------------------------------------------
 
-- name: OS | Install prerequisites
-  ansible.builtin.apt:
-    name:
-      - ca-certificates
-      - curl
-      - gnupg
-      - ufw
-    state: present
-  register: _apt_install
-  retries: 3
-  delay: 5
-  until: _apt_install is succeeded
+    - name: OS | Gather facts
+      ansible.builtin.setup:
+        gather_timeout: 30
 
-- name: OS | Gather service facts
-  ansible.builtin.service_facts:
+    - name: OS | Assert supported OS family
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "Debian"
+        fail_msg: >-
+          The Technitium role currently supports Debian-family systems only.
+          Detected ansible_os_family={{ ansible_os_family }}.
+        success_msg: "Detected supported Debian-family system."
 
-- name: OS | Disable systemd-resolved DNSStubListener
-  ansible.builtin.lineinfile:
-    path: /etc/systemd/resolved.conf
-    regexp: '^\s*#?\s*DNSStubListener='
-    line: 'DNSStubListener=no'
-    create: true
-    mode: "0644"
-  when: "'systemd-resolved.service' in ansible_facts.services"
+    - name: OS | Gather service facts
+      ansible.builtin.service_facts:
 
-- name: OS | Restart systemd-resolved
-  ansible.builtin.service:
-    name: systemd-resolved
-    state: restarted
-    daemon_reload: true
-  when: "'systemd-resolved.service' in ansible_facts.services"
-  ignore_errors: true
+    # -------------------------------------------------------------------------
+    # Packages
+    # -------------------------------------------------------------------------
 
-- name: OS | Ensure resolv.conf is symlink to resolved real file
-  ansible.builtin.file:
-    src: /run/systemd/resolve/resolv.conf
-    dest: /etc/resolv.conf
-    state: link
-    force: true
-  when: "'systemd-resolved.service' in ansible_facts.services"
+    - name: OS | Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      register: technitium_os_apt_update
+      retries: 3
+      delay: 5
+      until: technitium_os_apt_update is succeeded
 
-- name: OS | Check for resolvectl
-  ansible.builtin.stat:
-    path: /usr/bin/resolvectl
-  register: _resolvectl
+    - name: OS | Install prerequisites
+      ansible.builtin.apt:
+        name: "{{ technitium_os_packages | default(technitium_os_default_packages) }}"
+        state: present
+        install_recommends: false
+      register: technitium_os_apt_install
+      retries: 3
+      delay: 5
+      until: technitium_os_apt_install is succeeded
+      vars:
+        technitium_os_default_packages:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - dnsutils
+          - gnupg
+          - iproute2
+          - jq
+          - lsb-release
+          - python3
+          - python3-apt
+          - sudo
+          - tar
+          - ufw
+          - unzip
 
-- name: OS | Check for systemd-resolve
-  ansible.builtin.stat:
-    path: /usr/bin/systemd-resolve
-  register: _systemd_resolve
+    # -------------------------------------------------------------------------
+    # Hostname
+    # -------------------------------------------------------------------------
 
-- name: OS | Flush DNS cache (systemd-resolved)
-  ansible.builtin.command: >-
-    {{ (_resolvectl.stat.exists | bool) | ternary('resolvectl flush-caches', 'systemd-resolve --flush-caches') }}
-  changed_when: false
-  when:
-    - "'systemd-resolved.service' in ansible_facts.services"
-    - _resolvectl.stat.exists or _systemd_resolve.stat.exists
+    - name: OS | Set system hostname
+      ansible.builtin.hostname:
+        name: "{{ technitium_node_name | default(inventory_hostname) }}"
+      when: technitium_manage_hostname | default(true)
 
-- name: OS | Install UFW firewall
-  ansible.builtin.apt:
-    name: ufw
-    state: present
-  register: _ufw_install
-  retries: 3
-  delay: 5
-  until: _ufw_install is succeeded
+    - name: OS | Ensure local hostname entry exists
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: "^127\\.0\\.1\\.1\\s+"
+        line: "127.0.1.1 {{ technitium_node_name | default(inventory_hostname) }}"
+        create: true
+        mode: "0644"
+      when: technitium_manage_hostname | default(true)
 
-- name: OS | Allow SSH before enabling UFW
-  community.general.ufw:
-    rule: allow
-    name: OpenSSH
-  ignore_errors: true
+    # -------------------------------------------------------------------------
+    # systemd-resolved
+    # -------------------------------------------------------------------------
 
-- name: OS | Set UFW default policies (deny incoming, allow outgoing)
-  community.general.ufw:
-    state: enabled
-    direction: incoming
-    policy: deny
-  ignore_errors: true
-  register: _ufw_policy_in
+    - name: OS | Configure systemd-resolved DNSStubListener
+      ansible.builtin.ini_file:
+        path: /etc/systemd/resolved.conf
+        section: Resolve
+        option: DNSStubListener
+        value: "no"
+        no_extra_spaces: true
+        create: true
+        mode: "0644"
+      register: technitium_resolved_stub_config
+      when:
+        - technitium_manage_systemd_resolved | default(true)
+        - "'systemd-resolved.service' in ansible_facts.services"
 
-- name: OS | Set UFW allow outgoing
-  community.general.ufw:
-    state: enabled
-    direction: outgoing
-    policy: allow
-  ignore_errors: true
-  register: _ufw_policy_out
+    - name: OS | Configure systemd-resolved bootstrap DNS servers
+      ansible.builtin.ini_file:
+        path: /etc/systemd/resolved.conf
+        section: Resolve
+        option: DNS
+        value: "{{ technitium_os_bootstrap_dns_servers | default(technitium_forwarders | default(['1.1.1.1', '9.9.9.9'])) | join(' ') }}"
+        no_extra_spaces: true
+        create: true
+        mode: "0644"
+      register: technitium_resolved_dns_config
+      when:
+        - technitium_manage_systemd_resolved | default(true)
+        - "'systemd-resolved.service' in ansible_facts.services"
 
-- name: OS | Enable UFW
-  community.general.ufw:
-    state: enabled
-  ignore_errors: true
-  register: _ufw_enable
+    - name: OS | Configure systemd-resolved fallback DNS servers
+      ansible.builtin.ini_file:
+        path: /etc/systemd/resolved.conf
+        section: Resolve
+        option: FallbackDNS
+        value: "{{ technitium_os_fallback_dns_servers | default(['1.1.1.1', '1.0.0.1', '9.9.9.9', '149.112.112.112']) | join(' ') }}"
+        no_extra_spaces: true
+        create: true
+        mode: "0644"
+      register: technitium_resolved_fallback_config
+      when:
+        - technitium_manage_systemd_resolved | default(true)
+        - "'systemd-resolved.service' in ansible_facts.services"
+
+    - name: OS | Restart systemd-resolved when configuration changed
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+        daemon_reload: true
+      when:
+        - technitium_manage_systemd_resolved | default(true)
+        - "'systemd-resolved.service' in ansible_facts.services"
+        - >-
+          technitium_resolved_stub_config is changed
+          or technitium_resolved_dns_config is changed
+          or technitium_resolved_fallback_config is changed
+
+    - name: OS | Ensure resolv.conf points to systemd-resolved real resolver file
+      ansible.builtin.file:
+        src: /run/systemd/resolve/resolv.conf
+        dest: /etc/resolv.conf
+        state: link
+        force: true
+      when:
+        - technitium_manage_systemd_resolved | default(true)
+        - "'systemd-resolved.service' in ansible_facts.services"
+
+    - name: OS | Check for resolvectl
+      ansible.builtin.stat:
+        path: /usr/bin/resolvectl
+      register: technitium_resolvectl
+
+    - name: OS | Check for systemd-resolve
+      ansible.builtin.stat:
+        path: /usr/bin/systemd-resolve
+      register: technitium_systemd_resolve
+
+    - name: OS | Flush DNS cache using resolvectl
+      ansible.builtin.command:
+        cmd: resolvectl flush-caches
+      changed_when: false
+      when:
+        - technitium_manage_systemd_resolved | default(true)
+        - "'systemd-resolved.service' in ansible_facts.services"
+        - technitium_resolvectl.stat.exists
+
+    - name: OS | Flush DNS cache using systemd-resolve fallback
+      ansible.builtin.command:
+        cmd: systemd-resolve --flush-caches
+      changed_when: false
+      when:
+        - technitium_manage_systemd_resolved | default(true)
+        - "'systemd-resolved.service' in ansible_facts.services"
+        - not technitium_resolvectl.stat.exists
+        - technitium_systemd_resolve.stat.exists
+
+    # -------------------------------------------------------------------------
+    # Kernel / network safety
+    # -------------------------------------------------------------------------
+
+    - name: OS | Disable IPv6 only when explicitly requested
+      ansible.posix.sysctl:
+        name: "{{ item }}"
+        value: "1"
+        state: present
+        reload: true
+      loop:
+        - net.ipv6.conf.all.disable_ipv6
+        - net.ipv6.conf.default.disable_ipv6
+      when: technitium_disable_ipv6 | default(false)
+
+    - name: OS | Ensure IP forwarding is disabled by default
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: "0"
+        state: present
+        reload: true
+      when: technitium_disable_ip_forwarding | default(true)
+
+    # -------------------------------------------------------------------------
+    # UFW bootstrap
+    # -------------------------------------------------------------------------
+
+    - name: OS | Install UFW firewall
+      ansible.builtin.apt:
+        name: ufw
+        state: present
+        install_recommends: false
+      register: technitium_os_ufw_install
+      retries: 3
+      delay: 5
+      until: technitium_os_ufw_install is succeeded
+      when: technitium_firewall_enabled | default(true)
+
+    - name: OS | Reset UFW rules when requested
+      community.general.ufw:
+        state: reset
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_reset | default(false)
+
+    - name: OS | Set UFW default incoming policy
+      community.general.ufw:
+        direction: incoming
+        policy: "{{ technitium_firewall_default_incoming_policy | default('deny') }}"
+      when: technitium_firewall_enabled | default(true)
+
+    - name: OS | Set UFW default outgoing policy
+      community.general.ufw:
+        direction: outgoing
+        policy: "{{ technitium_firewall_default_outgoing_policy | default('allow') }}"
+      when: technitium_firewall_enabled | default(true)
+
+    - name: OS | Allow SSH from management networks before enabling UFW
+      community.general.ufw:
+        rule: "{{ technitium_firewall_ssh_rule | default('limit') }}"
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.ssh | default(22) }}"
+        comment: "Technitium SSH from management network"
+      loop: "{{ technitium_firewall_management_allowed_cidrs | default(['10.10.10.0/24', '10.10.20.0/24']) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_ssh | default(true)
+
+    # -------------------------------------------------------------------------
+    # UFW DNS service rules
+    # -------------------------------------------------------------------------
+
+    - name: OS | Allow UDP DNS from trusted networks
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: udp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.dns | default(53) }}"
+        comment: "Technitium UDP DNS from trusted network"
+      loop: "{{ technitium_firewall_dns_allowed_cidrs | default(technitium_firewall_allowed_cidrs | default(['10.10.10.0/24'])) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_dns_udp | default(true)
+
+    - name: OS | Allow TCP DNS from trusted networks
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.dns | default(53) }}"
+        comment: "Technitium TCP DNS from trusted network"
+      loop: "{{ technitium_firewall_dns_allowed_cidrs | default(technitium_firewall_allowed_cidrs | default(['10.10.10.0/24'])) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_dns_tcp | default(true)
+
+    # -------------------------------------------------------------------------
+    # UFW Technitium admin/API rules
+    # -------------------------------------------------------------------------
+
+    - name: OS | Allow Technitium HTTP admin/API from management networks
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.technitium_http | default(5380) }}"
+        comment: "Technitium HTTP admin/API from management network"
+      loop: "{{ technitium_firewall_management_allowed_cidrs | default(['10.10.10.0/24', '10.10.20.0/24']) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_technitium_http | default(true)
+
+    - name: OS | Allow Technitium HTTP API from automation networks
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.technitium_http | default(5380) }}"
+        comment: "Technitium HTTP API from automation network"
+      loop: "{{ technitium_firewall_automation_allowed_cidrs | default([]) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_technitium_http | default(true)
+        - technitium_firewall_automation_allowed_cidrs | default([]) | length > 0
+
+    - name: OS | Allow Technitium HTTPS admin/API from management networks
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.technitium_https | default(53443) }}"
+        comment: "Technitium HTTPS admin/API from management network"
+      loop: "{{ technitium_firewall_management_allowed_cidrs | default(['10.10.10.0/24', '10.10.20.0/24']) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_technitium_https | default(true)
+
+    - name: OS | Allow Technitium cluster HTTPS between DNS nodes
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.technitium_https | default(53443) }}"
+        comment: "Technitium cluster sync from DNS node"
+      loop: "{{ technitium_firewall_cluster_allowed_ips | default([]) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_cluster_https | default(true)
+        - technitium_firewall_cluster_allowed_ips | default([]) | length > 0
+
+    # -------------------------------------------------------------------------
+    # Optional encrypted DNS rules
+    # -------------------------------------------------------------------------
+
+    - name: OS | Allow DNS-over-TLS from trusted networks
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.dns_over_tls | default(853) }}"
+        comment: "Technitium DNS-over-TLS from trusted network"
+      loop: "{{ technitium_firewall_dns_allowed_cidrs | default(technitium_firewall_allowed_cidrs | default(['10.10.10.0/24'])) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_dot | default(false)
+
+    - name: OS | Allow DNS-over-HTTPS from trusted networks
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: tcp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.dns_over_https | default(443) }}"
+        comment: "Technitium DNS-over-HTTPS from trusted network"
+      loop: "{{ technitium_firewall_dns_allowed_cidrs | default(technitium_firewall_allowed_cidrs | default(['10.10.10.0/24'])) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_doh | default(false)
+
+    - name: OS | Allow DNS-over-QUIC from trusted networks
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: udp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.dns_over_quic | default(853) }}"
+        comment: "Technitium DNS-over-QUIC from trusted network"
+      loop: "{{ technitium_firewall_dns_allowed_cidrs | default(technitium_firewall_allowed_cidrs | default(['10.10.10.0/24'])) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_doq | default(false)
+
+    # -------------------------------------------------------------------------
+    # Optional DHCP rules
+    # -------------------------------------------------------------------------
+
+    - name: OS | Allow DHCP server requests when enabled
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: udp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.dhcp_server | default(67) }}"
+        comment: "Technitium DHCP server request"
+      loop: "{{ technitium_firewall_allowed_cidrs | default(['10.10.10.0/24']) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_dhcp | default(false)
+
+    - name: OS | Allow DHCP client replies when enabled
+      community.general.ufw:
+        rule: allow
+        direction: in
+        interface: "{{ technitium_firewall_interface | default('eth0') }}"
+        proto: udp
+        from_ip: "{{ item }}"
+        to_port: "{{ technitium_firewall_ports.dhcp_client | default(68) }}"
+        comment: "Technitium DHCP client reply"
+      loop: "{{ technitium_firewall_allowed_cidrs | default(['10.10.10.0/24']) }}"
+      when:
+        - technitium_firewall_enabled | default(true)
+        - technitium_firewall_allow_dhcp | default(false)
+
+    # -------------------------------------------------------------------------
+    # Enable firewall
+    # -------------------------------------------------------------------------
+
+    - name: OS | Enable UFW
+      community.general.ufw:
+        state: enabled
+      register: technitium_os_ufw_enable
+      when: technitium_firewall_enabled | default(true)
+
+    - name: OS | Reload UFW
+      community.general.ufw:
+        state: reloaded
+      when: technitium_firewall_enabled | default(true)
+
+    # -------------------------------------------------------------------------
+    # Service checks
+    # -------------------------------------------------------------------------
+
+    - name: OS | Check whether port 53 is already in use
+      ansible.builtin.shell: |
+        set -o pipefail
+        ss -lntup '( sport = :53 )' || true
+      args:
+        executable: /bin/bash
+      register: technitium_os_port_53_check
+      changed_when: false
+
+    - name: OS | Show port 53 listener state
+      ansible.builtin.debug:
+        var: technitium_os_port_53_check.stdout_lines
+      when: technitium_os_show_port_53_check | default(false)
+
+    - name: OS | Assert systemd-resolved DNS stub is not listening on port 53
+      ansible.builtin.assert:
+        that:
+          - "'systemd-resolve' not in technitium_os_port_53_check.stdout"
+          - "'systemd-resolved' not in technitium_os_port_53_check.stdout"
+        fail_msg: >-
+          systemd-resolved still appears to be listening on port 53.
+          Technitium will not be able to bind DNS until the stub listener is disabled.
+        success_msg: "systemd-resolved DNS stub is not listening on port 53."
+      when: technitium_assert_port_53_free_from_resolved | default(true)
+
+    - name: OS | Show OS preparation summary
+      ansible.builtin.debug:
+        msg:
+          - "Technitium OS preparation complete."
+          - "Host: {{ inventory_hostname }}"
+          - "Address: {{ ansible_host | default(ansible_default_ipv4.address | default('unknown')) }}"
+          - "Firewall enabled: {{ technitium_firewall_enabled | default(true) }}"
+          - "Firewall interface: {{ technitium_firewall_interface | default('eth0') }}"
+          - "systemd-resolved managed: {{ technitium_manage_systemd_resolved | default(true) }}"

@@ -1,17 +1,78 @@
-# -------------------------------------------------------------------
-# Managed by Ansible — do NOT edit manually
-# -------------------------------------------------------------------
-# This file is a generated list of SSH public keys authorized for user access
-# Format:
-#   <optional comment>
-#   <public key> <optional key comment>
-# -------------------------------------------------------------------
+# =============================================================================
+# Managed by Ansible - ssh role
+# -----------------------------------------------------------------------------
+# File:
+#   authorized_keys
+#
+# Purpose:
+#   Deterministic SSH authorized_keys fallback for managed infrastructure users.
+#
+# Notes:
+#   - CA-backed SSH authentication is preferred.
+#   - This file is retained for bootstrap and recovery access.
+#   - Do not edit manually; changes will be overwritten by Ansible.
+# =============================================================================
 
 {% set authorized_key_paths = authorized_key_paths | default([]) %}
-{% if authorized_key_paths | length > 0 %}
-{% for key_path in authorized_key_paths %}
-{{ lookup('file', key_path) | trim }}
+{% set authorized_key_literals = authorized_key_literals | default([]) %}
+{% set authorized_keys_exclusive = authorized_keys_exclusive | default(false) %}
+{% set rendered_keys = [] %}
+
+# -----------------------------------------------------------------------------
+# Source files
+# -----------------------------------------------------------------------------
+{% for key_path in authorized_key_paths | default([]) | unique | sort %}
+{% set key_file_content = lookup('ansible.builtin.file', key_path, errors='ignore') | default('', true) %}
+{% for key_line in key_file_content.splitlines() %}
+{% set normalized_key_line = key_line | trim %}
+{% if normalized_key_line | length > 0 and not normalized_key_line.startswith('#') %}
+{% if normalized_key_line not in rendered_keys %}
+{% set _ = rendered_keys.append(normalized_key_line) %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endfor %}
+
+# -----------------------------------------------------------------------------
+# Literal keys
+# -----------------------------------------------------------------------------
+{% for key_entry in authorized_key_literals | default([]) %}
+{% if key_entry is mapping %}
+{% set key_options = key_entry.options | default('') | trim %}
+{% set key_value = key_entry.key | default('') | trim %}
+{% set key_comment = key_entry.comment | default('') | trim %}
+{% if key_value | length > 0 %}
+{% set normalized_key_line = ((key_options ~ ' ') if key_options | length > 0 else '') ~ key_value ~ ((' ' ~ key_comment) if key_comment | length > 0 else '') %}
+{% if normalized_key_line not in rendered_keys %}
+{% set _ = rendered_keys.append(normalized_key_line) %}
+{% endif %}
+{% endif %}
+{% else %}
+{% set normalized_key_line = key_entry | string | trim %}
+{% if normalized_key_line | length > 0 and not normalized_key_line.startswith('#') %}
+{% if normalized_key_line not in rendered_keys %}
+{% set _ = rendered_keys.append(normalized_key_line) %}
+{% endif %}
+{% endif %}
+{% endif %}
+{% endfor %}
+
+# -----------------------------------------------------------------------------
+# Authorized keys
+# -----------------------------------------------------------------------------
+{% if rendered_keys | length > 0 %}
+{% for rendered_key in rendered_keys | sort %}
+{{ rendered_key }}
 {% endfor %}
 {% else %}
-# No authorized keys defined
+# No authorized keys defined.
 {% endif %}
+
+# =============================================================================
+# Metadata
+# -----------------------------------------------------------------------------
+# exclusive={{ authorized_keys_exclusive | bool }}
+# rendered_key_count={{ rendered_keys | length }}
+# source_path_count={{ authorized_key_paths | length }}
+# literal_key_count={{ authorized_key_literals | length }}
+# =============================================================================

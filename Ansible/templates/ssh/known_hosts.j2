@@ -1,34 +1,179 @@
-# Ansible/templates/ssh/known_hosts.j2
+# =============================================================================
+# SSH known_hosts managed by Ansible - ssh role
+# -----------------------------------------------------------------------------
+# File:
+#   ~/.ssh/known_hosts
+#
+# Purpose:
+#   Provides per-user SSH host trust for managed infrastructure hosts.
+#
+# Security model:
+#   - Prefer CA-backed host trust using @cert-authority entries.
+#   - Explicit host keys are optional fallback entries.
+#   - Explicit host entries are disabled by default unless pre-collected into
+#     variables or explicitly rendered.
+#
+# Notes:
+#   - Do not edit manually; changes will be overwritten by Ansible.
+#   - Keep this file free of private key material.
+#   - Canonical local DNS zone: local.sinlessgames.com
+# =============================================================================
 
-# -------------------------------------------------------------------
-# SSH known_hosts managed by Ansible (with CA trust)
-# -------------------------------------------------------------------
-# Trust SSH host certificates signed by your SSH CA for your domains
-{% if ssh_ca_pub is defined and (ssh_ca_pub | trim | length) > 0 %}
-# Trust any host under local.sinlessgames.com
-@cert-authority *.local.sinlessgames.com {{ ssh_ca_pub }}
+{% set ca_public_key = ssh_ca_pub | default('') | trim %}
+{% set ca_patterns = ssh_known_hosts_patterns | default(ssh_known_hosts_cert_authority_patterns | default([])) %}
+{% set explicit_entries = ssh_known_hosts_entries | default([]) %}
+{% set render_host_entries = ssh_render_host_entries | default(false) %}
+{% set local_domain = ssh_primary_local_domain | default('local.sinlessgames.com') %}
+{% set local_zones = ssh_local_dns_zones | default([local_domain]) %}
 
-# Trust any host under local.sinlessgamesllc.com
-@cert-authority *.local.sinlessgamesllc.com {{ ssh_ca_pub }}
-{% endif %}
+# -----------------------------------------------------------------------------
+# Host certificate authority trust
+# -----------------------------------------------------------------------------
+# These @cert-authority entries trust host certificates signed by the configured
+# SSH CA for the selected host patterns.
+# -----------------------------------------------------------------------------
 
-# -------------------------------------------------------------------
-# Optional explicit host entries (fallback)
-# IMPORTANT:
-# - This MUST be disabled by default because templates render on controller.
-# - Only enable if you pre-collect host key/cert material into variables.
-# -------------------------------------------------------------------
-{% if ssh_render_host_entries | default(false) %}
-{% for host in groups['all'] | default([]) %}
-{% set hostnames = [
-    (hostvars[host]['ansible_fqdn'] if hostvars[host]['ansible_fqdn'] is defined else host),
-    hostvars[host]['inventory_hostname']
-] %}
-{% for name in hostnames %}
-{% if hostvars[host]['ansible_default_ipv4'] is defined %}
-# ssh_host_cert for {{ name }}
-# NOTE: Do NOT use lookup('file', ...) here unless the file exists on controller.
+{% if ca_public_key | length > 0 %}
+{% set rendered_ca_patterns = [] %}
+
+{% if ca_patterns | length > 0 %}
+{% for pattern in ca_patterns %}
+{% if pattern | string | trim | length > 0 %}
+{% set _ = rendered_ca_patterns.append(pattern | string | trim) %}
 {% endif %}
 {% endfor %}
+{% else %}
+{% for zone in local_zones %}
+{% set _ = rendered_ca_patterns.append('*.' ~ zone) %}
+{% endfor %}
+{% set _ = rendered_ca_patterns.append('10.10.*') %}
+{% endif %}
+
+{% for pattern in rendered_ca_patterns | unique | sort %}
+@cert-authority {{ pattern }} {{ ca_public_key }}
+{% endfor %}
+{% else %}
+# WARNING: No SSH CA public key was provided. CA-backed host trust is disabled.
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Explicit known_hosts entries
+# -----------------------------------------------------------------------------
+# Preferred input:
+#   ssh_known_hosts_entries
+#
+# Accepted forms:
+#   - List of literal known_hosts lines
+#   - String containing one or more known_hosts lines
+#   - List of mappings:
+#       - hostnames:
+#           - host.local.sinlessgames.com
+#           - 10.10.10.10
+#         key_type: ssh-ed25519
+#         key: AAAAC3Nza...
+#         comment: optional
+# -----------------------------------------------------------------------------
+
+{% set rendered_explicit_entries = [] %}
+
+{% if explicit_entries is string %}
+{% for entry_line in explicit_entries.splitlines() %}
+{% set normalized_entry = entry_line | trim %}
+{% if normalized_entry | length > 0 and not normalized_entry.startswith('#') %}
+{% if normalized_entry not in rendered_explicit_entries %}
+{% set _ = rendered_explicit_entries.append(normalized_entry) %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% elif explicit_entries is sequence %}
+{% for entry in explicit_entries %}
+{% if entry is mapping %}
+{% set hostnames = entry.hostnames | default(entry.hosts | default([entry.hostname | default(entry.host | default(''))])) %}
+{% set key_type = entry.key_type | default(entry.type | default('')) | trim %}
+{% set key_value = entry.key | default(entry.public_key | default('')) | trim %}
+{% set key_comment = entry.comment | default('') | trim %}
+{% if hostnames is string %}
+{% set hostnames = [hostnames] %}
+{% endif %}
+{% set normalized_hosts = [] %}
+{% for hostname in hostnames %}
+{% if hostname | string | trim | length > 0 %}
+{% set _ = normalized_hosts.append(hostname | string | trim) %}
+{% endif %}
+{% endfor %}
+{% if normalized_hosts | length > 0 and key_type | length > 0 and key_value | length > 0 %}
+{% set normalized_entry = (normalized_hosts | unique | sort | join(',')) ~ ' ' ~ key_type ~ ' ' ~ key_value ~ ((' ' ~ key_comment) if key_comment | length > 0 else '') %}
+{% if normalized_entry not in rendered_explicit_entries %}
+{% set _ = rendered_explicit_entries.append(normalized_entry) %}
+{% endif %}
+{% endif %}
+{% else %}
+{% set normalized_entry = entry | string | trim %}
+{% if normalized_entry | length > 0 and not normalized_entry.startswith('#') %}
+{% if normalized_entry not in rendered_explicit_entries %}
+{% set _ = rendered_explicit_entries.append(normalized_entry) %}
+{% endif %}
+{% endif %}
+{% endif %}
 {% endfor %}
 {% endif %}
+
+{% if rendered_explicit_entries | length > 0 %}
+{% for entry in rendered_explicit_entries | sort %}
+{{ entry }}
+{% endfor %}
+{% else %}
+# No explicit known_hosts entries provided.
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Optional inventory-derived placeholders
+# -----------------------------------------------------------------------------
+# This block intentionally does not perform file lookups. Enable only when you
+# want visible placeholders or when the template is extended to consume
+# pre-collected host key material from variables.
+# -----------------------------------------------------------------------------
+
+{% if render_host_entries | bool %}
+
+# Inventory host placeholders
+{% for host in groups['all'] | default([]) | sort %}
+{% set hv = hostvars[host] %}
+{% set host_aliases = [] %}
+{% set inventory_name = host %}
+{% set short_name = hv.ansible_hostname | default(host) %}
+{% set fqdn = hv.ansible_fqdn | default(short_name ~ '.' ~ local_domain) %}
+{% set ansible_host_value = hv.ansible_host | default('') %}
+
+{% set _ = host_aliases.append(inventory_name) %}
+{% if short_name not in host_aliases %}
+{% set _ = host_aliases.append(short_name) %}
+{% endif %}
+{% if fqdn not in host_aliases %}
+{% set _ = host_aliases.append(fqdn) %}
+{% endif %}
+{% if ansible_host_value | string | length > 0 and ansible_host_value not in host_aliases %}
+{% set _ = host_aliases.append(ansible_host_value) %}
+{% endif %}
+{% for zone in local_zones %}
+{% set inventory_fqdn = inventory_name ~ '.' ~ zone %}
+{% set short_fqdn = short_name ~ '.' ~ zone %}
+{% if inventory_fqdn not in host_aliases %}
+{% set _ = host_aliases.append(inventory_fqdn) %}
+{% endif %}
+{% if short_fqdn not in host_aliases %}
+{% set _ = host_aliases.append(short_fqdn) %}
+{% endif %}
+{% endfor %}
+# {{ host }} aliases: {{ host_aliases | unique | sort | join(',') }}
+{% endfor %}
+{% endif %}
+
+# =============================================================================
+# Summary
+# -----------------------------------------------------------------------------
+# ca_enabled={{ ca_public_key | length > 0 }}
+# ca_pattern_count={{ rendered_ca_patterns | default([]) | length }}
+# explicit_entry_count={{ rendered_explicit_entries | length }}
+# inventory_placeholders={{ render_host_entries | bool }}
+# =============================================================================

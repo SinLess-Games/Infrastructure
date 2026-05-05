@@ -1,28 +1,294 @@
 ---
 # =============================================================================
-# SSH :: Users :: Configure Authorized Principals for SSH certificates
+# SSH Role - Configure Authorized Principals
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Renders AuthorizedPrincipalsFile entries for CA-backed SSH user
+#   authentication.
+#
+# Security model:
+#   - TrustedUserCAKeys validates the signing CA.
+#   - AuthorizedPrincipalsFile controls which certificate principals may log in
+#     as each local Unix account.
+#
+# Output:
+#   {{ ssh_authorized_principals_dir }}/<username>
+#
+# Example:
+#   /etc/ssh/auth_principals/root
+#   /etc/ssh/auth_principals/sinless777
+#   /etc/ssh/auth_principals/ansible
+#
+# Notes:
+#   - Skips absent users.
+#   - Skips users with manage_ssh=false.
+#   - Uses ssh_principals map first, then user.ssh_principals, then username.
+#   - Removes stale principal files for absent or SSH-disabled users when enabled.
 # =============================================================================
 
-- name: Ensure AuthorizedPrincipalsFile directory exists
-  ansible.builtin.file:
-    path: "{{ ssh_authorized_principals_dir }}"
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-  become: true
+# -----------------------------------------------------------------------------
+# Normalize inputs
+# -----------------------------------------------------------------------------
 
-- name: Render AuthorizedPrincipalsFile for SSH users
+- name: SSH | Principals | Normalize inputs
+  ansible.builtin.set_fact:
+    ssh_principals_users_effective: "{{ ssh_role_users | default(users | default([])) }}"
+    ssh_principals_map_effective: "{{ ssh_principals | default(ssh.principals |
+      default({}) if ssh is defined else {}) }}"
+    ssh_principals_dir_effective: "{{ ssh_authorized_principals_dir | default('/etc/ssh/auth_principals') }}"
+    ssh_principals_file_owner_effective: "{{ ssh_authorized_principals_owner | default('root') }}"
+    ssh_principals_file_group_effective: "{{ ssh_authorized_principals_group | default('root') }}"
+    ssh_principals_dir_mode_effective: "{{ ssh_authorized_principals_dir_mode | default('0755') }}"
+    ssh_principals_file_mode_effective: "{{ ssh_authorized_principals_file_mode | default('0644') }}"
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-principals
+
+# -----------------------------------------------------------------------------
+# Validate
+# -----------------------------------------------------------------------------
+
+- name: SSH | Principals | Validate user list and principal map
+  ansible.builtin.assert:
+    that:
+      - ssh_principals_users_effective is sequence
+      - ssh_principals_users_effective is not string
+      - ssh_principals_users_effective is not mapping
+      - ssh_principals_map_effective is mapping
+      - ssh_principals_dir_effective is string
+      - ssh_principals_dir_effective is match('^/')
+      - ssh_principals_dir_effective | length > 1
+      - ssh_principals_dir_effective not in ['/', '/etc', '/usr', '/var',
+        '/tmp', '/root', '/home']
+    fail_msg: "Authorized principals inputs are invalid."
+    success_msg: "Authorized principals inputs are valid."
+  tags:
+    - ssh
+    - ssh-principals
+    - ssh-principals-validate
+
+- name: SSH | Principals | Validate SSH user entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+    fail_msg: "Each SSH user entry must be a mapping with a valid Linux username."
+  loop: "{{ ssh_principals_users_effective }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
+  tags:
+    - ssh
+    - ssh-principals
+    - ssh-principals-validate
+
+# -----------------------------------------------------------------------------
+# Build principal jobs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Principals | Build authorized principal jobs
+  ansible.builtin.set_fact:
+    ssh_authorized_principal_jobs: >-
+      {%- set jobs = [] -%} {%- for user in ssh_principals_users_effective -%}
+        {%- set state = user.state | default('present') -%}
+        {%- set manage_ssh = user.manage_ssh | default(users_default_manage_ssh | default(true)) -%}
+        {%- set mapped_principals = ssh_principals_map_effective[user.name] | default([]) -%}
+        {%- set user_principals = user.ssh_principals | default([]) -%}
+        {%- set default_principals = [user.name] if ssh_principals_default_to_username | default(true) | bool else [] -%}
+        {%- set principals = (
+              mapped_principals
+              if mapped_principals | length > 0
+              else (
+                user_principals
+                if user_principals | length > 0
+                else default_principals
+              )
+            )
+        -%}
+        {%- set _ = jobs.append({
+          'name': user.name,
+          'state': state,
+          'manage_ssh': manage_ssh,
+          'path': ssh_principals_dir_effective ~ '/' ~ user.name,
+          'principals': principals | unique | sort | list
+        }) -%}
+      {%- endfor -%} {{ jobs }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-principals
+
+- name: SSH | Principals | Validate authorized principal jobs
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.path is match('^/')
+      - item.path.startswith(ssh_principals_dir_effective ~ '/')
+      - item.principals is sequence
+      - item.principals is not string
+      - item.principals is not mapping
+      - >-
+        item.state != 'present' or not (item.manage_ssh | bool) or
+        item.principals | length > 0
+    fail_msg: "Invalid authorized principals job: {{ item }}"
+  loop: "{{ ssh_authorized_principal_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags:
+    - ssh
+    - ssh-principals
+    - ssh-principals-validate
+
+- name: SSH | Principals | Validate principal values
+  ansible.builtin.assert:
+    that:
+      - principal is string
+      - principal | length > 0
+      - principal is not search('\\s')
+    fail_msg: "Invalid SSH principal for {{ item.0.name }}: {{ principal }}"
+  loop: "{{ ssh_authorized_principal_jobs | subelements('principals',
+    skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }} -> {{ item.1 }}"
+  vars:
+    principal: "{{ item.1 }}"
+  tags:
+    - ssh
+    - ssh-principals
+    - ssh-principals-validate
+
+# -----------------------------------------------------------------------------
+# Directory
+# -----------------------------------------------------------------------------
+
+- name: SSH | Principals | Ensure AuthorizedPrincipalsFile directory exists
+  ansible.builtin.file:
+    path: "{{ ssh_principals_dir_effective }}"
+    state: directory
+    owner: "{{ ssh_principals_file_owner_effective }}"
+    group: "{{ ssh_principals_file_group_effective }}"
+    mode: "{{ ssh_principals_dir_mode_effective }}"
+  become: true
+  tags:
+    - ssh
+    - ssh-principals
+
+# -----------------------------------------------------------------------------
+# Render principals
+# -----------------------------------------------------------------------------
+
+- name: SSH | Principals | Render AuthorizedPrincipalsFile entries
   ansible.builtin.copy:
-    dest: "{{ ssh_authorized_principals_dir }}/{{ item.name }}"
-    owner: root
-    group: root
-    mode: "0644"
+    dest: "{{ item.path }}"
+    owner: "{{ ssh_principals_file_owner_effective }}"
+    group: "{{ ssh_principals_file_group_effective }}"
+    mode: "{{ ssh_principals_file_mode_effective }}"
     content: |
-      {% for principal in (item.ssh_principals | default([item.name])) %}
+      # Managed by Ansible - ssh role
+      # User: {{ item.name }}
+      {% for principal in item.principals %}
       {{ principal }}
       {% endfor %}
-  loop: "{{ ssh_role_users }}"
+  loop: "{{ ssh_authorized_principal_jobs }}"
   loop_control:
     label: "{{ item.name }}"
   become: true
+  when:
+    - item.state == 'present'
+    - item.manage_ssh | bool
+    - item.principals | length > 0
+  tags:
+    - ssh
+    - ssh-principals
+
+# -----------------------------------------------------------------------------
+# Remove stale principals
+# -----------------------------------------------------------------------------
+
+- name: SSH | Principals | Remove principal files for absent or SSH-disabled users
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ ssh_authorized_principal_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+  when:
+    - ssh_remove_stale_authorized_principals | default(true) | bool
+    - item.state != 'present' or not (item.manage_ssh | bool)
+  tags:
+    - ssh
+    - ssh-principals
+
+# -----------------------------------------------------------------------------
+# Verify
+# -----------------------------------------------------------------------------
+
+- name: SSH | Principals | Stat rendered principal files
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop: "{{ ssh_authorized_principal_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: ssh_authorized_principal_file_stats
+  changed_when: false
+  when:
+    - item.state == 'present'
+    - item.manage_ssh | bool
+    - item.principals | length > 0
+  tags:
+    - ssh
+    - ssh-principals
+    - ssh-principals-verify
+
+- name: SSH | Principals | Assert rendered principal files exist
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false) | bool
+      - not (item.stat.islnk | default(false) | bool)
+      - item.stat.pw_name == ssh_principals_file_owner_effective
+      - item.stat.gr_name == ssh_principals_file_group_effective
+    fail_msg: "Authorized principals file is missing, symlinked, or has incorrect
+      ownership for {{ item.item.name }}."
+    success_msg: "Authorized principals file is valid for {{ item.item.name }}."
+  loop: "{{ ssh_authorized_principal_file_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item is defined
+    - item.skipped is not defined or not item.skipped
+  tags:
+    - ssh
+    - ssh-principals
+    - ssh-principals-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Principals | Show authorized principals summary
+  ansible.builtin.debug:
+    msg:
+      - "Authorized principals configuration complete."
+      - "Directory: {{ ssh_principals_dir_effective }}"
+      - >-
+        Users rendered: {{
+          ssh_authorized_principal_jobs
+          | selectattr('state', 'equalto', 'present')
+          | selectattr('manage_ssh', 'equalto', true)
+          | map(attribute='name')
+          | list
+          | join(', ')
+          if ssh_authorized_principal_jobs | length > 0
+          else 'none'
+        }}
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-principals
+    - ssh-summary

@@ -1,138 +1,486 @@
 ---
-# roles/technitium/tasks/block-lists.yml
-# Apply Technitium DNS "Allow / Block List URLs" (Settings -> Blocking)
+# =============================================================================
+# Technitium DNS - Block List Configuration
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Apply Technitium DNS block list URL settings.
+#   - Enable or disable DNS blocking.
+#   - Configure block list update interval.
+#   - Optionally trigger an immediate block list update.
+#
+# Design:
+#   - In clustered mode, only the primary node writes blocking settings.
+#   - Secondary nodes skip this task and receive configuration through cluster sync.
+#   - Supports both:
+#       * technitium_block_list_sources
+#       * technitium_block_list_urls
+#   - Uses Authorization: Bearer for current Technitium API behavior.
+#   - Also includes token in form data for backward compatibility.
+#   - Never logs API tokens or full settings responses.
+#
+# Companion vars:
+#   - Ansible/group_vars/technitium/main.yaml
+#   - Ansible/group_vars/technitium/block-lists.yaml
+#   - Ansible/group_vars/technitium/cluster.yaml
+# =============================================================================
 
-- name: Block Lists | Normalize API base URL (ensure technitium_api_base_url_effective exists)
+# -----------------------------------------------------------------------------
+# Decide whether this node should manage block list settings
+# -----------------------------------------------------------------------------
+
+- name: Block Lists | Determine whether this node manages block lists
   ansible.builtin.set_fact:
-    technitium_api_base_url_effective: >-
+    technitium_block_lists_manage_on_this_node: >-
       {{
-        technitium_api_base_url_effective
-          | default(
-              technitium_api_base_url
+        not (technitium_cluster_enabled | default(false) | bool)
+        or inventory_hostname == (technitium_cluster_primary_host | default(inventory_hostname))
+      }}
+
+- name: Block Lists | Show secondary skip message
+  ansible.builtin.debug:
+    msg: >-
+      Skipping Technitium block-list writes on {{ inventory_hostname }} because
+      clustering is enabled and this node is not the primary.
+  when:
+    - technitium_block_lists_enabled | default(true) | bool
+    - technitium_cluster_enabled | default(false) | bool
+    - not (technitium_block_lists_manage_on_this_node | bool)
+    - technitium_block_lists_show_skip_message | default(true)
+
+# -----------------------------------------------------------------------------
+# Block list management
+# -----------------------------------------------------------------------------
+
+- name: Block Lists | Configure Technitium block list settings
+  when:
+    - technitium_block_lists_enabled | default(true) | bool
+    - technitium_block_lists_manage_on_this_node | bool
+  block:
+    # -------------------------------------------------------------------------
+    # Preconditions
+    # -------------------------------------------------------------------------
+
+    - name: Block Lists | Normalize API and authentication variables
+      ansible.builtin.set_fact:
+        technitium_block_lists_api_base: >-
+          {{
+            technitium_api_base_url_effective
+            | default(
+                technitium_api_base_url
                 | default(
-                    (technitium_api_scheme | default('http')) ~ '://' ~
-                    (technitium_api_host | default(ansible_host | default(inventory_hostname))) ~ ':' ~
-                    (technitium_api_port | default(5380))
-                )
-          )
-      }}
+                    technitium_api_url
+                    | default(
+                        (technitium_api_scheme | default('http'))
+                        ~ '://'
+                        ~ (technitium_api_host | default(ansible_host | default(inventory_hostname)))
+                        ~ ':'
+                        ~ (technitium_api_port | default(5380) | string)
+                    )
+                  )
+              )
+            | regex_replace('/+$', '')
+          }}
+        technitium_block_lists_api_token: "{{ technitium_api_token | default(technitium_session_token | default('')) }}"
+        technitium_block_lists_no_log: "{{ technitium_no_log | default(true) }}"
+        technitium_block_lists_validate_certs: "{{ technitium_validate_certs | default(technitium_api_validate_certs | default(false)) }}"
+      no_log: true
 
-- name: Block Lists | Validate required vars
-  ansible.builtin.assert:
-    that:
-      - technitium_block_lists_enabled | default(true) | bool
-      - technitium_api_token is defined
-      - technitium_api_token | length > 0
-      - technitium_block_list_urls is defined
-      - technitium_block_list_urls | length > 0
-      - technitium_api_base_url_effective is defined
-      - technitium_api_base_url_effective | length > 0
-    fail_msg: >-
-      Missing required vars for block lists. Need: technitium_api_token,
-      technitium_block_list_urls (non-empty), and technitium_api_base_url_effective/host+port.
-  when: technitium_block_lists_enabled | default(true) | bool
+    - name: Block Lists | Assert required variables are available
+      ansible.builtin.assert:
+        that:
+          - technitium_block_lists_api_base is defined
+          - technitium_block_lists_api_base | length > 0
+          - technitium_block_lists_api_token is defined
+          - technitium_block_lists_api_token | length > 0
+          - technitium_block_list_sources is defined or technitium_block_list_urls is defined
+        fail_msg: >-
+          Missing required Technitium block-list variables. Expected API base,
+          API token, and either technitium_block_list_sources or
+          technitium_block_list_urls.
+        success_msg: "Technitium block-list variables passed validation."
+      no_log: true
 
-- name: Block Lists | Normalize URLs into a clean list (strings only)
-  ansible.builtin.set_fact:
-    technitium_block_list_urls_clean: >-
-      {%- set urls = [] -%}
-      {%- for item in (technitium_block_list_urls | default([])) -%}
-      {%-   if item is string -%}
-      {%-     set _ = urls.append(item) -%}
-      {%-   elif item is mapping and (item.url is defined) and item.url -%}
-      {%-     set _ = urls.append(item.url) -%}
-      {%-   endif -%}
-      {%- endfor -%}
-      {{
-        urls
-        | map('trim')
-        | reject('equalto', '')
-        | unique
-        | list
-      }}
-  when: technitium_block_lists_enabled | default(true) | bool
+    # -------------------------------------------------------------------------
+    # Normalize source metadata
+    # -------------------------------------------------------------------------
 
-- name: Block Lists | Fail fast if any URL exceeds 255 chars
-  ansible.builtin.assert:
-    that:
-      - item | length <= 255
-    fail_msg: >-
-      Block list URL exceeds 255 chars ({{ item | length }}): {{ item }}
-  loop: "{{ technitium_block_list_urls_clean }}"
-  when: technitium_block_lists_enabled | default(true) | bool
+    - name: Block Lists | Build enabled URL list from technitium_block_list_sources
+      ansible.builtin.set_fact:
+        technitium_block_list_urls_from_sources: >-
+          {{
+            technitium_block_list_sources
+            | default([])
+            | selectattr('enabled', 'equalto', true)
+            | sort(attribute='priority')
+            | map(attribute='url')
+            | list
+          }}
+      when: technitium_block_list_sources is defined
 
-# Technitium settings/set expects blockListUrls as a comma-separated string
-- name: Block Lists | Build API value (comma-separated)
-  ansible.builtin.set_fact:
-    technitium_block_list_urls_api_value: "{{ technitium_block_list_urls_clean | join(',') }}"
-  when: technitium_block_lists_enabled | default(true) | bool
+    - name: Block Lists | Build raw URL candidate list
+      ansible.builtin.set_fact:
+        technitium_block_list_url_candidates: >-
+          {{
+            (
+              technitium_block_list_urls_from_sources
+              | default([])
+            )
+            if (
+              technitium_block_list_sources is defined
+              and (technitium_block_list_urls_from_sources | default([]) | length > 0)
+            )
+            else (
+              technitium_block_list_urls
+              | default([])
+            )
+          }}
 
-# Optional idempotency check
-- name: Block Lists | Read current settings (best-effort)
-  ansible.builtin.uri:
-    url: "{{ technitium_api_base_url_effective }}/api/settings/get"
-    method: GET
-    return_content: true
-    status_code: [200]
-    validate_certs: "{{ technitium_api_validate_certs | default(true) }}"
-    body_format: form-urlencoded
-    body:
-      token: "{{ technitium_api_token }}"
-  register: technitium_settings_get
-  failed_when: false
-  changed_when: false
-  when: technitium_block_lists_enabled | default(true) | bool
+    - name: Block Lists | Normalize URLs into clean list
+      ansible.builtin.set_fact:
+        technitium_block_list_urls_clean: >-
+          {%- set urls = [] -%}
+          {%- for item in technitium_block_list_url_candidates | default([]) -%}
+            {%- if item is string -%}
+              {%- set _ = urls.append(item) -%}
+            {%- elif item is mapping and item.url is defined and item.url -%}
+              {%- set _ = urls.append(item.url) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{
+            urls
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
 
-- name: Block Lists | Normalize current URLs (from settings/get)
-  ansible.builtin.set_fact:
-    technitium_current_block_list_urls_clean: >-
-      {{
-        (technitium_settings_get.json.response.blockListUrls | default([]))
-        | map('string')
-        | map('trim')
-        | reject('equalto', '')
-        | unique
-        | list
-      }}
-  when: technitium_block_lists_enabled | default(true) | bool
+    - name: Block Lists | Assert block list URL list is not empty when blocking is enabled
+      ansible.builtin.assert:
+        that:
+          - >-
+            not (technitium_enable_blocking | default(true) | bool)
+            or technitium_block_list_urls_clean | length > 0
+        fail_msg: >-
+          DNS blocking is enabled but no block list URLs were declared.
+          Define technitium_block_list_sources or technitium_block_list_urls.
 
-- name: Block Lists | Decide if update is needed
-  ansible.builtin.set_fact:
-    technitium_block_lists_needs_update: >-
-      {{
-        (technitium_current_block_list_urls_clean | sort) != (technitium_block_list_urls_clean | sort)
-      }}
-  when: technitium_block_lists_enabled | default(true) | bool
+    - name: Block Lists | Validate block list URLs
+      ansible.builtin.assert:
+        that:
+          - item is string
+          - item | length > 0
+          - item | length <= technitium_block_list_max_url_length | default(2048)
+          - item is match('^https?://')
+        fail_msg: >-
+          Invalid Technitium block list URL: {{ item }}.
+          URLs must be HTTP/HTTPS and shorter than
+          {{ technitium_block_list_max_url_length | default(2048) }} characters.
+      loop: "{{ technitium_block_list_urls_clean }}"
+      loop_control:
+        label: "{{ item }}"
 
-- name: Block Lists | Apply Allow / Block List URLs to Technitium (settings/set)
-  ansible.builtin.uri:
-    url: "{{ technitium_api_base_url_effective }}/api/settings/set"
-    method: POST
-    headers:
-      Content-Type: application/x-www-form-urlencoded
-    body_format: form-urlencoded
-    body:
-      token: "{{ technitium_api_token }}"
-      blockListUrls: "{{ technitium_block_list_urls_api_value }}"
-    return_content: true
-    status_code: [200]
-    validate_certs: "{{ technitium_api_validate_certs | default(true) }}"
-  register: technitium_block_lists_set
-  failed_when: technitium_block_lists_set.json.status != 'ok'
-  when:
-    - technitium_block_lists_enabled | default(true) | bool
-    - technitium_block_lists_needs_update | default(true) | bool
+    - name: Block Lists | Build API block list URL value
+      ansible.builtin.set_fact:
+        technitium_block_list_urls_api_value: "{{ technitium_block_list_urls_clean | join(',') }}"
 
-- name: Block Lists | Assert block list settings saved
-  ansible.builtin.assert:
-    that:
-      - technitium_block_lists_set is not skipped
-      - technitium_block_lists_set.json is defined
-      - technitium_block_lists_set.json.status is defined
-      - technitium_block_lists_set.json.status == 'ok'
-    fail_msg: >-
-      Technitium settings/set did not return status=ok.
-      Response={{ technitium_block_lists_set.content | default('') }}
-  when:
-    - technitium_block_lists_enabled | default(true) | bool
-    - technitium_block_lists_needs_update | default(true) | bool
+    # -------------------------------------------------------------------------
+    # Optional local allow/deny domain metadata
+    # -------------------------------------------------------------------------
+    # These are not pushed here as zones. They are kept normalized for future
+    # role tasks that manage explicit allowed/blocked zones.
+    # -------------------------------------------------------------------------
+
+    - name: Block Lists | Normalize local allow and deny domain lists
+      ansible.builtin.set_fact:
+        technitium_allow_domains_clean: >-
+          {{
+            technitium_allow_domains
+            | default([])
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+        technitium_deny_domains_clean: >-
+          {{
+            technitium_deny_domains
+            | default([])
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+
+    - name: Block Lists | Validate local allow domains
+      ansible.builtin.assert:
+        that:
+          - item | length > 0
+          - item is not search('\\s')
+        fail_msg: "Invalid allow domain entry: {{ item }}"
+      loop: "{{ technitium_allow_domains_clean }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_allow_domains_clean | length > 0
+
+    - name: Block Lists | Validate local deny domains
+      ansible.builtin.assert:
+        that:
+          - item | length > 0
+          - item is not search('\\s')
+        fail_msg: "Invalid deny domain entry: {{ item }}"
+      loop: "{{ technitium_deny_domains_clean }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_deny_domains_clean | length > 0
+
+    # -------------------------------------------------------------------------
+    # Read current settings
+    # -------------------------------------------------------------------------
+
+    - name: Block Lists | Read current Technitium settings
+      ansible.builtin.uri:
+        url: "{{ technitium_block_lists_api_base }}/api/settings/get"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ technitium_block_lists_api_token }}"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+        return_content: true
+        validate_certs: "{{ technitium_block_lists_validate_certs | bool }}"
+        timeout: "{{ technitium_api_timeout | default(90) | int }}"
+      register: technitium_block_lists_settings_get
+      failed_when: false
+      changed_when: false
+      no_log: "{{ technitium_block_lists_no_log | bool }}"
+
+    - name: Block Lists | Assert current settings were read
+      ansible.builtin.assert:
+        that:
+          - technitium_block_lists_settings_get.json is defined
+          - technitium_block_lists_settings_get.json.status == "ok"
+        fail_msg: >-
+          Failed to read Technitium settings before applying block lists.
+          Response={{ technitium_block_lists_settings_get.json.errorMessage | default(technitium_block_lists_settings_get.content | default('unknown error')) }}.
+        success_msg: "Technitium settings were read successfully."
+
+    - name: Block Lists | Normalize current block list URLs
+      ansible.builtin.set_fact:
+        technitium_current_block_list_urls_clean: >-
+          {{
+            technitium_block_lists_settings_get.json.response.blockListUrls
+            | default([])
+            | map('string')
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+
+    - name: Block Lists | Determine whether block list settings need update
+      ansible.builtin.set_fact:
+        technitium_block_lists_needs_update: >-
+          {{
+            technitium_force_block_list_update | default(false) | bool
+            or (
+              technitium_current_block_list_urls_clean | sort
+              != technitium_block_list_urls_clean | sort
+            )
+            or (
+              technitium_block_lists_settings_get.json.response.enableBlocking | default(false) | bool
+              != technitium_enable_blocking | default(true) | bool
+            )
+            or (
+              technitium_block_lists_settings_get.json.response.blockListUpdateIntervalHours | default(0) | int
+              != technitium_blocking_update_interval_hours | default(24) | int
+            )
+            or (
+              technitium_block_lists_settings_get.json.response.blockingType | default('')
+              != technitium_blocking_type | default('AnyAddress')
+            )
+            or (
+              technitium_block_lists_settings_get.json.response.blockingAnswerTtl | default(0) | int
+              != technitium_blocking_ttl | default(300) | int
+            )
+          }}
+
+    # -------------------------------------------------------------------------
+    # Apply settings
+    # -------------------------------------------------------------------------
+
+    - name: Block Lists | Build block list settings body
+      ansible.builtin.set_fact:
+        technitium_block_lists_settings_body:
+          token: "{{ technitium_block_lists_api_token }}"
+          enableBlocking: "{{ technitium_enable_blocking | default(true) | bool | ternary('true', 'false') }}"
+          allowTxtBlockingReport: "{{ technitium_allow_txt_blocking_report | default(true) | bool | ternary('true', 'false') }}"
+          blockListUrls: "{{ technitium_block_list_urls_api_value }}"
+          blockListUpdateIntervalHours: "{{ technitium_blocking_update_interval_hours | default(24) | string }}"
+          blockingType: "{{ technitium_blocking_type | default('AnyAddress') }}"
+          blockingAnswerTtl: "{{ technitium_blocking_ttl | default(300) | string }}"
+          customBlockingAddresses: "{{ technitium_custom_blocking_addresses | default(['0.0.0.0']) | join(',') }}"
+      no_log: true
+
+    - name: Block Lists | Apply block list settings
+      ansible.builtin.uri:
+        url: "{{ technitium_block_lists_api_base }}/api/settings/set"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ technitium_block_lists_api_token }}"
+        body_format: form-urlencoded
+        body: "{{ technitium_block_lists_settings_body }}"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+        return_content: true
+        validate_certs: "{{ technitium_block_lists_validate_certs | bool }}"
+        timeout: "{{ technitium_api_timeout | default(90) | int }}"
+      register: technitium_block_lists_set
+      failed_when: false
+      changed_when: technitium_block_lists_needs_update | bool
+      no_log: "{{ technitium_block_lists_no_log | bool }}"
+      when: technitium_block_lists_needs_update | bool
+
+    - name: Block Lists | Assert block list settings were saved
+      ansible.builtin.assert:
+        that:
+          - technitium_block_lists_set.json is defined
+          - technitium_block_lists_set.json.status == "ok"
+        fail_msg: >-
+          Technitium settings/set did not return status=ok while applying
+          block-list settings.
+          Response={{ technitium_block_lists_set.json.errorMessage | default(technitium_block_lists_set.content | default('unknown error')) }}.
+        success_msg: "Technitium block-list settings were saved."
+      when: technitium_block_lists_needs_update | bool
+
+    - name: Block Lists | Mark block list settings unchanged
+      ansible.builtin.debug:
+        msg: "Technitium block-list settings already match the desired state."
+      when:
+        - not (technitium_block_lists_needs_update | bool)
+        - technitium_block_lists_show_no_change | default(true)
+
+    # -------------------------------------------------------------------------
+    # Optional immediate update
+    # -------------------------------------------------------------------------
+    # The normal Technitium behavior updates block lists on the configured
+    # interval. Enable this when you want Ansible to request an immediate refresh.
+    # -------------------------------------------------------------------------
+
+    - name: Block Lists | Trigger immediate block list update when requested
+      ansible.builtin.uri:
+        url: "{{ technitium_block_lists_api_base }}/api/settings/updateBlockLists"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ technitium_block_lists_api_token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_block_lists_api_token }}"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+          - 404
+        return_content: true
+        validate_certs: "{{ technitium_block_lists_validate_certs | bool }}"
+        timeout: "{{ technitium_block_list_update_timeout | default(300) | int }}"
+      register: technitium_block_lists_update_now
+      failed_when: false
+      changed_when: technitium_block_lists_update_now.json.status | default('') == 'ok'
+      no_log: "{{ technitium_block_lists_no_log | bool }}"
+      when:
+        - technitium_block_lists_update_now | default(false) | bool
+
+    - name: Block Lists | Warn when immediate block list update endpoint is unavailable
+      ansible.builtin.debug:
+        msg: >-
+          Immediate block-list update endpoint did not return status=ok.
+          This is non-fatal; Technitium will still update block lists on the
+          configured interval.
+      when:
+        - technitium_block_lists_update_now | default(false) | bool
+        - technitium_block_lists_update_now is defined
+        - technitium_block_lists_update_now.skipped is not defined
+        - technitium_block_lists_update_now.json.status | default('') != 'ok'
+
+    # -------------------------------------------------------------------------
+    # Verification
+    # -------------------------------------------------------------------------
+
+    - name: Block Lists | Read settings after block list configuration
+      ansible.builtin.uri:
+        url: "{{ technitium_block_lists_api_base }}/api/settings/get"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ technitium_block_lists_api_token }}"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+        return_content: true
+        validate_certs: "{{ technitium_block_lists_validate_certs | bool }}"
+        timeout: "{{ technitium_api_timeout | default(90) | int }}"
+      register: technitium_block_lists_settings_verify
+      failed_when: false
+      changed_when: false
+      no_log: "{{ technitium_block_lists_no_log | bool }}"
+      when: technitium_verify_block_lists_after_apply | default(true)
+
+    - name: Block Lists | Assert block list settings are readable after apply
+      ansible.builtin.assert:
+        that:
+          - technitium_block_lists_settings_verify.json is defined
+          - technitium_block_lists_settings_verify.json.status == "ok"
+        fail_msg: >-
+          Failed to verify Technitium block-list settings after apply.
+          Response={{ technitium_block_lists_settings_verify.json.errorMessage | default(technitium_block_lists_settings_verify.content | default('unknown error')) }}.
+        success_msg: "Technitium block-list settings are readable after apply."
+      when: technitium_verify_block_lists_after_apply | default(true)
+
+    - name: Block Lists | Normalize verified block list URLs
+      ansible.builtin.set_fact:
+        technitium_verified_block_list_urls_clean: >-
+          {{
+            technitium_block_lists_settings_verify.json.response.blockListUrls
+            | default([])
+            | map('string')
+            | map('trim')
+            | reject('equalto', '')
+            | unique
+            | list
+          }}
+      when: technitium_verify_block_lists_after_apply | default(true)
+
+    - name: Block Lists | Assert verified block list URLs match desired state
+      ansible.builtin.assert:
+        that:
+          - technitium_verified_block_list_urls_clean | sort == technitium_block_list_urls_clean | sort
+          - technitium_block_lists_settings_verify.json.response.enableBlocking | default(false) | bool == technitium_enable_blocking | default(true) | bool
+        fail_msg: >-
+          Technitium block-list verification failed. The saved settings do not
+          match the desired Ansible state.
+        success_msg: "Technitium block-list settings match the desired state."
+      when: technitium_verify_block_lists_after_apply | default(true)
+
+    # -------------------------------------------------------------------------
+    # Summary
+    # -------------------------------------------------------------------------
+
+    - name: Block Lists | Show block list summary
+      ansible.builtin.debug:
+        msg:
+          - "Technitium block-list configuration complete."
+          - "Host: {{ inventory_hostname }}"
+          - "API: {{ technitium_block_lists_api_base }}"
+          - "Blocking enabled: {{ technitium_enable_blocking | default(true) | bool }}"
+          - "Block list URLs declared: {{ technitium_block_list_urls_clean | length }}"
+          - "Update interval hours: {{ technitium_blocking_update_interval_hours | default(24) }}"
+          - "Settings changed: {{ technitium_block_lists_needs_update | bool }}"
+          - "Verification enabled: {{ technitium_verify_block_lists_after_apply | default(true) }}"
+          - "Cluster-aware primary-only writes: {{ technitium_cluster_enabled | default(false) | bool }}"

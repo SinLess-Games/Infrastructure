@@ -1,45 +1,124 @@
-# --------------------- Homebrew Taps ---------------------
-# Taps provide access to additional formulae for specific tools or organizations
-tap 'hashicorp/tap'                 # HashiCorp tools for infrastructure as code and security
-tap 'go-task/tap'                   # Go Task CLI for automation and task running
-tap 'fluxcd/tap'                    # FluxCD tools for GitOps
+# =============================================================================
+# Homebrew Brewfile
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Local developer/bootstrap tooling for the Infrastructure repository.
+#
+# Used by:
+#   scripts/initialize-repo.sh
+#
+# Install:
+#   brew bundle --file=scripts/configs/Brewfile
+#
+# Notes:
+#   - Keep this focused on workstation/controller tooling.
+#   - Python dependencies belong in Ansible/requirements.txt.
+#   - Ansible Galaxy dependencies belong in Ansible/requirements.yaml.
+#   - Cluster/runtime packages belong in Ansible roles, not this Brewfile.
+# =============================================================================
 
-# ------------------- Programming Languages -------------------
-# Programming languages and runtime environments
-brew 'pipx'                         # Pipx, package installer for Python packages
+# =============================================================================
+# Taps
+# =============================================================================
 
-# ------------------- Containerization and Virtualization -------------------
-# Tools for running and managing containers and virtual environments
-brew 'minikube'                     # Local Kubernetes, for testing and development
+tap "hashicorp/tap"
+tap "go-task/tap"
+tap "fluxcd/tap"
 
-# ------------------- Kubernetes-related Tools -------------------
-# Kubernetes CLI and tools for managing clusters and workflows
-brew 'kubectl'                      # Kubernetes command-line interface for cluster management
-brew 'helm'                         # Helm, package manager for Kubernetes applications
-brew 'istioctl'                     # Istio CLI, manages Istio service mesh on Kubernetes
-brew 'flux'                         # FluxCD, GitOps operator for Kubernetes
+# =============================================================================
+# Shell / Environment
+# =============================================================================
 
-# ------------------- Cloud and Infrastructure as Code -------------------
-# Infrastructure as Code (IaC) and cloud management tools
-brew 'terraform'                    # Terraform, open-source IaC tool by HashiCorp
+brew "direnv"        # Directory-aware environment loading
+brew "zsh"           # Shell used by local workstation setup
+brew "starship"      # Cross-shell prompt
 
-# ------------------- Secrets and Configuration Management -------------------
-# Tools for encrypting and managing secrets in configuration files
-brew 'sops'                         # Sops, for managing encrypted files in Git
-brew 'age'                          # Age, modern encryption tool for files
+# =============================================================================
+# Git / GitHub
+# =============================================================================
 
-# ------------------- CI/CD and DevOps -------------------
-# Continuous integration/continuous delivery tools and GitHub workflow management
-brew 'go-task'                      # Task automation using Go Task CLI
-brew 'gh'                           # GitHub CLI, interacts with GitHub from the command line
+brew "git"           # Version control
+brew "gh"            # GitHub CLI
 
-# ------------------- Development Utilities -------------------
-# Essential utilities for development and data processing
-brew 'git'                          # Git, version control for managing code
-brew 'jq'                           # jq, JSON processor for data manipulation
-brew 'yq'                           # yq, YAML processor with jq-like syntax
+# =============================================================================
+# Automation
+# =============================================================================
 
+brew "go-task"       # Task runner used by taskfile.yaml
+brew "pre-commit"    # Local quality hooks
 
-# ------------------- Miscellaneous Utilities -------------------
-# Additional helpful command-line utilities
-brew 'direnv'
+# =============================================================================
+# Python Tooling
+# =============================================================================
+
+brew "python@3.12"   # Stable Python runtime for Ansible virtualenvs
+brew "pipx"          # Isolated Python CLI package installer
+
+# =============================================================================
+# Infrastructure as Code
+# =============================================================================
+
+brew "hashicorp/tap/terraform" # Terraform IaC
+brew "tflint"                  # Terraform linting
+brew "terraform-docs"          # Terraform module documentation generator
+
+# =============================================================================
+# Secrets / Encryption
+# =============================================================================
+
+brew "sops"          # Encrypted YAML/JSON/env files
+brew "age"           # Modern file encryption used by SOPS
+brew "vault"         # HashiCorp Vault CLI
+
+# =============================================================================
+# Kubernetes / GitOps
+# =============================================================================
+
+brew "kubectl"       # Kubernetes CLI
+brew "helm"          # Kubernetes package manager
+brew "kustomize"     # Kustomize manifest tooling
+brew "minikube"      # Local Kubernetes testing
+brew "istioctl"      # Istio CLI
+brew "fluxcd/tap/flux" # Flux GitOps CLI
+brew "k9s"           # Terminal Kubernetes UI
+brew "kubectx"       # Switch Kubernetes contexts/namespaces
+brew "stern"         # Multi-pod Kubernetes logs
+
+# =============================================================================
+# Containers
+# =============================================================================
+
+brew "docker"        # Docker CLI
+brew "docker-compose" # Docker Compose CLI
+
+# =============================================================================
+# Data / File Utilities
+# =============================================================================
+
+brew "jq"            # JSON processor
+brew "yq"            # YAML/XML/TOML processor
+brew "ripgrep"       # Fast search
+brew "fd"            # Fast find alternative
+brew "tree"          # Directory tree viewer
+brew "coreutils"     # GNU core utilities
+brew "gnu-sed"       # GNU sed
+brew "grep"          # GNU grep
+brew "wget"          # File downloader
+brew "curl"          # HTTP client
+
+# =============================================================================
+# Networking / Diagnostics
+# =============================================================================
+
+brew "nmap"          # Network scanning
+brew "ipcalc"        # CIDR/subnet calculations
+brew "mtr"           # Network path diagnostics
+brew "bind"          # dig/nslookup DNS tools
+brew "openssl"       # TLS and certificate diagnostics
+
+# =============================================================================
+# Documentation
+# =============================================================================
+
+brew "mkdocs"        # Docs site local preview/build helper
+brew "graphviz"      # Diagram rendering support

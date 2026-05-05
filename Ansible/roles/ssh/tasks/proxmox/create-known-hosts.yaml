@@ -1,108 +1,434 @@
 ---
 # =============================================================================
-# Role: ssh
-# Task: proxmox/create-known-hosts.yaml
-#
+# SSH Role - Proxmox Create CA-backed known_hosts
+# -----------------------------------------------------------------------------
 # Purpose:
-# - Install a CA-backed SSH known_hosts file
-# - Use @cert-authority entries via template
-# - Support wildcard DNS (*.local.sinlessgames.com, *.local.sinlessgamesllc.com)
+#   Installs a deterministic CA-backed SSH known_hosts file for Proxmox/root
+#   automation access.
 #
-# Design:
-# - No ssh-keyscan
-# - No pinned host keys
-# - Deterministic, CA-based trust only
-# =============================================================================
-
-# Fixes:
-# - Read SSH CA pub key from target and set as fact for template rendering
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# Variables (expected)
-# -----------------------------------------------------------------------------
-# ssh.known_hosts.cert_authority_patterns:
-#   - "*.local.sinlessgames.com"
-#   - "*.local.sinlessgamesllc.com"
+# Security model:
+#   - Uses @cert-authority trust entries.
+#   - Does not use ssh-keyscan.
+#   - Does not pin explicit host keys by default.
+#   - Reads the already-installed SSH CA public key from the target node.
 #
-# ssh.known_hosts.trusted_user_ca_keys:
-#   /etc/ssh/ca/ssh_ca.pub
-#
-# ssh_known_hosts_path (optional):
+# Default output:
 #   /root/.ssh/known_hosts
+#
+# Template variables provided:
+#   - ssh_ca_pub
+#   - ssh_known_hosts_patterns
+#   - ssh_known_hosts_entries
+#   - ssh_render_host_entries
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Normalize variables
 # -----------------------------------------------------------------------------
 
-- name: Set known_hosts path
+- name: SSH | Proxmox known_hosts | Normalize variables
   ansible.builtin.set_fact:
-    ssh__known_hosts_path: "{{ ssh_known_hosts_path | default('/root/.ssh/known_hosts') }}"
+    proxmox_known_hosts_path: >-
+      {{
+        ssh_known_hosts_path
+        | default(
+            ssh.root_client.user_known_hosts_file
+            | default('/root/.ssh/known_hosts')
+            if ssh is defined and ssh.root_client is defined
+            else '/root/.ssh/known_hosts'
+          )
+      }}
+    proxmox_known_hosts_ca_public_key_path: >-
+      {{
+        ssh_known_hosts_trusted_user_ca_keys
+        | default(
+            ssh.known_hosts.trusted_user_ca_keys
+            | default(
+                ssh_trusted_user_ca_keys_path
+                | default('/etc/ssh/ca/ssh_ca.pub')
+              )
+            if ssh is defined and ssh.known_hosts is defined
+            else ssh_trusted_user_ca_keys_path | default('/etc/ssh/ca/ssh_ca.pub')
+          )
+      }}
+    proxmox_known_hosts_patterns: >-
+      {{
+        ssh_known_hosts_cert_authority_patterns
+        | default(
+            ssh.known_hosts.cert_authority_patterns
+            | default(['*.local.sinlessgames.com', '10.10.*'])
+            if ssh is defined and ssh.known_hosts is defined
+            else ['*.local.sinlessgames.com', '10.10.*']
+          )
+      }}
+    proxmox_known_hosts_entries: "{{ ssh_known_hosts_entries | default([]) }}"
+    proxmox_known_hosts_render_host_entries: "{{ ssh_render_host_entries | default(false) | bool }}"
   changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
 
 # -----------------------------------------------------------------------------
-# Ensure .ssh directory exists
+# Validate variables
 # -----------------------------------------------------------------------------
 
-- name: Ensure root .ssh directory exists
+- name: SSH | Proxmox known_hosts | Validate variables
+  ansible.builtin.assert:
+    that:
+      - proxmox_known_hosts_path is string
+      - proxmox_known_hosts_path is match('^/')
+      - proxmox_known_hosts_path | length > 1
+      - proxmox_known_hosts_ca_public_key_path is string
+      - proxmox_known_hosts_ca_public_key_path is match('^/')
+      - proxmox_known_hosts_ca_public_key_path | length > 1
+      - proxmox_known_hosts_patterns is sequence
+      - proxmox_known_hosts_patterns is not string
+      - proxmox_known_hosts_patterns is not mapping
+      - proxmox_known_hosts_patterns | length > 0
+      - proxmox_known_hosts_entries is sequence
+      - proxmox_known_hosts_entries is not string
+      - proxmox_known_hosts_entries is not mapping
+    fail_msg: "Proxmox known_hosts variables are invalid."
+    success_msg: "Proxmox known_hosts variables are valid."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-validate
+
+- name: SSH | Proxmox known_hosts | Validate CA authority patterns
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | length > 0
+      - item is not search('\\s')
+    fail_msg: "Invalid known_hosts @cert-authority pattern: {{ item }}"
+  loop: "{{ proxmox_known_hosts_patterns }}"
+  loop_control:
+    label: "{{ item }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-validate
+
+# -----------------------------------------------------------------------------
+# Resolve template source
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox known_hosts | Check role-local known_hosts.j2 template
+  ansible.builtin.stat:
+    path: "{{ role_path }}/templates/known_hosts.j2"
+  delegate_to: localhost
+  register: proxmox_known_hosts_role_template_stat
+  changed_when: false
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+
+- name: SSH | Proxmox known_hosts | Check role-local ssh_known_hosts.j2 template
+  ansible.builtin.stat:
+    path: "{{ role_path }}/templates/ssh_known_hosts.j2"
+  delegate_to: localhost
+  register: proxmox_known_hosts_role_alt_template_stat
+  changed_when: false
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+
+- name: SSH | Proxmox known_hosts | Check legacy known_hosts.j2 template
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../templates/ssh/known_hosts.j2"
+  delegate_to: localhost
+  register: proxmox_known_hosts_legacy_template_stat
+  changed_when: false
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+
+- name: SSH | Proxmox known_hosts | Select known_hosts template source
+  ansible.builtin.set_fact:
+    proxmox_known_hosts_template_src: >-
+      {{
+        ssh_known_hosts_template_src
+        | default(
+            (role_path ~ '/templates/known_hosts.j2')
+            if proxmox_known_hosts_role_template_stat.stat.exists | default(false)
+            else (
+              (role_path ~ '/templates/ssh_known_hosts.j2')
+              if proxmox_known_hosts_role_alt_template_stat.stat.exists | default(false)
+              else (playbook_dir ~ '/../templates/ssh/known_hosts.j2')
+            )
+          )
+      }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+
+- name: SSH | Proxmox known_hosts | Assert selected template exists
+  ansible.builtin.assert:
+    that:
+      - >-
+        ssh_known_hosts_template_src is defined or
+        proxmox_known_hosts_role_template_stat.stat.exists | default(false) or
+        proxmox_known_hosts_role_alt_template_stat.stat.exists | default(false)
+        or proxmox_known_hosts_legacy_template_stat.stat.exists | default(false)
+    fail_msg: >-
+      No known_hosts template was found. Expected one of: - {{ role_path
+      }}/templates/known_hosts.j2 - {{ role_path }}/templates/ssh_known_hosts.j2
+      - {{ playbook_dir }}/../templates/ssh/known_hosts.j2 Or set
+      ssh_known_hosts_template_src to a valid template path.
+    success_msg: "known_hosts template source is available."
+  delegate_to: localhost
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-validate
+
+# -----------------------------------------------------------------------------
+# Validate and read CA public key from target node
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox known_hosts | Stat SSH CA public key on node
+  ansible.builtin.stat:
+    path: "{{ proxmox_known_hosts_ca_public_key_path }}"
+    follow: false
+  register: proxmox_known_hosts_ca_public_key_stat
+  changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-ca
+
+- name: SSH | Proxmox known_hosts | Assert SSH CA public key exists on node
+  ansible.builtin.assert:
+    that:
+      - proxmox_known_hosts_ca_public_key_stat.stat.exists | default(false) |
+        bool
+      - proxmox_known_hosts_ca_public_key_stat.stat.isreg | default(false) | bool
+      - not (proxmox_known_hosts_ca_public_key_stat.stat.islnk | default(false)
+        | bool)
+    fail_msg: >-
+      SSH CA public key is missing, invalid, or symlinked on node: {{
+      proxmox_known_hosts_ca_public_key_path }}. Run proxmox/copy-ca.yaml before
+      creating known_hosts.
+    success_msg: "SSH CA public key exists on node and is not symlinked."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-ca
+
+- name: SSH | Proxmox known_hosts | Read SSH CA public key from node
+  ansible.builtin.slurp:
+    src: "{{ proxmox_known_hosts_ca_public_key_path }}"
+  register: proxmox_known_hosts_ca_public_key_slurp
+  become: true
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-ca
+
+- name: SSH | Proxmox known_hosts | Set SSH CA public key fact
+  ansible.builtin.set_fact:
+    ssh_ca_pub: "{{ proxmox_known_hosts_ca_public_key_slurp.content | b64decode | trim }}"
+  changed_when: false
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-ca
+
+- name: SSH | Proxmox known_hosts | Validate decoded SSH CA public key
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_pub | length > 0
+      - ssh_ca_pub is match('^ssh-(ed25519|rsa)|^ecdsa-sha2-')
+      - ssh_ca_pub.split() | length >= 2
+    fail_msg: "Decoded SSH CA public key is empty or invalid."
+    success_msg: "Decoded SSH CA public key is valid."
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-ca
+    - ssh-known-hosts-validate
+
+# -----------------------------------------------------------------------------
+# Prepare root SSH directory
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox known_hosts | Ensure known_hosts parent directory exists
   ansible.builtin.file:
-    path: "{{ ssh__known_hosts_path | dirname }}"
+    path: "{{ proxmox_known_hosts_path | dirname }}"
     state: directory
     owner: root
     group: root
     mode: "0700"
   become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
 
-# -----------------------------------------------------------------------------
-# Assert SSH CA public key exists on node
-# -----------------------------------------------------------------------------
-
-- name: Assert SSH CA public key exists on node
+- name: SSH | Proxmox known_hosts | Stat target known_hosts path
   ansible.builtin.stat:
-    path: "{{ ssh.known_hosts.trusted_user_ca_keys }}"
-  register: ssh__known_hosts_ca_pub
-  become: true
-
-- name: Fail if SSH CA public key is missing
-  ansible.builtin.fail:
-    msg: "SSH CA public key not found at {{ ssh.known_hosts.trusted_user_ca_keys }}"
-  when: not ssh__known_hosts_ca_pub.stat.exists
-
-# Read SSH CA pub key content from target for template rendering
-- name: Read SSH CA pub key content from target
-  ansible.builtin.slurp:
-    src: "{{ ssh.known_hosts.trusted_user_ca_keys }}"
-  register: ssh__ca_pub_slurp
-  become: true
-
-- name: Set ssh_ca_pub fact for template rendering
-  ansible.builtin.set_fact:
-    ssh_ca_pub: "{{ ssh__ca_pub_slurp.content | b64decode }}"
+    path: "{{ proxmox_known_hosts_path }}"
+    follow: false
+  register: proxmox_known_hosts_file_stat
   changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-validate
+
+- name: SSH | Proxmox known_hosts | Refuse symlinked known_hosts file
+  ansible.builtin.fail:
+    msg: >-
+      Proxmox known_hosts path is a symlink: {{ proxmox_known_hosts_path }}.
+      Refusing to overwrite symlinked known_hosts.
+  when: proxmox_known_hosts_file_stat.stat.islnk | default(false) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-validate
 
 # -----------------------------------------------------------------------------
-# Deploy known_hosts via template
+# Deploy known_hosts
 # -----------------------------------------------------------------------------
 
-- name: Deploy CA-based known_hosts file
+- name: SSH | Proxmox known_hosts | Deploy CA-backed known_hosts file
   ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/ssh/known_hosts.j2"
-    dest: "{{ ssh__known_hosts_path }}"
+    src: "{{ proxmox_known_hosts_template_src }}"
+    dest: "{{ proxmox_known_hosts_path }}"
     owner: root
     group: root
-    mode: "0644"
+    mode: "{{ ssh_known_hosts_file_mode | default('0644') }}"
+    backup: "{{ ssh_known_hosts_backup | default(false) }}"
+  register: proxmox_known_hosts_template_result
   become: true
+  vars:
+    ansible_template_src: "{{ proxmox_known_hosts_template_src }}"
+    ssh_known_hosts_patterns: "{{ proxmox_known_hosts_patterns }}"
+    ssh_known_hosts_entries: "{{ proxmox_known_hosts_entries }}"
+    ssh_render_host_entries: "{{ proxmox_known_hosts_render_host_entries }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
 
 # -----------------------------------------------------------------------------
 # Validation
 # -----------------------------------------------------------------------------
 
-- name: Verify known_hosts contains @cert-authority entries
-  ansible.builtin.shell: |
-    grep '^@cert-authority' {{ ssh__known_hosts_path }}
-  register: ssh__known_hosts_verify
+- name: SSH | Proxmox known_hosts | Stat rendered known_hosts file
+  ansible.builtin.stat:
+    path: "{{ proxmox_known_hosts_path }}"
+    follow: false
+  register: proxmox_known_hosts_rendered_stat
   changed_when: false
   become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-verify
 
-- name: Assert CA trust is present in known_hosts
+- name: SSH | Proxmox known_hosts | Assert rendered known_hosts file is valid
   ansible.builtin.assert:
     that:
-      - ssh__known_hosts_verify.stdout is search('@cert-authority')
-    fail_msg: "known_hosts does not contain SSH CA trust entries"
+      - proxmox_known_hosts_rendered_stat.stat.exists | default(false) | bool
+      - proxmox_known_hosts_rendered_stat.stat.isreg | default(false) | bool
+      - not (proxmox_known_hosts_rendered_stat.stat.islnk | default(false) |
+        bool)
+      - proxmox_known_hosts_rendered_stat.stat.pw_name == 'root'
+      - proxmox_known_hosts_rendered_stat.stat.gr_name == 'root'
+    fail_msg: "Rendered known_hosts file failed validation: {{
+      proxmox_known_hosts_path }}"
+    success_msg: "Rendered known_hosts file exists and is valid."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-verify
+
+- name: SSH | Proxmox known_hosts | Read rendered known_hosts file
+  ansible.builtin.slurp:
+    src: "{{ proxmox_known_hosts_path }}"
+  register: proxmox_known_hosts_rendered_slurp
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-verify
+
+- name: SSH | Proxmox known_hosts | Decode rendered known_hosts file
+  ansible.builtin.set_fact:
+    proxmox_known_hosts_rendered_content: "{{ proxmox_known_hosts_rendered_slurp.content | b64decode }}"
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-verify
+
+- name: SSH | Proxmox known_hosts | Assert CA trust entries are present
+  ansible.builtin.assert:
+    that:
+      - proxmox_known_hosts_rendered_content is
+        search('(?m)^@cert-authority\\s+')
+      - >-
+        proxmox_known_hosts_patterns | select('in',
+        proxmox_known_hosts_rendered_content) | list | length ==
+        proxmox_known_hosts_patterns | length
+    fail_msg: >-
+      known_hosts does not contain all expected SSH CA trust entries. Expected
+      patterns: {{ proxmox_known_hosts_patterns | join(', ') }}
+    success_msg: "known_hosts contains all expected SSH CA trust entries."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-known-hosts-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox known_hosts | Show known_hosts summary
+  ansible.builtin.debug:
+    msg:
+      - "Proxmox CA-backed known_hosts file deployed."
+      - "Host: {{ inventory_hostname }}"
+      - "Path: {{ proxmox_known_hosts_path }}"
+      - "Template: {{ proxmox_known_hosts_template_src }}"
+      - "CA public key path: {{ proxmox_known_hosts_ca_public_key_path }}"
+      - "CA authority patterns: {{ proxmox_known_hosts_patterns | join(', ') }}"
+      - "Changed: {{ proxmox_known_hosts_template_result is changed }}"
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-known-hosts
+    - ssh-summary

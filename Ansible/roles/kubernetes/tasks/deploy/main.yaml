@@ -1,4 +1,8 @@
 ---
+# =============================================================================
+# Kubernetes Production Cluster Deployment
+# =============================================================================
+
 - name: Ensure generated directories exist
   ansible.builtin.file:
     path: "{{ item }}"
@@ -20,13 +24,73 @@
         | combine(
             {
               'plan_only': (kubernetes_plan_only | default(kubernetes_operation.plan_only) | bool),
-              'destroy': (kubernetes_destroy | default(kubernetes_operation.destroy) | bool)
+              'destroy': (kubernetes_destroy | default(kubernetes_operation.destroy) | bool),
+              'force_apply': (kubernetes_force_apply | default(kubernetes_operation.force_apply | default(false)) | bool)
             },
             recursive=True
           )
       }}
   delegate_to: localhost
   run_once: true
+
+- name: Build Kubernetes deployment node lists
+  ansible.builtin.set_fact:
+    kubernetes_role_all_nodes: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+    kubernetes_gpu_passthrough_nodes: >-
+      {{
+        kubernetes_nodes.workers
+        | selectattr('gpu_passthrough_devices', 'defined')
+        | selectattr('gpu_passthrough_devices')
+        | list
+      }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Build Kubernetes deployment validation values
+  ansible.builtin.set_fact:
+    kubernetes_role_all_node_vmids: "{{ kubernetes_role_all_nodes | map(attribute='vmid') | list }}"
+    kubernetes_role_all_node_ips: "{{ kubernetes_role_all_nodes | map(attribute='ip') | list }}"
+    kubernetes_role_all_node_names: "{{ kubernetes_role_all_nodes | map(attribute='name') | list }}"
+    kubernetes_role_all_node_target_nodes: "{{ kubernetes_role_all_nodes | map(attribute='target_node') | list }}"
+    kubernetes_gpu_passthrough_hosts: "{{ kubernetes_gpu_passthrough_nodes | map(attribute='target_node') | unique | list }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate Kubernetes production VM layout
+  ansible.builtin.assert:
+    that:
+      - kubernetes_nodes.control_plane | length == kubernetes_control_plane.count | int
+      - kubernetes_nodes.workers | length == kubernetes_workers.count | int
+      - kubernetes_master_ips | length == kubernetes_control_plane.count | int
+      - kubernetes_worker_ips | length == kubernetes_workers.count | int
+      - kubernetes_role_all_node_vmids | unique | length == kubernetes_role_all_node_vmids | length
+      - kubernetes_role_all_node_ips | unique | length == kubernetes_role_all_node_ips | length
+      - kubernetes_role_all_node_names | unique | length == kubernetes_role_all_node_names | length
+      - kubernetes_role_all_node_target_nodes | difference(kubernetes_proxmox_target_nodes) | length == 0
+      - kubernetes_control_plane.memory_balloon_mb | int == 0
+      - kubernetes_workers.memory_balloon_mb | int == 0
+    fail_msg: >-
+      Kubernetes production VM layout is unsafe or inconsistent. Check node counts,
+      duplicate VMIDs, duplicate IPs, target_node values, and memory ballooning.
+  delegate_to: localhost
+  run_once: true
+
+- name: Validate GPU passthrough worker definitions
+  ansible.builtin.assert:
+    that:
+      - item.gpu_passthrough_devices | length > 0
+      - item.target_node is defined
+      - item.vmid is defined
+      - item.name is defined
+    fail_msg: >-
+      GPU passthrough worker {{ item.name | default('unknown') }} is missing
+      gpu_passthrough_devices, target_node, vmid, or name.
+  loop: "{{ kubernetes_gpu_passthrough_nodes }}"
+  loop_control:
+    label: "{{ item.name | default('unknown-gpu-worker') }}"
+  delegate_to: localhost
+  run_once: true
+  when: kubernetes_gpu_passthrough_nodes | length > 0
 
 - name: Build Terraform module target arguments
   ansible.builtin.set_fact:
@@ -53,6 +117,7 @@
   loop: "{{ kubernetes_nodes.control_plane }}"
   loop_control:
     index_var: node_index
+    label: "{{ item.name }}"
   vars:
     kubernetes_default_user: "{{ kubernetes_ansible.default_user }}"
   delegate_to: localhost
@@ -66,6 +131,7 @@
   loop: "{{ kubernetes_nodes.workers }}"
   loop_control:
     index_var: node_index
+    label: "{{ item.name }}"
   vars:
     kubernetes_default_user: "{{ kubernetes_ansible.default_user }}"
   delegate_to: localhost
@@ -171,7 +237,7 @@
         mime_type: text/yaml
     status_code: 200
     return_content: true
-  loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+  loop: "{{ kubernetes_role_all_nodes }}"
   loop_control:
     label: "{{ item.name }}@{{ item.target_node }}"
   delegate_to: localhost
@@ -206,7 +272,7 @@
           timeout 5 /usr/sbin/qm unlock "${vmid}" 2>/dev/null || true
         fi
         rm -f "/var/lock/qemu-server/lock-${vmid}.conf"
-  loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+  loop: "{{ kubernetes_role_all_nodes }}"
   loop_control:
     label: "{{ item.name }}@{{ item.target_node }}"
   throttle: 2
@@ -215,7 +281,9 @@
   changed_when: false
   failed_when: false
   register: stale_lock_cleanup_result
-  when: not kubernetes_operation.plan_only | bool
+  when:
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
 
 - name: Clear orphaned Proxmox cloud-init volumes before Terraform apply
   ansible.builtin.command:
@@ -248,7 +316,7 @@
             timeout 10 /usr/sbin/lvremove -fy "${vg}/${volume}" >/dev/null 2>&1 || true
           fi
         done
-  loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+  loop: "{{ kubernetes_role_all_nodes }}"
   loop_control:
     label: "{{ item.name }}@{{ item.target_node }}"
   throttle: 2
@@ -257,7 +325,9 @@
   changed_when: false
   failed_when: false
   register: orphan_cloudinit_cleanup_result
-  when: not kubernetes_operation.plan_only | bool
+  when:
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
 
 - name: Clear orphaned Proxmox cloud-init volumes via API before Terraform apply
   ansible.builtin.uri:
@@ -272,7 +342,7 @@
       - 200
       - 404
       - 500
-  loop: "{{ kubernetes_nodes.control_plane + kubernetes_nodes.workers }}"
+  loop: "{{ kubernetes_role_all_nodes }}"
   loop_control:
     label: "{{ item.name }}@{{ item.target_node }}"
   delegate_to: localhost
@@ -281,7 +351,9 @@
   failed_when: false
   no_log: true
   register: orphan_cloudinit_cleanup_api_result
-  when: not kubernetes_operation.plan_only | bool
+  when:
+    - not kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
 
 - name: Initialize Terraform working directory
   ansible.builtin.command:
@@ -292,7 +364,6 @@
   delegate_to: localhost
   run_once: true
   changed_when: false
-  when: not kubernetes_operation.plan_only | bool
   environment:
     TF_VAR_proxmox_api_url: "{{ kubernetes_deploy_proxmox_api_url }}"
     TF_VAR_proxmox_api_token_id: "{{ kubernetes_terraform_proxmox_api_token_id }}"
@@ -300,6 +371,38 @@
     TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
     TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
   no_log: true
+
+- name: Plan Terraform cluster resources
+  ansible.builtin.command:
+    argv: "{{ ['terraform', '-chdir=' ~ kubernetes_terraform_dir, 'plan', '-no-color'] + kubernetes_role_terraform_target_args }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  when:
+    - kubernetes_operation.plan_only | bool
+    - not kubernetes_operation.destroy | bool
+  environment:
+    TF_VAR_proxmox_api_url: "{{ kubernetes_deploy_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ kubernetes_terraform_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ kubernetes_terraform_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
+    TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
+
+- name: Plan Terraform cluster destroy
+  ansible.builtin.command:
+    argv: "{{ ['terraform', '-chdir=' ~ kubernetes_terraform_dir, 'plan', '-destroy', '-no-color'] + kubernetes_role_terraform_target_args }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  when:
+    - kubernetes_operation.plan_only | bool
+    - kubernetes_operation.destroy | bool
+  environment:
+    TF_VAR_proxmox_api_url: "{{ kubernetes_deploy_proxmox_api_url }}"
+    TF_VAR_proxmox_api_token_id: "{{ kubernetes_terraform_proxmox_api_token_id }}"
+    TF_VAR_proxmox_api_token_secret: "{{ kubernetes_terraform_proxmox_api_token_secret }}"
+    TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
+    TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
 
 - name: Apply Terraform cluster plan
   ansible.builtin.command:
@@ -335,7 +438,33 @@
     TF_VAR_proxmox_tls_insecure: "{{ kubernetes_deploy_proxmox_tls_insecure | bool | ternary('true', 'false') }}"
     TF_VAR_kubernetes_ssh_keys: "{{ kubernetes_deploy_ssh_keys | to_json }}"
 
-- name: Check SSH access for GPU passthrough host management
+# =============================================================================
+# GPU Passthrough Management
+# =============================================================================
+# This supports the full production layout where GPU devices are assigned from
+# each worker definition:
+#
+#   kubernetes_nodes.workers[].gpu_passthrough_devices
+#
+# Example:
+#   rke2-prod-wk-01 -> NVidia-1060
+#   rke2-prod-wk-02 -> Nvidia-3060
+#
+# It replaces the previous single dedicated GPU worker behavior that expected
+# one VM to receive both GPU mappings.
+
+- name: Determine whether GPU passthrough management is requested
+  ansible.builtin.set_fact:
+    kubernetes_gpu_passthrough_requested: >-
+      {{
+        (kubernetes_gpu_passthrough_nodes | length > 0)
+        and not (kubernetes_operation.plan_only | bool)
+        and not (kubernetes_operation.destroy | bool)
+      }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Check SSH access for GPU passthrough Proxmox hosts
   ansible.builtin.command:
     argv:
       - ssh
@@ -347,187 +476,263 @@
       - StrictHostKeyChecking=no
       - -o
       - UserKnownHostsFile=/dev/null
-      - "{{ (kubernetes_proxmox_gpu.host_user | default('root')) ~ '@' ~ (kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host)) }}"
+      - "{{ ((kubernetes_proxmox_gpu | default({})).host_user | default('root')) ~ '@' ~ (kubernetes_proxmox.node_ssh_hosts[item] | default(item)) }}"
       - true
+  loop: "{{ kubernetes_gpu_passthrough_hosts }}"
+  loop_control:
+    label: "{{ item }}"
   delegate_to: localhost
   run_once: true
   changed_when: false
   failed_when: false
-  register: kubernetes_gpu_proxmox_ssh_access_check
-  when:
-    - kubernetes_proxmox_gpu.enabled | bool
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
+  register: kubernetes_gpu_proxmox_ssh_access_checks
+  when: kubernetes_gpu_passthrough_requested | bool
+
+- name: Build GPU passthrough SSH failure list
+  ansible.builtin.set_fact:
+    kubernetes_gpu_passthrough_ssh_failed_hosts: >-
+      {{
+        kubernetes_gpu_proxmox_ssh_access_checks.results
+        | default([])
+        | selectattr('rc', 'ne', 0)
+        | map(attribute='item')
+        | list
+      }}
+  delegate_to: localhost
+  run_once: true
+  when: kubernetes_gpu_passthrough_requested | bool
 
 - name: Determine whether GPU passthrough management tasks should run
   ansible.builtin.set_fact:
     kubernetes_gpu_passthrough_manage_enabled: >-
       {{
-        (kubernetes_proxmox_gpu.enabled | bool)
-        and ((kubernetes_gpu_proxmox_ssh_access_check.rc | default(1)) == 0)
+        (kubernetes_gpu_passthrough_requested | bool)
+        and (kubernetes_gpu_passthrough_ssh_failed_hosts | default([]) | length == 0)
       }}
   delegate_to: localhost
   run_once: true
-  when:
-    - kubernetes_proxmox_gpu.enabled | bool
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
+  when: kubernetes_gpu_passthrough_requested | bool
 
 - name: Report skipped GPU passthrough management when Proxmox SSH is unavailable
   ansible.builtin.debug:
     msg: >-
-      Skipping GPU passthrough management because SSH access to {{ kubernetes_proxmox_gpu.host }} is unavailable.
-      Configure key-based access for {{ kubernetes_proxmox_gpu.host_user | default('root') }} to re-enable this step.
+      Skipping GPU passthrough management because SSH access failed for:
+      {{ kubernetes_gpu_passthrough_ssh_failed_hosts | join(', ') }}.
+      Configure key-based SSH access for {{ (kubernetes_proxmox_gpu | default({})).host_user | default('root') }}
+      before running GPU passthrough automation.
   delegate_to: localhost
   run_once: true
   when:
-    - kubernetes_proxmox_gpu.enabled | bool
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
-    - not (kubernetes_gpu_passthrough_manage_enabled | default(false))
+    - kubernetes_gpu_passthrough_requested | bool
+    - not (kubernetes_gpu_passthrough_manage_enabled | default(false) | bool)
 
-- name: Read dedicated GPU worker VM config from Proxmox
-  ansible.builtin.command:
-    argv:
-      - qm
-      - config
-      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
-  become: true
-  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
+- name: Configure GPU passthrough mappings on GPU worker VMs
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    vmid="{{ item.vmid }}"
+    vm_name="{{ item.name }}"
+
+    current_config="$(ssh \
+      -o ConnectTimeout=5 \
+      -o BatchMode=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      "{{ ((kubernetes_proxmox_gpu | default({})).host_user | default('root')) }}@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] | default(item.target_node) }}" \
+      "/usr/sbin/qm config ${vmid}" 2>/dev/null || true)"
+
+    needs_update="false"
+
+    if ! printf '%s\n' "${current_config}" | grep -Fxq "machine: q35"; then
+      needs_update="true"
+    fi
+
+    {% for device in item.gpu_passthrough_devices %}
+    if ! printf '%s\n' "${current_config}" | grep -Fxq "hostpci{{ loop.index0 }}: mapping={{ device }},pcie=1"; then
+      needs_update="true"
+    fi
+    {% endfor %}
+
+    if [ "${needs_update}" = "true" ]; then
+      ssh \
+        -o ConnectTimeout=5 \
+        -o BatchMode=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        "{{ ((kubernetes_proxmox_gpu | default({})).host_user | default('root')) }}@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] | default(item.target_node) }}" \
+        '/usr/sbin/qm set "{{ item.vmid }}" --machine q35{% for device in item.gpu_passthrough_devices %} --hostpci{{ loop.index0 }} "mapping={{ device }},pcie=1"{% endfor %}'
+
+      echo "GPU_PASSTHROUGH_CHANGED ${vm_name} ${vmid}"
+    else
+      echo "GPU_PASSTHROUGH_UNCHANGED ${vm_name} ${vmid}"
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ kubernetes_gpu_passthrough_nodes }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  delegate_to: localhost
   run_once: true
-  changed_when: false
-  register: kubernetes_gpu_vm_config
+  changed_when: "'GPU_PASSTHROUGH_CHANGED' in kubernetes_gpu_passthrough_config.stdout"
+  register: kubernetes_gpu_passthrough_config
   when:
-    - kubernetes_gpu_passthrough_manage_enabled | default(false)
+    - kubernetes_gpu_passthrough_manage_enabled | default(false) | bool
     - not kubernetes_operation.plan_only | bool
     - not kubernetes_operation.destroy | bool
 
-- name: Determine whether dedicated GPU worker passthrough mappings need update
+- name: Build list of GPU worker VMs requiring restart
   ansible.builtin.set_fact:
-    kubernetes_gpu_passthrough_needs_update: >-
+    kubernetes_gpu_passthrough_restart_nodes: >-
       {{
-        ('hostpci0: mapping=' ~ kubernetes_proxmox_gpu.devices[0] ~ ',pcie=1') not in (kubernetes_gpu_vm_config.stdout | default(''))
-        or ('hostpci1: mapping=' ~ kubernetes_proxmox_gpu.devices[1] ~ ',pcie=1') not in (kubernetes_gpu_vm_config.stdout | default(''))
-        or 'machine: q35' not in (kubernetes_gpu_vm_config.stdout | default(''))
+        kubernetes_gpu_passthrough_config.results
+        | default([])
+        | selectattr('changed', 'equalto', true)
+        | map(attribute='item')
+        | list
       }}
   delegate_to: localhost
   run_once: true
   when:
-    - kubernetes_gpu_passthrough_manage_enabled | default(false)
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
+    - kubernetes_gpu_passthrough_manage_enabled | default(false) | bool
+    - kubernetes_gpu_passthrough_config is defined
 
-- name: Configure GPU passthrough on dedicated worker VM
-  ansible.builtin.command:
-    argv:
-      - qm
-      - set
-      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
-      - --machine
-      - q35
-      - --hostpci0
-      - "mapping={{ kubernetes_proxmox_gpu.devices[0] }},pcie=1"
-      - --hostpci1
-      - "mapping={{ kubernetes_proxmox_gpu.devices[1] }},pcie=1"
-  become: true
-  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
-  run_once: true
-  changed_when: true
-  register: kubernetes_gpu_passthrough_config
-  when:
-    - kubernetes_gpu_passthrough_manage_enabled | default(false)
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
-    - kubernetes_gpu_passthrough_needs_update | default(false)
+- name: Read GPU worker VM power state after passthrough update
+  ansible.builtin.shell: |
+    set -euo pipefail
 
-- name: Read dedicated GPU worker VM power state from Proxmox
-  ansible.builtin.command:
-    argv:
-      - qm
-      - status
-      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
-  become: true
-  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
+    ssh \
+      -o ConnectTimeout=5 \
+      -o BatchMode=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      "{{ ((kubernetes_proxmox_gpu | default({})).host_user | default('root')) }}@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] | default(item.target_node) }}" \
+      "/usr/sbin/qm status {{ item.vmid }}"
+  args:
+    executable: /bin/bash
+  loop: "{{ kubernetes_gpu_passthrough_restart_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  delegate_to: localhost
   run_once: true
   changed_when: false
   register: kubernetes_gpu_vm_status
   when:
-    - kubernetes_gpu_passthrough_manage_enabled | default(false)
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
-    - kubernetes_gpu_passthrough_needs_update | default(false)
+    - kubernetes_gpu_passthrough_manage_enabled | default(false) | bool
+    - kubernetes_gpu_passthrough_restart_nodes | default([]) | length > 0
 
-- name: Stop dedicated GPU worker VM after passthrough update
-  ansible.builtin.command:
-    argv:
-      - qm
-      - stop
-      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
-  become: true
-  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
+- name: Build list of running GPU worker VMs requiring restart
+  ansible.builtin.set_fact:
+    kubernetes_gpu_passthrough_running_restart_nodes: >-
+      {{
+        kubernetes_gpu_vm_status.results
+        | default([])
+        | selectattr('stdout', 'search', 'status: running')
+        | map(attribute='item')
+        | list
+      }}
+  delegate_to: localhost
+  run_once: true
+  when:
+    - kubernetes_gpu_passthrough_manage_enabled | default(false) | bool
+    - kubernetes_gpu_vm_status is defined
+
+- name: Gracefully stop running GPU worker VMs after passthrough update
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    ssh \
+      -o ConnectTimeout=5 \
+      -o BatchMode=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      "{{ ((kubernetes_proxmox_gpu | default({})).host_user | default('root')) }}@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] | default(item.target_node) }}" \
+      'timeout 90 /usr/sbin/qm shutdown "{{ item.vmid }}" --timeout 60 || /usr/sbin/qm stop "{{ item.vmid }}"'
+  args:
+    executable: /bin/bash
+  loop: "{{ kubernetes_gpu_passthrough_running_restart_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  delegate_to: localhost
   run_once: true
   changed_when: true
   failed_when: false
   when:
-    - kubernetes_gpu_passthrough_manage_enabled | default(false)
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
-    - kubernetes_gpu_passthrough_needs_update | default(false)
-    - kubernetes_gpu_vm_status.stdout is defined
-    - "'status: running' in kubernetes_gpu_vm_status.stdout"
+    - kubernetes_gpu_passthrough_manage_enabled | default(false) | bool
+    - kubernetes_gpu_passthrough_running_restart_nodes | default([]) | length > 0
 
-- name: Wait for dedicated GPU worker VM to stop after passthrough update
-  ansible.builtin.command:
-    argv:
-      - qm
-      - status
-      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
-  become: true
-  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
+- name: Wait for GPU worker VMs to stop after passthrough update
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    ssh \
+      -o ConnectTimeout=5 \
+      -o BatchMode=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      "{{ ((kubernetes_proxmox_gpu | default({})).host_user | default('root')) }}@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] | default(item.target_node) }}" \
+      "/usr/sbin/qm status {{ item.vmid }}"
+  args:
+    executable: /bin/bash
+  loop: "{{ kubernetes_gpu_passthrough_running_restart_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  delegate_to: localhost
   run_once: true
   changed_when: false
   register: kubernetes_gpu_vm_stopped
-  retries: 24
+  retries: 30
   delay: 5
   until: "'status: stopped' in kubernetes_gpu_vm_stopped.stdout"
   when:
-    - kubernetes_gpu_passthrough_manage_enabled | default(false)
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
-    - kubernetes_gpu_passthrough_needs_update | default(false)
+    - kubernetes_gpu_passthrough_manage_enabled | default(false) | bool
+    - kubernetes_gpu_passthrough_running_restart_nodes | default([]) | length > 0
 
-- name: Start dedicated GPU worker VM after passthrough update
-  ansible.builtin.command:
-    argv:
-      - qm
-      - start
-      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
-  become: true
-  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
+- name: Start GPU worker VMs after passthrough update
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    ssh \
+      -o ConnectTimeout=5 \
+      -o BatchMode=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      "{{ ((kubernetes_proxmox_gpu | default({})).host_user | default('root')) }}@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] | default(item.target_node) }}" \
+      "/usr/sbin/qm start {{ item.vmid }}"
+  args:
+    executable: /bin/bash
+  loop: "{{ kubernetes_gpu_passthrough_running_restart_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  delegate_to: localhost
   run_once: true
   changed_when: true
   when:
-    - kubernetes_gpu_passthrough_manage_enabled | default(false)
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
-    - kubernetes_gpu_passthrough_needs_update | default(false)
+    - kubernetes_gpu_passthrough_manage_enabled | default(false) | bool
+    - kubernetes_gpu_passthrough_running_restart_nodes | default([]) | length > 0
 
-- name: Wait for dedicated GPU worker VM to start after passthrough update
-  ansible.builtin.command:
-    argv:
-      - qm
-      - status
-      - "{{ kubernetes_proxmox_gpu.vmid | string }}"
-  become: true
-  delegate_to: "{{ kubernetes_proxmox.node_ssh_hosts[kubernetes_proxmox_gpu.host] | default(kubernetes_proxmox_gpu.host) }}"
+- name: Wait for GPU worker VMs to start after passthrough update
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    ssh \
+      -o ConnectTimeout=5 \
+      -o BatchMode=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      "{{ ((kubernetes_proxmox_gpu | default({})).host_user | default('root')) }}@{{ kubernetes_proxmox.node_ssh_hosts[item.target_node] | default(item.target_node) }}" \
+      "/usr/sbin/qm status {{ item.vmid }}"
+  args:
+    executable: /bin/bash
+  loop: "{{ kubernetes_gpu_passthrough_running_restart_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}@{{ item.target_node }}"
+  delegate_to: localhost
   run_once: true
   changed_when: false
   register: kubernetes_gpu_vm_started
-  retries: 24
+  retries: 30
   delay: 5
   until: "'status: running' in kubernetes_gpu_vm_started.stdout"
   when:
-    - kubernetes_proxmox_gpu.enabled | bool
-    - not kubernetes_operation.plan_only | bool
-    - not kubernetes_operation.destroy | bool
-    - kubernetes_gpu_passthrough_needs_update | default(false)
+    - kubernetes_gpu_passthrough_manage_enabled | default(false) | bool
+    - kubernetes_gpu_passthrough_running_restart_nodes | default([]) | length > 0

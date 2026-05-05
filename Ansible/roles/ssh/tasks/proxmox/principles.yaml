@@ -1,66 +1,564 @@
-# Ansible/roles/ssh/tasks/proxmox/principals.yaml
+---
+# =============================================================================
+# SSH Role - Proxmox Certificate Principals
+# -----------------------------------------------------------------------------
+# File:
+#   Ansible/roles/ssh/tasks/proxmox/principals.yaml
 #
-# Enforces SSH certificate principals for Proxmox nodes.
-# This task file is intentionally strict and explicit to avoid silent
-# authorization failures with OpenSSH CA-based auth.
+# Purpose:
+#   Enforces OpenSSH AuthorizedPrincipalsFile entries for Proxmox nodes.
+#
+# Security model:
+#   - TrustedUserCAKeys verifies the certificate signing CA.
+#   - AuthorizedPrincipalsFile controls which certificate principals may log in
+#     as each local account.
+#   - This file keeps privileged account principal mapping explicit and
+#     deterministic.
+#
+# Notes:
+#   - The filename should be principals.yaml, not principles.yaml, unless you
+#     intentionally named it that way.
+#   - Supports both shared_certs and legacy shared-certs.
+#   - Defaults to managing root and breakglass.
+#   - Validates formatting and effective sshd configuration.
+# =============================================================================
 
-- name: Set AuthorizedPrincipalsFile base directory
-  set_fact:
-    ssh_authorized_principals_dir: "/etc/ssh/auth_principals"
+# -----------------------------------------------------------------------------
+# Normalize inputs
+# -----------------------------------------------------------------------------
 
-- name: Ensure AuthorizedPrincipalsFile directory exists
-  file:
-    path: "{{ ssh_authorized_principals_dir }}"
+- name: SSH | Proxmox Principals | Normalize variables
+  ansible.builtin.set_fact:
+    proxmox_principals_users_effective: "{{ ssh_role_users | default(users | default([])) }}"
+    proxmox_principals_map_effective: "{{ ssh_principals | default(ssh.principals |
+      default({}) if ssh is defined else {}) }}"
+    proxmox_principals_authorized_file_pattern: >-
+      {{
+        ssh_server_authorized_principals_file
+        | default(
+            ssh.server.authorized_principals_file
+            | default('/etc/ssh/auth_principals/%u')
+            if ssh is defined and ssh.server is defined
+            else '/etc/ssh/auth_principals/%u'
+          )
+      }}
+    proxmox_principals_default_targets:
+      - root
+      - breakglass
+    proxmox_principals_extra_effective: "{{ ssh_proxmox_extra_authorized_principals | default({}) }}"
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+
+- name: SSH | Proxmox Principals | Resolve AuthorizedPrincipalsFile directory
+  ansible.builtin.set_fact:
+    proxmox_principals_authorized_dir: "{{ proxmox_principals_authorized_file_pattern | dirname }}"
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+
+# -----------------------------------------------------------------------------
+# Validate inputs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox Principals | Validate AuthorizedPrincipalsFile settings
+  ansible.builtin.assert:
+    that:
+      - proxmox_principals_authorized_file_pattern is string
+      - proxmox_principals_authorized_file_pattern is match('^/')
+      - "'%u' in proxmox_principals_authorized_file_pattern"
+      - proxmox_principals_authorized_dir is string
+      - proxmox_principals_authorized_dir is match('^/')
+      - proxmox_principals_users_effective is sequence
+      - proxmox_principals_users_effective is not string
+      - proxmox_principals_users_effective is not mapping
+      - proxmox_principals_map_effective is mapping
+      - proxmox_principals_extra_effective is mapping
+    fail_msg: >-
+      Invalid Proxmox AuthorizedPrincipalsFile configuration. Expected an
+      absolute path containing %u, such as /etc/ssh/auth_principals/%u.
+    success_msg: "Proxmox AuthorizedPrincipalsFile settings are valid."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-validate
+
+- name: SSH | Proxmox Principals | Validate SSH user entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.ssh_principals is not defined or item.ssh_principals is sequence
+      - item.ssh_principals is not defined or item.ssh_principals is not string
+      - item.ssh_principals is not defined or item.ssh_principals is not mapping
+      - item.shared_certs is not defined or item.shared_certs is sequence
+      - item.shared_certs is not defined or item.shared_certs is not string
+      - item.shared_certs is not defined or item.shared_certs is not mapping
+      - item['shared-certs'] is not defined or item['shared-certs'] is sequence
+      - item['shared-certs'] is not defined or item['shared-certs'] is not string
+      - item['shared-certs'] is not defined or item['shared-certs'] is not
+        mapping
+    fail_msg: "Invalid SSH user entry for Proxmox principals: {{ item.name |
+      default('undefined-user') }}"
+  loop: "{{ proxmox_principals_users_effective }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-validate
+
+# -----------------------------------------------------------------------------
+# Build target account list
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox Principals | Build managed principal target accounts
+  ansible.builtin.set_fact:
+    proxmox_principals_targets: >-
+      {%- set targets = [] -%}
+
+      {%- for target in ssh_proxmox_principal_targets |
+      default(proxmox_principals_default_targets) -%}
+        {%- if target | string | trim | length > 0 -%}
+          {%- set _ = targets.append(target | string | trim) -%}
+        {%- endif -%}
+      {%- endfor -%}
+
+      {%- for user in proxmox_principals_users_effective -%}
+        {%- for target in user.shared_certs | default([]) -%}
+          {%- if target | string | trim | length > 0 -%}
+            {%- set _ = targets.append(target | string | trim) -%}
+          {%- endif -%}
+        {%- endfor -%}
+
+        {%- for target in user['shared-certs'] | default([]) -%}
+          {%- if target | string | trim | length > 0 -%}
+            {%- set _ = targets.append(target | string | trim) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+
+      {{ targets | unique | sort | list }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+
+- name: SSH | Proxmox Principals | Validate managed target account names
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | length > 0
+      - item is match('^[a-z_][a-z0-9_-]*[$]?$')
+    fail_msg: "Invalid Proxmox AuthorizedPrincipalsFile target account: {{ item }}"
+  loop: "{{ proxmox_principals_targets }}"
+  loop_control:
+    label: "{{ item }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-validate
+
+# -----------------------------------------------------------------------------
+# Build principal render jobs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox Principals | Build principal render jobs
+  ansible.builtin.set_fact:
+    proxmox_principals_jobs: >-
+      {%- set jobs = [] -%}
+
+      {%- for target in proxmox_principals_targets -%}
+        {%- set target_user_def = (
+              proxmox_principals_users_effective
+              | selectattr('name', 'equalto', target)
+              | list
+              | first
+              | default({})
+            )
+        -%}
+
+        {%- set target_mapped_principals = proxmox_principals_map_effective[target] | default([]) -%}
+        {%- set target_user_principals = target_user_def.ssh_principals | default([]) -%}
+        {%- set principals = [] -%}
+
+        {%- if target_mapped_principals | length > 0 -%}
+          {%- for principal in target_mapped_principals -%}
+            {%- set _ = principals.append(principal | string | trim) -%}
+          {%- endfor -%}
+        {%- elif target_user_principals | length > 0 -%}
+          {%- for principal in target_user_principals -%}
+            {%- set _ = principals.append(principal | string | trim) -%}
+          {%- endfor -%}
+        {%- else -%}
+          {%- set _ = principals.append(target) -%}
+        {%- endif -%}
+
+        {%- for user in proxmox_principals_users_effective -%}
+          {%- set user_state = user.state | default('present') -%}
+          {%- set manage_ssh = user.manage_ssh | default(users_default_manage_ssh | default(true)) -%}
+          {%- set shared_targets = (user.shared_certs | default([])) + (user['shared-certs'] | default([])) -%}
+
+          {%- if user_state == 'present' and manage_ssh | bool and target in shared_targets -%}
+            {%- set mapped_principals = proxmox_principals_map_effective[user.name] | default([]) -%}
+            {%- set user_principals = user.ssh_principals | default([]) -%}
+
+            {%- if mapped_principals | length > 0 -%}
+              {%- for principal in mapped_principals -%}
+                {%- set _ = principals.append(principal | string | trim) -%}
+              {%- endfor -%}
+            {%- elif user_principals | length > 0 -%}
+              {%- for principal in user_principals -%}
+                {%- set _ = principals.append(principal | string | trim) -%}
+              {%- endfor -%}
+            {%- else -%}
+              {%- set _ = principals.append(user.name) -%}
+            {%- endif -%}
+          {%- endif -%}
+        {%- endfor -%}
+
+        {%- for principal in proxmox_principals_extra_effective[target] | default([]) -%}
+          {%- set _ = principals.append(principal | string | trim) -%}
+        {%- endfor -%}
+
+        {%- set _ = jobs.append({
+          'target': target,
+          'path': proxmox_principals_authorized_file_pattern | replace('%u', target),
+          'principals': principals | reject('equalto', '') | unique | sort | list
+        }) -%}
+      {%- endfor -%}
+
+      {{ jobs }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+
+- name: SSH | Proxmox Principals | Validate principal render jobs
+  ansible.builtin.assert:
+    that:
+      - item.target is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.path is string
+      - item.path is match('^/')
+      - item.path.startswith(proxmox_principals_authorized_dir ~ '/')
+      - item.principals is sequence
+      - item.principals is not string
+      - item.principals is not mapping
+      - item.principals | length > 0
+    fail_msg: "Invalid Proxmox principal render job: {{ item }}"
+  loop: "{{ proxmox_principals_jobs }}"
+  loop_control:
+    label: "{{ item.target }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-validate
+
+- name: SSH | Proxmox Principals | Validate principal values
+  ansible.builtin.assert:
+    that:
+      - principal is string
+      - principal | length > 0
+      - principal is not search('\\s')
+    fail_msg: "Invalid SSH certificate principal for {{ item.0.target }}: {{
+      principal }}"
+  loop: "{{ proxmox_principals_jobs | subelements('principals') }}"
+  loop_control:
+    label: "{{ item.0.target }} -> {{ item.1 }}"
+  vars:
+    principal: "{{ item.1 }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-validate
+
+# -----------------------------------------------------------------------------
+# Ensure directory exists
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox Principals | Ensure AuthorizedPrincipalsFile directory exists
+  ansible.builtin.file:
+    path: "{{ proxmox_principals_authorized_dir }}"
     state: directory
     owner: root
     group: root
-    mode: "0755"
+    mode: "{{ ssh_authorized_principals_dir_mode | default('0755') }}"
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
 
-- name: Initialize root allowed principals (default to ['root'])
-  set_fact:
-    ssh_root_principals: "{{ ssh_root_principals | default(['root']) }}"
+# -----------------------------------------------------------------------------
+# Symlink safety
+# -----------------------------------------------------------------------------
 
-- name: Normalize root allowed principals
-  set_fact:
-    ssh_root_principals: "{{ ssh_root_principals | map('trim') | list }}"
+- name: SSH | Proxmox Principals | Stat principal files
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop: "{{ proxmox_principals_jobs }}"
+  loop_control:
+    label: "{{ item.target }}"
+  register: proxmox_principals_file_stats
+  changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-validate
 
-- name: Deploy root AuthorizedPrincipals file
-  copy:
-    dest: "{{ ssh_authorized_principals_dir }}/root"
+- name: SSH | Proxmox Principals | Refuse symlinked principal files
+  ansible.builtin.fail:
+    msg: >-
+      AuthorizedPrincipalsFile for {{ item.item.target }} is a symlink: {{
+      item.item.path }}. Refusing to overwrite symlinked principal file.
+  loop: "{{ proxmox_principals_file_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.target }}"
+  when: item.stat.islnk | default(false) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-validate
+
+# -----------------------------------------------------------------------------
+# Render principal files
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox Principals | Deploy AuthorizedPrincipalsFile entries
+  ansible.builtin.copy:
+    dest: "{{ item.path }}"
     owner: root
     group: root
-    mode: "0644"
+    mode: "{{ ssh_authorized_principals_file_mode | default('0644') }}"
     content: |
-      {% for principal in ssh_root_principals %}
+      # Managed by Ansible - ssh role
+      # Target account: {{ item.target }}
+      {% for principal in item.principals %}
       {{ principal }}
       {% endfor %}
+  loop: "{{ proxmox_principals_jobs }}"
+  loop_control:
+    label: "{{ item.target }}"
+  register: proxmox_principals_copy_results
+  notify: Restart sshd
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
 
-- name: Assert AuthorizedPrincipalsFile contains no whitespace or invalid entries
-  command: sed -n 'l' {{ ssh_authorized_principals_dir }}/root
-  register: principals_sanity
+# -----------------------------------------------------------------------------
+# Formatting validation
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox Principals | Read rendered principal files
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ proxmox_principals_jobs }}"
+  loop_control:
+    label: "{{ item.target }}"
+  register: proxmox_principals_rendered_files
   changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-verify
 
-- name: Fail if AuthorizedPrincipalsFile contains invalid formatting
-  fail:
-    msg: |
-      Invalid AuthorizedPrincipalsFile formatting detected.
-      Each principal must be on its own line with no whitespace.
-      Current contents:
-      {{ principals_sanity.stdout_lines }}
-  when: principals_sanity.stdout is search('[ \t]+$')
-
-- name: Validate sshd is configured to use correct AuthorizedPrincipalsFile path
-  command: sshd -T
-  register: sshd_effective_config
-  changed_when: false
-
-- name: Assert sshd AuthorizedPrincipalsFile path is correct
-  assert:
+- name: SSH | Proxmox Principals | Assert rendered principal files contain
+    expected principals only
+  ansible.builtin.assert:
     that:
-      - "'authorizedprincipalsfile {{ ssh_authorized_principals_dir }}/%u' in sshd_effective_config.stdout"
+      - item.content is defined
+      - >-
+        (
+          item.content
+          | b64decode
+          | split('\n')
+          | map('trim')
+          | reject('equalto', '')
+          | reject('match', '^#')
+          | list
+          | difference(item.item.principals)
+          | length
+        ) == 0
+      - >-
+        (
+          item.item.principals
+          | difference(
+              item.content
+              | b64decode
+              | split('\n')
+              | map('trim')
+              | reject('equalto', '')
+              | reject('match', '^#')
+              | list
+            )
+          | length
+        ) == 0
+    fail_msg: >-
+      AuthorizedPrincipalsFile for {{ item.item.target }} does not exactly match
+      expected principals: {{ item.item.principals | join(', ') }}.
+    success_msg: "AuthorizedPrincipalsFile for {{ item.item.target }} matches
+      expected principals."
+  loop: "{{ proxmox_principals_rendered_files.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.target }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-verify
+
+- name: SSH | Proxmox Principals | Check for trailing whitespace in principal files
+  ansible.builtin.command:
+    argv:
+      - awk
+      - "/[ \\t]+$/ { bad=1 } END { exit bad }"
+      - "{{ item.path }}"
+  loop: "{{ proxmox_principals_jobs }}"
+  loop_control:
+    label: "{{ item.target }}"
+  register: proxmox_principals_whitespace_check
+  changed_when: false
+  failed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-verify
+
+- name: SSH | Proxmox Principals | Fail when principal files contain trailing
+    whitespace
+  ansible.builtin.fail:
+    msg: >-
+      Invalid trailing whitespace detected in AuthorizedPrincipalsFile for {{
+      item.item.target }}: {{ item.item.path }}. Each principal must be on its
+      own line without trailing spaces or tabs.
+  loop: "{{ proxmox_principals_whitespace_check.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.target }}"
+  when: item.rc | default(0) != 0
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-verify
+
+# -----------------------------------------------------------------------------
+# sshd effective configuration validation
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox Principals | Validate sshd configuration syntax
+  ansible.builtin.command:
+    cmd: "sshd -t -f {{ ssh_sshd_config_path | default('/etc/ssh/sshd_config') }}"
+  register: proxmox_principals_sshd_syntax
+  changed_when: false
+  become: true
+  when: ssh_proxmox_validate_sshd_after_principals | default(true) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-verify
+
+- name: SSH | Proxmox Principals | Read effective sshd configuration
+  ansible.builtin.command:
+    cmd: "sshd -T -f {{ ssh_sshd_config_path | default('/etc/ssh/sshd_config') }}"
+  register: proxmox_principals_sshd_effective_config
+  changed_when: false
+  become: true
+  when: ssh_proxmox_validate_sshd_after_principals | default(true) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-verify
+
+- name: SSH | Proxmox Principals | Assert sshd uses expected
+    AuthorizedPrincipalsFile path
+  ansible.builtin.assert:
+    that:
+      - >-
+        'authorizedprincipalsfile ' ~
+        (proxmox_principals_authorized_file_pattern | lower) in
+        (proxmox_principals_sshd_effective_config.stdout | lower)
     fail_msg: |
-      sshd is NOT using the expected AuthorizedPrincipalsFile path.
-      Expected: {{ ssh_authorized_principals_dir }}/%u
-      Actual sshd -T output:
-      {{ sshd_effective_config.stdout }}
-    success_msg: "AuthorizedPrincipalsFile path is correctly configured."
+      sshd is not using the expected AuthorizedPrincipalsFile path.
+
+      Expected:
+        authorizedprincipalsfile {{ proxmox_principals_authorized_file_pattern | lower }}
+
+      Effective matching directives:
+      {{
+        (
+          proxmox_principals_sshd_effective_config.stdout_lines
+          | select('match', '^authorizedprincipalsfile\\s')
+          | list
+        )
+        | to_nice_yaml
+      }}
+    success_msg: "sshd AuthorizedPrincipalsFile path is correctly configured."
+  when: ssh_proxmox_validate_sshd_after_principals | default(true) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-principals-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox Principals | Show principal configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "Proxmox SSH certificate principals are configured."
+      - "AuthorizedPrincipalsFile pattern: {{
+        proxmox_principals_authorized_file_pattern }}"
+      - "Directory: {{ proxmox_principals_authorized_dir }}"
+      - >-
+        Targets: {{
+          proxmox_principals_jobs
+          | map(attribute='target')
+          | list
+          | join(', ')
+        }}
+      - >-
+        Changed: {{
+          proxmox_principals_copy_results.results
+          | default([])
+          | selectattr('changed', 'equalto', true)
+          | map(attribute='item.target')
+          | list
+          | join(', ')
+          if proxmox_principals_copy_results is defined
+          else 'none'
+        }}
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-principals
+    - ssh-summary

@@ -1,19 +1,107 @@
 # =============================================================================
 # SSH Known Hosts File
-# =============================================================================
-# Ansible managed - /etc/ssh/ssh_known_hosts
-# Generated: {{ ansible_date_time.iso8601 }}
-# Host: {{ inventory_hostname }}
+# -----------------------------------------------------------------------------
+# Managed by Ansible - ssh role
 #
-# This file contains explicit SSH host key entries for all hosts in the
-# infrastructure. It complements the CA-based trust model defined in user
-# ~/.ssh/known_hosts and provides fallback host key verification.
+# File:
+#   /etc/ssh/ssh_known_hosts
 #
-# Format:
-#   - Collected via ssh-keyscan from all inventory hosts
-#   - Includes ed25519 (preferred), RSA, and ECDSA keys
-#   - Works alongside @cert-authority entries in user known_hosts
+# Purpose:
+#   Provides system-wide explicit SSH host key trust for managed infrastructure
+#   hosts.
 #
+# Security model:
+#   - CA-based host trust should remain the preferred model where host
+#     certificates are deployed.
+#   - Explicit host keys provide a deterministic fallback for bootstrap,
+#     recovery, legacy clients, and hosts that do not yet have host certificates.
+#
+# Notes:
+#   - Do not edit manually; changes will be overwritten by Ansible.
+#   - Host keys should be collected with ssh-keyscan or an equivalent controlled
+#     collection task.
+#   - Prefer ed25519 host keys where available.
+#   - Keep this file free of private key material.
 # =============================================================================
 
-{{ ssh__collected_hostkeys | default('# WARNING: No host keys available') }}
+# -----------------------------------------------------------------------------
+# Generation metadata
+# -----------------------------------------------------------------------------
+
+# inventory_host={{ inventory_hostname }}
+# generated_at={{ ansible_date_time.iso8601 | default('unknown') }}
+# managed_by=ansible
+# role=ssh
+
+# -----------------------------------------------------------------------------
+# Explicit known host entries
+# -----------------------------------------------------------------------------
+# Expected input:
+#   ssh__collected_hostkeys
+#
+# Accepted forms:
+#   - String containing one or more known_hosts lines
+#   - List of known_hosts lines
+#
+# Example line:
+#   host.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...
+# -----------------------------------------------------------------------------
+
+{% set collected_hostkeys = ssh__collected_hostkeys | default([]) %}
+{% set rendered_hostkeys = [] %}
+
+{% if collected_hostkeys is string %}
+{% for hostkey_line in collected_hostkeys.splitlines() %}
+{% set normalized_hostkey_line = hostkey_line | trim %}
+{% if normalized_hostkey_line | length > 0 and not normalized_hostkey_line.startswith('#') %}
+{% if normalized_hostkey_line not in rendered_hostkeys %}
+{% set _ = rendered_hostkeys.append(normalized_hostkey_line) %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% elif collected_hostkeys is sequence %}
+{% for hostkey_line in collected_hostkeys %}
+{% set normalized_hostkey_line = hostkey_line | string | trim %}
+{% if normalized_hostkey_line | length > 0 and not normalized_hostkey_line.startswith('#') %}
+{% if normalized_hostkey_line not in rendered_hostkeys %}
+{% set _ = rendered_hostkeys.append(normalized_hostkey_line) %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if rendered_hostkeys | length > 0 %}
+{% for hostkey_line in rendered_hostkeys | sort %}
+{{ hostkey_line }}
+{% endfor %}
+{% else %}
+# WARNING: No explicit SSH host keys were provided.
+# CA-based trust may still work if @cert-authority entries are deployed.
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Optional system-wide certificate authority trust
+# -----------------------------------------------------------------------------
+# Define ssh_known_hosts_cert_authority_patterns and ssh_ca_pub if you want this
+# file to also include @cert-authority entries.
+# -----------------------------------------------------------------------------
+
+{% set ca_patterns = ssh_known_hosts_cert_authority_patterns | default([]) %}
+{% set ca_public_key = ssh_ca_pub | default('') | trim %}
+
+{% if ca_public_key | length > 0 and ca_patterns | length > 0 %}
+
+# -----------------------------------------------------------------------------
+# Host certificate authority trust
+# -----------------------------------------------------------------------------
+{% for pattern in ca_patterns | unique | sort %}
+@cert-authority {{ pattern }} {{ ca_public_key }}
+{% endfor %}
+{% endif %}
+
+# =============================================================================
+# Summary
+# -----------------------------------------------------------------------------
+# explicit_hostkey_count={{ rendered_hostkeys | length }}
+# ca_pattern_count={{ ca_patterns | length if ca_public_key | length > 0 else 0 }}
+# =============================================================================

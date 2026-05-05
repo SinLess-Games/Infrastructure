@@ -1,85 +1,704 @@
 ---
 # =============================================================================
-# Technitium DNS — Cluster Initialization and Join
+# Technitium DNS - Cluster Initialization and Join
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Initialize the Technitium DNS cluster on the primary node.
+#   - Join secondary nodes to the primary cluster.
+#   - Validate cluster state before and after changes.
+#   - Configure cluster timing options.
+#
+# Design:
+#   - Runs once from the Ansible controller.
+#   - Uses Technitium API tokens created by init_admin.yaml.
+#   - Uses Bearer auth and token form field for compatibility.
+#   - Does not delete or rebuild clusters automatically.
+#   - Treats clusterDomain as immutable after initialization.
+#
+# Companion vars:
+#   - Ansible/group_vars/technitium/cluster.yaml
+#   - Ansible/group_vars/technitium/main.yaml
 # =============================================================================
 
-- name: Technitium | Cluster | Assert primary host is in inventory
-  ansible.builtin.assert:
-    that:
-      - technitium_cluster_primary_host is defined
-      - technitium_cluster_primary_host in groups['dns']
-    fail_msg: "technitium_cluster_primary_host must be in the dns inventory group"
-  when: technitium_cluster_enabled | default(false) | bool
-
-# -----------------------------------------------------------------------------
-# PRIMARY NODE: READ CLUSTER STATE
-# -----------------------------------------------------------------------------
-- name: Technitium | Cluster | Read primary cluster state
-  ansible.builtin.uri:
-    url: "http://{{ technitium_cluster_primary_ip }}:5380/api/admin/cluster/state?token={{ hostvars[technitium_cluster_primary_host].technitium_api_token }}"
-    method: GET
-    return_content: true
-    status_code: 200
-  register: _technitium_cluster_state
-  changed_when: false
+- name: Technitium Cluster | Configure Technitium DNS cluster
   run_once: true
-  delegate_to: "{{ technitium_cluster_primary_host }}"
+  delegate_to: localhost
+  become: false
   when: technitium_cluster_enabled | default(false) | bool
+  block:
+    # -------------------------------------------------------------------------
+    # Preconditions / normalization
+    # -------------------------------------------------------------------------
 
-# -----------------------------------------------------------------------------
-# PRIMARY NODE: Initialize Cluster
-# -----------------------------------------------------------------------------
-- name: Technitium | Cluster | Initialize cluster on primary node
-  ansible.builtin.uri:
-    url: "http://{{ technitium_cluster_primary_ip }}:5380/api/admin/cluster/init"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      token: "{{ hostvars[technitium_cluster_primary_host].technitium_api_token }}"
-      clusterDomain: "{{ technitium_cluster_domain }}"
-      primaryNodeIpAddresses: "{{ technitium_cluster_primary_ip }}"
-    status_code: [200, 400]
-    return_content: true
-  register: _technitium_cluster_init
-  failed_when: >-
-    _technitium_cluster_init.json is defined
-    and _technitium_cluster_init.json.status is defined
-    and _technitium_cluster_init.json.status != 'ok'
-    and 'already' not in (_technitium_cluster_init.json.errorMessage | default('') | lower)
-  run_once: true
-  delegate_to: "{{ technitium_cluster_primary_host }}"
-  when:
-    - technitium_cluster_enabled | default(false) | bool
-    - _technitium_cluster_state.json is defined
-    - not (_technitium_cluster_state.json.response.clusterInitialized | default(false))
+    - name: Technitium Cluster | Build cluster host list
+      ansible.builtin.set_fact:
+        technitium_cluster_inventory_group: >-
+          {{
+            (
+              groups.get('technitium', [])
+              + groups.get('dns', [])
+            )
+            | unique
+          }}
+        technitium_cluster_effective_excluded_nodes: "{{ technitium_cluster_excluded_nodes | default([]) }}"
 
-- name: Technitium | Cluster | Display cluster init result
-  ansible.builtin.debug:
-    msg: "Cluster init: {{ _technitium_cluster_init.json.status | default('skipped') }} - {{ _technitium_cluster_init.json.errorMessage | default('ok') }}"
-  when:
-    - technitium_cluster_enabled | default(false) | bool
-    - _technitium_cluster_init is defined
+    - name: Technitium Cluster | Build managed cluster host list
+      ansible.builtin.set_fact:
+        technitium_cluster_managed_hosts: >-
+          {{
+            technitium_cluster_inventory_group
+            | difference(technitium_cluster_effective_excluded_nodes)
+            | list
+          }}
 
-- name: Technitium | Cluster | Wait 10 seconds for cluster to stabilize
-  ansible.builtin.pause:
-    seconds: 10
-  run_once: true
-  when: technitium_cluster_enabled | default(false) | bool
+    - name: Technitium Cluster | Build secondary host list
+      ansible.builtin.set_fact:
+        technitium_cluster_effective_secondary_hosts: >-
+          {{
+            technitium_cluster_secondary_hosts
+            | default(
+                technitium_cluster_managed_hosts
+                | difference([technitium_cluster_primary_host])
+              )
+            }}
 
-# -----------------------------------------------------------------------------
-# PREPARE HOSTS: Ensure all nodes can resolve each other
-# -----------------------------------------------------------------------------
-- import_tasks: cluster-prepare-hosts.yaml
-  when: technitium_cluster_enabled | default(false) | bool
+    - name: Technitium Cluster | Assert cluster variables are valid
+      ansible.builtin.assert:
+        that:
+          - technitium_cluster_primary_host is defined
+          - technitium_cluster_primary_host | length > 0
+          - technitium_cluster_primary_host in technitium_cluster_managed_hosts
+          - technitium_cluster_primary_ip is defined
+          - technitium_cluster_primary_ip | length > 0
+          - technitium_cluster_domain is defined
+          - technitium_cluster_domain | length > 0
+          - technitium_cluster_effective_secondary_hosts | length >= 1
+          - hostvars[technitium_cluster_primary_host] is defined
+          - hostvars[technitium_cluster_primary_host].technitium_api_token is defined or hostvars[technitium_cluster_primary_host].technitium_session_token is defined
+        fail_msg: >-
+          Technitium cluster variables are incomplete. Ensure the primary host
+          exists in the technitium or dns inventory group, has an API token from
+          init_admin.yaml, and at least one secondary node is available.
+        success_msg: "Technitium cluster variables passed validation."
+      no_log: true
 
-# -----------------------------------------------------------------------------
-# ENSURE ZONES: Create cluster domain zone with A records for all nodes
-# -----------------------------------------------------------------------------
-- import_tasks: cluster-ensure-zones.yaml
-  when: technitium_cluster_enabled | default(false) | bool
+    - name: Technitium Cluster | Assert secondary hosts have required facts
+      ansible.builtin.assert:
+        that:
+          - hostvars[item] is defined
+          - hostvars[item].ansible_host is defined
+          - hostvars[item].ansible_host | length > 0
+          - hostvars[item].technitium_api_token is defined or hostvars[item].technitium_session_token is defined
+        fail_msg: >-
+          Secondary host {{ item }} is missing ansible_host or Technitium API
+          token facts. Ensure init_admin.yaml ran successfully for every
+          secondary node before cluster.yaml.
+        success_msg: "Secondary host {{ item }} has required cluster facts."
+      loop: "{{ technitium_cluster_effective_secondary_hosts }}"
+      loop_control:
+        label: "{{ item }}"
+      no_log: true
 
-# -----------------------------------------------------------------------------
-# JOIN SECONDARY NODES: Join all secondary nodes to primary cluster
-# -----------------------------------------------------------------------------
-- import_tasks: cluster-join-secondary.yaml
-  when: technitium_cluster_enabled | default(false) | bool
+    - name: Technitium Cluster | Normalize cluster API variables
+      ansible.builtin.set_fact:
+        technitium_cluster_http_port_effective: "{{ technitium_http_port | default(5380) | int }}"
+        technitium_cluster_https_port_effective: "{{ technitium_https_port | default(53443) | int }}"
+        technitium_cluster_primary_api_base: >-
+          {{
+            technitium_cluster_primary_admin_url
+            | default('http://' ~ technitium_cluster_primary_ip ~ ':' ~ (technitium_http_port | default(5380) | string) ~ '/')
+            | regex_replace('/+$', '')
+          }}
+        technitium_cluster_primary_https_url: >-
+          {{
+            technitium_cluster_primary_join_url
+            | default(
+                'https://'
+                ~ (technitium_cluster_primary_fqdn | default(technitium_cluster_primary_host ~ '.' ~ technitium_cluster_domain))
+                ~ ':'
+                ~ (technitium_https_port | default(53443) | string)
+                ~ '/'
+              )
+          }}
+        technitium_cluster_primary_token: >-
+          {{
+            hostvars[technitium_cluster_primary_host].technitium_api_token
+            | default(hostvars[technitium_cluster_primary_host].technitium_session_token)
+          }}
+        technitium_cluster_primary_username: >-
+          {{
+            hostvars[technitium_cluster_primary_host].technitium_admin_username_effective
+            | default(hostvars[technitium_cluster_primary_host].technitium_admin_username | default(hostvars[technitium_cluster_primary_host].technitium_admin_user | default('admin')))
+          }}
+        technitium_cluster_primary_password: >-
+          {{
+            hostvars[technitium_cluster_primary_host].technitium_actual_password
+            | default(hostvars[technitium_cluster_primary_host].technitium_admin_password | default(technitium_actual_password | default('')))
+          }}
+        technitium_cluster_ignore_certificate_errors_effective: >-
+          {{
+            technitium_cluster_ignore_certificate_errors
+            | default(not (technitium_cluster_validate_certs | default(false) | bool))
+            | bool
+          }}
+      no_log: true
+
+    - name: Technitium Cluster | Assert primary credentials are available
+      ansible.builtin.assert:
+        that:
+          - technitium_cluster_primary_token | length > 0
+          - technitium_cluster_primary_username | length > 0
+          - technitium_cluster_primary_password | length > 0
+        fail_msg: >-
+          Missing primary Technitium token, username, or actual password.
+          Secondary join requires primary admin credentials.
+        success_msg: "Primary cluster credentials are available."
+      no_log: true
+
+    - name: Technitium Cluster | Build cluster host API map
+      ansible.builtin.set_fact:
+        technitium_cluster_host_api_map: >-
+          {%- set out = {} -%}
+          {%- for h in technitium_cluster_managed_hosts -%}
+            {%- set ip = hostvars[h].ansible_host | default(hostvars[h].technitium_node_ip | default('')) -%}
+            {%- set fqdn = h ~ '.' ~ technitium_cluster_domain -%}
+            {%- set token = hostvars[h].technitium_api_token | default(hostvars[h].technitium_session_token | default('')) -%}
+            {%- set _ = out.update({
+              h: {
+                'host': h,
+                'ip': ip,
+                'fqdn': fqdn,
+                'api_base': 'http://' ~ ip ~ ':' ~ (technitium_cluster_http_port_effective | string),
+                'https_url': 'https://' ~ fqdn ~ ':' ~ (technitium_cluster_https_port_effective | string) ~ '/',
+                'token': token
+              }
+            }) -%}
+          {%- endfor -%}
+          {{ out }}
+      no_log: true
+
+    # -------------------------------------------------------------------------
+    # API readiness
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Cluster | Wait for HTTP API ports on all managed nodes
+      ansible.builtin.wait_for:
+        host: "{{ technitium_cluster_host_api_map[item].ip }}"
+        port: "{{ technitium_cluster_http_port_effective }}"
+        timeout: "{{ technitium_cluster_api_wait_timeout | default(180) | int }}"
+        delay: "{{ technitium_cluster_api_wait_delay | default(2) | int }}"
+        state: started
+        msg: "Timed out waiting for Technitium HTTP API on {{ item }}."
+      loop: "{{ technitium_cluster_managed_hosts }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Technitium Cluster | Confirm HTTP API responds on all managed nodes
+      ansible.builtin.uri:
+        url: "{{ technitium_cluster_host_api_map[item].api_base }}/"
+        method: GET
+        status_code:
+          - 200
+          - 301
+          - 302
+          - 401
+          - 403
+        return_content: false
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_cluster_api_timeout | default(30) | int }}"
+      register: technitium_cluster_api_readiness
+      retries: "{{ technitium_cluster_api_retries | default(5) | int }}"
+      delay: "{{ technitium_cluster_api_delay | default(5) | int }}"
+      until: technitium_cluster_api_readiness.status in [200, 301, 302, 401, 403]
+      loop: "{{ technitium_cluster_managed_hosts }}"
+      loop_control:
+        label: "{{ item }}"
+
+    # -------------------------------------------------------------------------
+    # Read pre-cluster state
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Cluster | Read primary cluster state before init
+      ansible.builtin.uri:
+        url: "{{ technitium_cluster_primary_api_base }}/api/admin/cluster/state"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ technitium_cluster_primary_token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_cluster_primary_token }}"
+          includeServerIpAddresses: "true"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_cluster_api_timeout | default(30) | int }}"
+      register: technitium_cluster_primary_state_before
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Technitium Cluster | Assert primary cluster state was read
+      ansible.builtin.assert:
+        that:
+          - technitium_cluster_primary_state_before.json is defined
+          - technitium_cluster_primary_state_before.json.status == "ok"
+        fail_msg: >-
+          Failed to read Technitium cluster state from primary node
+          {{ technitium_cluster_primary_host }}.
+          Response={{ technitium_cluster_primary_state_before.json.errorMessage | default(technitium_cluster_primary_state_before.content | default('unknown error')) }}.
+        success_msg: "Primary cluster state was read successfully."
+
+    - name: Technitium Cluster | Validate existing cluster domain on primary
+      ansible.builtin.assert:
+        that:
+          - >-
+            not (technitium_cluster_primary_state_before.json.response.clusterInitialized | default(false) | bool)
+            or technitium_cluster_primary_state_before.json.response.clusterDomain | default('') == technitium_cluster_domain
+        fail_msg: >-
+          Primary node is already initialized with a different cluster domain.
+          Existing={{ technitium_cluster_primary_state_before.json.response.clusterDomain | default('unknown') }},
+          desired={{ technitium_cluster_domain }}.
+          Technitium cluster domains cannot be changed safely after initialization.
+        success_msg: "Primary cluster domain is valid."
+
+    # -------------------------------------------------------------------------
+    # Optional pre-cluster DNS Server Domain Name alignment
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Cluster | Ensure DNS server domain is FQDN before clustering
+      ansible.builtin.uri:
+        url: "{{ technitium_cluster_host_api_map[item].api_base }}/api/settings/set"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ technitium_cluster_host_api_map[item].token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_cluster_host_api_map[item].token }}"
+          dnsServerDomain: "{{ technitium_cluster_host_api_map[item].fqdn }}"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_cluster_api_timeout | default(30) | int }}"
+      register: technitium_cluster_node_domain_set
+      failed_when: false
+      changed_when: technitium_cluster_node_domain_set.json.status | default('') == 'ok'
+      loop: "{{ technitium_cluster_managed_hosts }}"
+      loop_control:
+        label: "{{ item }} -> {{ technitium_cluster_host_api_map[item].fqdn }}"
+      no_log: true
+      when: technitium_cluster_manage_node_domain | default(true)
+
+    - name: Technitium Cluster | Assert DNS server domain updates succeeded
+      ansible.builtin.assert:
+        that:
+          - item.json is defined
+          - item.json.status is defined
+          - item.json.status == "ok"
+        fail_msg: >-
+          Failed to set DNS server domain for {{ item.item }}.
+          Response={{ item.json.errorMessage | default(item.content | default('unknown error')) }}.
+      loop: "{{ technitium_cluster_node_domain_set.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: technitium_cluster_manage_node_domain | default(true)
+
+    # -------------------------------------------------------------------------
+    # Initialize primary node
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Cluster | Initialize cluster on primary node
+      ansible.builtin.uri:
+        url: "{{ technitium_cluster_primary_api_base }}/api/admin/cluster/init"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ technitium_cluster_primary_token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_cluster_primary_token }}"
+          clusterDomain: "{{ technitium_cluster_domain }}"
+          primaryNodeIpAddresses: "{{ technitium_cluster_primary_ip_addresses | default([technitium_cluster_primary_ip]) | join(',') }}"
+        status_code:
+          - 200
+          - 400
+          - 409
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_cluster_init_timeout | default(180) | int }}"
+      register: technitium_cluster_primary_init
+      failed_when: false
+      changed_when: technitium_cluster_primary_init.json.status | default('') == 'ok'
+      no_log: true
+      when: not (technitium_cluster_primary_state_before.json.response.clusterInitialized | default(false) | bool)
+
+    - name: Technitium Cluster | Assert primary cluster initialization succeeded
+      ansible.builtin.assert:
+        that:
+          - technitium_cluster_primary_init.json is defined
+          - technitium_cluster_primary_init.json.status is defined
+          - >-
+            technitium_cluster_primary_init.json.status == "ok"
+            or (
+              technitium_cluster_primary_init.json.status == "error"
+              and (
+                (technitium_cluster_primary_init.json.errorMessage | default('')) is search('already', ignorecase=True)
+                or (technitium_cluster_primary_init.json.errorMessage | default('')) is search('initialized', ignorecase=True)
+              )
+            )
+        fail_msg: >-
+          Failed to initialize Technitium cluster on primary node.
+          Response={{ technitium_cluster_primary_init.json.errorMessage | default(technitium_cluster_primary_init.content | default('unknown error')) }}.
+        success_msg: "Technitium primary cluster initialization succeeded or was already initialized."
+      when:
+        - technitium_cluster_primary_init is defined
+        - technitium_cluster_primary_init.skipped is not defined
+
+    - name: Technitium Cluster | Wait for primary HTTPS cluster service after initialization
+      ansible.builtin.wait_for:
+        host: "{{ technitium_cluster_primary_ip }}"
+        port: "{{ technitium_cluster_https_port_effective }}"
+        timeout: "{{ technitium_cluster_https_wait_timeout | default(180) | int }}"
+        delay: "{{ technitium_cluster_https_wait_delay | default(5) | int }}"
+        state: started
+        msg: "Timed out waiting for primary Technitium HTTPS cluster service."
+      when:
+        - technitium_cluster_primary_init is defined
+        - technitium_cluster_primary_init.skipped is not defined
+
+    - name: Technitium Cluster | Pause briefly after primary cluster initialization
+      ansible.builtin.pause:
+        seconds: "{{ technitium_cluster_post_init_delay | default(10) | int }}"
+      when:
+        - technitium_cluster_post_init_delay | default(10) | int > 0
+        - technitium_cluster_primary_init is defined
+        - technitium_cluster_primary_init.skipped is not defined
+
+    # -------------------------------------------------------------------------
+    # Read secondary state
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Cluster | Read secondary cluster state before join
+      ansible.builtin.uri:
+        url: "{{ technitium_cluster_host_api_map[item].api_base }}/api/admin/cluster/state"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ technitium_cluster_host_api_map[item].token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_cluster_host_api_map[item].token }}"
+          includeServerIpAddresses: "true"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_cluster_api_timeout | default(30) | int }}"
+      register: technitium_cluster_secondary_state_before
+      failed_when: false
+      changed_when: false
+      loop: "{{ technitium_cluster_effective_secondary_hosts }}"
+      loop_control:
+        label: "{{ item }}"
+      no_log: true
+
+    - name: Technitium Cluster | Assert secondary cluster states were read
+      ansible.builtin.assert:
+        that:
+          - item.json is defined
+          - item.json.status == "ok"
+        fail_msg: >-
+          Failed to read Technitium cluster state from secondary {{ item.item }}.
+          Response={{ item.json.errorMessage | default(item.content | default('unknown error')) }}.
+      loop: "{{ technitium_cluster_secondary_state_before.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Technitium Cluster | Validate existing secondary cluster domains
+      ansible.builtin.assert:
+        that:
+          - >-
+            not (item.json.response.clusterInitialized | default(false) | bool)
+            or item.json.response.clusterDomain | default('') == technitium_cluster_domain
+        fail_msg: >-
+          Secondary node {{ item.item }} is already initialized with a different
+          cluster domain. Existing={{ item.json.response.clusterDomain | default('unknown') }},
+          desired={{ technitium_cluster_domain }}.
+        success_msg: "Secondary {{ item.item }} cluster domain is valid."
+      loop: "{{ technitium_cluster_secondary_state_before.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # -------------------------------------------------------------------------
+    # Join secondaries
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Cluster | Join secondary nodes to primary cluster
+      ansible.builtin.uri:
+        url: "{{ technitium_cluster_host_api_map[item.item].api_base }}/api/admin/cluster/initJoin"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ technitium_cluster_host_api_map[item.item].token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_cluster_host_api_map[item.item].token }}"
+          secondaryNodeIpAddresses: "{{ technitium_cluster_secondary_ip_addresses[item.item] | default([technitium_cluster_host_api_map[item.item].ip]) | join(',') }}"
+          primaryNodeUrl: "{{ technitium_cluster_primary_https_url }}"
+          primaryNodeIpAddress: "{{ technitium_cluster_primary_join_ip | default(technitium_cluster_primary_ip) }}"
+          ignoreCertificateErrors: "{{ technitium_cluster_ignore_certificate_errors_effective | ternary('true', 'false') }}"
+          primaryNodeUsername: "{{ technitium_cluster_primary_username }}"
+          primaryNodePassword: "{{ technitium_cluster_primary_password }}"
+          primaryNodeTotp: "{{ technitium_cluster_primary_totp | default('') }}"
+        status_code:
+          - 200
+          - 400
+          - 409
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_cluster_join_timeout | default(600) | int }}"
+      register: technitium_cluster_secondary_join
+      failed_when: false
+      changed_when: technitium_cluster_secondary_join.json.status | default('') == 'ok'
+      loop: "{{ technitium_cluster_secondary_state_before.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      no_log: true
+      when:
+        - technitium_cluster_allow_secondary_join | default(true) | bool
+        - not (item.json.response.clusterInitialized | default(false) | bool)
+
+    - name: Technitium Cluster | Assert secondary join calls succeeded
+      ansible.builtin.assert:
+        that:
+          - item.json is defined
+          - item.json.status is defined
+          - >-
+            item.json.status == "ok"
+            or (
+              item.json.status == "error"
+              and (
+                (item.json.errorMessage | default('')) is search('already', ignorecase=True)
+                or (item.json.errorMessage | default('')) is search('initialized', ignorecase=True)
+                or (item.json.errorMessage | default('')) is search('cluster', ignorecase=True)
+              )
+            )
+        fail_msg: >-
+          Secondary node {{ item.item.item | default(item.item) }} failed to join
+          the Technitium cluster.
+          Response={{ item.json.errorMessage | default(item.content | default('unknown error')) }}.
+        success_msg: "Secondary join call succeeded or node was already clustered."
+      loop: "{{ technitium_cluster_secondary_join.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.item | default(item.item) }}"
+      when:
+        - technitium_cluster_secondary_join is defined
+        - item.skipped is not defined
+
+    - name: Technitium Cluster | Pause briefly after secondary joins
+      ansible.builtin.pause:
+        seconds: "{{ technitium_cluster_post_join_delay | default(15) | int }}"
+      when:
+        - technitium_cluster_post_join_delay | default(15) | int > 0
+        - technitium_cluster_secondary_join is defined
+        - technitium_cluster_secondary_join.results | default([]) | selectattr('skipped', 'undefined') | list | length > 0
+
+    # -------------------------------------------------------------------------
+    # Configure primary cluster options
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Cluster | Configure primary cluster timing options
+      ansible.builtin.uri:
+        url: "{{ technitium_cluster_primary_api_base }}/api/admin/cluster/primary/setOptions"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ technitium_cluster_primary_token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_cluster_primary_token }}"
+          heartbeatRefreshIntervalSeconds: "{{ technitium_cluster_heartbeat_refresh_interval_seconds | default(30) | string }}"
+          heartbeatRetryIntervalSeconds: "{{ technitium_cluster_heartbeat_retry_interval_seconds | default(10) | string }}"
+          configRefreshIntervalSeconds: "{{ technitium_cluster_config_refresh_interval_seconds | default(900) | string }}"
+          configRetryIntervalSeconds: "{{ technitium_cluster_config_retry_interval_seconds | default(60) | string }}"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_cluster_api_timeout | default(30) | int }}"
+      register: technitium_cluster_options_set
+      failed_when: false
+      changed_when: false
+      no_log: true
+      when: technitium_cluster_manage_options | default(true)
+
+    - name: Technitium Cluster | Assert cluster timing options were accepted
+      ansible.builtin.assert:
+        that:
+          - technitium_cluster_options_set.json is defined
+          - technitium_cluster_options_set.json.status == "ok"
+        fail_msg: >-
+          Failed to configure Technitium cluster timing options.
+          Response={{ technitium_cluster_options_set.json.errorMessage | default(technitium_cluster_options_set.content | default('unknown error')) }}.
+        success_msg: "Technitium cluster timing options were accepted."
+      when: technitium_cluster_manage_options | default(true)
+
+    # -------------------------------------------------------------------------
+    # Final verification
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Cluster | Read final primary cluster state
+      ansible.builtin.uri:
+        url: "{{ technitium_cluster_primary_api_base }}/api/admin/cluster/state"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ technitium_cluster_primary_token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_cluster_primary_token }}"
+          includeServerIpAddresses: "true"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_cluster_api_timeout | default(30) | int }}"
+      register: technitium_cluster_primary_state_final
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Technitium Cluster | Assert final primary cluster state is valid
+      ansible.builtin.assert:
+        that:
+          - technitium_cluster_primary_state_final.json is defined
+          - technitium_cluster_primary_state_final.json.status == "ok"
+          - technitium_cluster_primary_state_final.json.response.clusterInitialized | default(false) | bool
+          - technitium_cluster_primary_state_final.json.response.clusterDomain == technitium_cluster_domain
+        fail_msg: >-
+          Final Technitium cluster state is invalid on primary node.
+          Response={{ technitium_cluster_primary_state_final.json.errorMessage | default(technitium_cluster_primary_state_final.content | default('unknown error')) }}.
+        success_msg: "Final primary cluster state is valid."
+
+    - name: Technitium Cluster | Build final cluster node list
+      ansible.builtin.set_fact:
+        technitium_cluster_final_nodes: "{{ technitium_cluster_primary_state_final.json.response.nodes | default([]) }}"
+        technitium_cluster_final_node_names: "{{ technitium_cluster_primary_state_final.json.response.nodes | default([]) | map(attribute='name') | list }}"
+        technitium_cluster_expected_node_names: >-
+          {{
+            technitium_cluster_managed_hosts
+            | map('regex_replace', '$', '.' ~ technitium_cluster_domain)
+            | list
+          }}
+
+    - name: Technitium Cluster | Validate expected nodes are present when node-domain management is enabled
+      ansible.builtin.assert:
+        that:
+          - item in technitium_cluster_final_node_names
+        fail_msg: >-
+          Expected cluster node {{ item }} was not found in the primary cluster
+          state. Current nodes={{ technitium_cluster_final_node_names | join(', ') }}.
+        success_msg: "Expected cluster node {{ item }} is present."
+      loop: "{{ technitium_cluster_expected_node_names }}"
+      loop_control:
+        label: "{{ item }}"
+      when: technitium_cluster_manage_node_domain | default(true)
+
+    - name: Technitium Cluster | Validate cluster has expected node count
+      ansible.builtin.assert:
+        that:
+          - technitium_cluster_final_nodes | length >= technitium_cluster_managed_hosts | length
+        fail_msg: >-
+          Cluster has fewer nodes than expected.
+          Expected at least {{ technitium_cluster_managed_hosts | length }},
+          found {{ technitium_cluster_final_nodes | length }}.
+        success_msg: "Cluster node count is valid."
+      when: technitium_cluster_validate_node_count | default(true)
+
+    - name: Technitium Cluster | Read final secondary cluster states
+      ansible.builtin.uri:
+        url: "{{ technitium_cluster_host_api_map[item].api_base }}/api/admin/cluster/state"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ technitium_cluster_host_api_map[item].token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_cluster_host_api_map[item].token }}"
+          includeServerIpAddresses: "true"
+        status_code:
+          - 200
+          - 400
+          - 401
+          - 403
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_cluster_api_timeout | default(30) | int }}"
+      register: technitium_cluster_secondary_state_final
+      failed_when: false
+      changed_when: false
+      loop: "{{ technitium_cluster_effective_secondary_hosts }}"
+      loop_control:
+        label: "{{ item }}"
+      no_log: true
+      when: technitium_cluster_verify_secondaries | default(true)
+
+    - name: Technitium Cluster | Assert final secondary states are clustered
+      ansible.builtin.assert:
+        that:
+          - item.json is defined
+          - item.json.status == "ok"
+          - item.json.response.clusterInitialized | default(false) | bool
+          - item.json.response.clusterDomain == technitium_cluster_domain
+        fail_msg: >-
+          Secondary node {{ item.item }} is not properly joined to the expected
+          Technitium cluster.
+          Response={{ item.json.errorMessage | default(item.content | default('unknown error')) }}.
+        success_msg: "Secondary node {{ item.item }} is joined to the expected cluster."
+      loop: "{{ technitium_cluster_secondary_state_final.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: technitium_cluster_verify_secondaries | default(true)
+
+    # -------------------------------------------------------------------------
+    # Summary
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Cluster | Show cluster summary
+      ansible.builtin.debug:
+        msg:
+          - "Technitium cluster configuration complete."
+          - "Primary host: {{ technitium_cluster_primary_host }}"
+          - "Primary API: {{ technitium_cluster_primary_api_base }}"
+          - "Primary join URL: {{ technitium_cluster_primary_https_url }}"
+          - "Cluster domain: {{ technitium_cluster_domain }}"
+          - "Managed hosts: {{ technitium_cluster_managed_hosts | join(', ') }}"
+          - "Secondary hosts: {{ technitium_cluster_effective_secondary_hosts | join(', ') }}"
+          - "Final cluster nodes: {{ technitium_cluster_final_node_names | join(', ') }}"
+          - "Certificate validation ignored for join: {{ technitium_cluster_ignore_certificate_errors_effective }}"
+
+  rescue:
+    - name: Technitium Cluster | Show cluster failure context
+      ansible.builtin.debug:
+        msg:
+          - "Technitium cluster configuration failed."
+          - "Primary host: {{ technitium_cluster_primary_host | default('undefined') }}"
+          - "Primary IP: {{ technitium_cluster_primary_ip | default('undefined') }}"
+          - "Cluster domain: {{ technitium_cluster_domain | default('undefined') }}"
+          - "Managed hosts: {{ technitium_cluster_managed_hosts | default([]) | join(', ') }}"
+          - "Secondary hosts: {{ technitium_cluster_effective_secondary_hosts | default([]) | join(', ') }}"
+          - "Check Technitium API tokens, HTTPS port 53443 reachability, DNS server domains, firewall rules, and cluster domain immutability."
+
+    - name: Technitium Cluster | Fail cluster configuration
+      ansible.builtin.fail:
+        msg: "Technitium cluster configuration failed."

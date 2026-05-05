@@ -1,151 +1,695 @@
 ---
 # =============================================================================
-# Technitium DNS — Zones + Records
+# Technitium DNS - Zones + Records
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Create authoritative forward and reverse zones.
+#   - Apply declared DNS records from group_vars.
+#   - Support production-ready record types used by local infrastructure:
+#       A, AAAA, NS, CNAME, PTR, MX, TXT, SRV, DNAME, DS, SSHFP, TLSA,
+#       SVCB, HTTPS, URI, CAA, ANAME, FWD, APP, and unknown/rdata records.
+#
+# Design:
+#   - Uses Authorization: Bearer for modern Technitium API behavior.
+#   - Also includes token in form body for backward compatibility.
+#   - Handles multi-value RRsets safely:
+#       * First record for each zone/domain/type uses overwrite=true.
+#       * Additional records for that same RRset use overwrite=false.
+#     This prevents round-robin and multi-value records from being collapsed.
+#   - Supports forward records from:
+#       technitium_dns_zone_records / technitium_domain_records
+#   - Supports PTR records from:
+#       technitium_dns_reverse_zones / technitium_reverse_zones
+#
+# Companion vars:
+#   - Ansible/group_vars/technitium/main.yaml
+#   - Ansible/group_vars/technitium/domains.yaml
+#   - Ansible/group_vars/technitium/domain-records.yaml
+#   - Ansible/group_vars/technitium/reverse-zones.yaml
 # =============================================================================
-
-# -----------------------------------------------------------------------------
-# Normalize URL (avoid accidental //api)
-# -----------------------------------------------------------------------------
-- name: Technitium | Normalize API base URL
-  ansible.builtin.set_fact:
-    _technitium_api_base: "{{ technitium_api_url | regex_replace('/+$', '') }}"
 
 # -----------------------------------------------------------------------------
 # Preconditions
 # -----------------------------------------------------------------------------
-- name: Technitium | Assert required vars exist
+
+- name: Technitium Zones | Assert required variables exist
   ansible.builtin.assert:
     that:
       - technitium_api_url is defined
       - technitium_api_url | length > 0
-      - technitium_api_token is defined
-      - technitium_api_token | length > 0
-      - technitium_dns_zones is defined
-      - technitium_dns_zone_records is defined
+      - technitium_api_token is defined or technitium_session_token is defined
+      - technitium_dns_zones is defined or technitium_domains is defined
     fail_msg: >-
-      Missing required variables. Ensure technitium_api_url, technitium_api_token,
-      technitium_dns_zones, and technitium_dns_zone_records are defined.
+      Missing required Technitium zone variables. Expected technitium_api_url,
+      technitium_api_token or technitium_session_token, and technitium_dns_zones
+      or technitium_domains.
+    success_msg: "Technitium zone variables passed validation."
+  no_log: true
+
+- name: Technitium Zones | Normalize API and source variables
+  ansible.builtin.set_fact:
+    technitium_zones_api_base: "{{ technitium_api_url | regex_replace('/+$', '') }}"
+    technitium_zones_api_token: "{{ technitium_api_token | default(technitium_session_token) }}"
+    technitium_zones_list: "{{ technitium_dns_zones | default(technitium_domains | default([])) }}"
+    technitium_zones_forward_record_map: "{{ technitium_dns_zone_records | default(technitium_domain_records | default({})) }}"
+    technitium_zones_reverse_zone_list: "{{ technitium_dns_reverse_zones | default(technitium_reverse_zones | default([])) }}"
+    technitium_zones_default_ttl: "{{ technitium_record_default_ttl | default(300) }}"
+    technitium_zones_no_log: "{{ technitium_no_log | default(true) }}"
+  no_log: true
+
+- name: Technitium Zones | Assert API token is usable
+  ansible.builtin.assert:
+    that:
+      - technitium_zones_api_token is defined
+      - technitium_zones_api_token | length > 0
+    fail_msg: "Technitium API token is missing or empty."
+    success_msg: "Technitium API token is available."
+  no_log: true
+
+- name: Technitium Zones | Assert zone list is not empty
+  ansible.builtin.assert:
+    that:
+      - technitium_zones_list | length > 0
+    fail_msg: "No Technitium zones were declared."
+    success_msg: "Technitium zone list is present."
 
 # -----------------------------------------------------------------------------
-# Create zones (idempotent-ish; Technitium typically returns 200 with status field)
+# Normalize zones
 # -----------------------------------------------------------------------------
-- name: Technitium | Create DNS zones
+
+- name: Technitium Zones | Build normalized zone jobs
+  ansible.builtin.set_fact:
+    technitium_zone_jobs: >-
+      {%- set out = [] -%}
+      {%- for z in technitium_zones_list | default([]) -%}
+        {%- if z.enabled | default(true) | bool -%}
+          {%- set ztype_raw = z.type | default('Primary') | string -%}
+          {%- set ztype = 'Primary' if ztype_raw | lower == 'primary' else ztype_raw -%}
+          {%- set _ = out.append({
+            'name': z.name,
+            'type': ztype,
+            'zone_role': z.zone_role | default('forward'),
+            'description': z.description | default(''),
+            'environment': z.environment | default(''),
+            'owner': z.owner | default(''),
+            'tags': z.tags | default([])
+          }) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Technitium Zones | Assert normalized zone jobs are valid
+  ansible.builtin.assert:
+    that:
+      - technitium_zone_jobs is defined
+      - technitium_zone_jobs | length > 0
+      - item.name is defined
+      - item.name | length > 0
+      - item.type is defined
+      - item.type | length > 0
+    fail_msg: "Invalid Technitium zone job: {{ item }}"
+  loop: "{{ technitium_zone_jobs }}"
+  loop_control:
+    label: "{{ item.name | default('unknown') }}"
+
+# -----------------------------------------------------------------------------
+# Create zones
+# -----------------------------------------------------------------------------
+
+- name: Technitium Zones | Create authoritative zones
   ansible.builtin.uri:
-    url: "{{ _technitium_api_base }}/api/zones/create"
+    url: "{{ technitium_zones_api_base }}/api/zones/create"
     method: POST
+    headers:
+      Authorization: "Bearer {{ technitium_zones_api_token }}"
     body_format: form-urlencoded
     body:
-      token: "{{ technitium_api_token }}"
+      token: "{{ technitium_zones_api_token }}"
       zone: "{{ item.name }}"
-      type: "{{ item.type | default('Primary') }}"
-    status_code: 200
+      type: "{{ item.type }}"
+    status_code:
+      - 200
+      - 400
+      - 409
     return_content: true
-  register: _technitium_zone_create
-  loop: "{{ technitium_dns_zones }}"
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_zone_create
+  loop: "{{ technitium_zone_jobs }}"
   loop_control:
-    label: "{{ item.name }} ({{ item.type | default('Primary') }})"
-  no_log: "{{ technitium_no_log | default(true) }}"
+    label: "{{ item.name }} ({{ item.type }})"
+  failed_when: false
+  changed_when: >-
+    technitium_zone_create.json.status | default('') == 'ok'
+  no_log: "{{ technitium_zones_no_log | bool }}"
 
-- name: Technitium | Assert zone create calls succeeded (allow already-exists)
+- name: Technitium Zones | Assert zone create calls succeeded or already existed
   ansible.builtin.assert:
     that:
       - item.json is defined
       - item.json.status is defined
-      - item.json.status in ['ok', 'error']
-    fail_msg: "Zone create call returned unexpected response: {{ item.content | default(item) }}"
-  loop: "{{ _technitium_zone_create.results | default([]) }}"
+      - >-
+        item.json.status == 'ok'
+        or (
+          item.json.status == 'error'
+          and (
+            (item.json.errorMessage | default('')) is search('already', ignorecase=True)
+            or (item.json.errorMessage | default('')) is search('exists', ignorecase=True)
+          )
+        )
+    fail_msg: >-
+      Zone create failed for {{ item.item.name }}.
+      Response: {{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+    success_msg: "Zone create call succeeded or zone already exists."
+  loop: "{{ technitium_zone_create.results | default([]) }}"
   loop_control:
     label: "{{ item.item.name }}"
 
 # -----------------------------------------------------------------------------
-# Flatten records map -> list of {zone,domain,type,ttl,value}
-#
-# Expected input shape:
-# technitium_dns_zone_records:
-#   local.sinlessgames.com:
-#     records:
-#       - { name: pxe, ttl: 300, type: A, value: 10.10.10.10 }
+# Enable zones when requested
 # -----------------------------------------------------------------------------
-- name: Technitium | Build flattened record jobs
-  ansible.builtin.set_fact:
-    _technitium_record_jobs: >-
-      {%- set out = [] -%}
-      {%- for z in (technitium_dns_zone_records | default({}) | dict2items) -%}
-        {%- set zone = z.key -%}
-        {%- set recs = (z.value.records | default([])) -%}
-        {%- for r in recs -%}
-          {%- set n = (r.name | default('')) -%}
-          {%- if n in ['', '@', none] -%}
-            {%- set fqdn = zone -%}
-          {%- else -%}
-            {%- set fqdn = n ~ '.' ~ zone -%}
-          {%- endif -%}
-          {%- set _ = out.append({
-            'zone': zone,
-            'domain': fqdn,
-            'type': (r.type | default('A')),
-            'ttl': (r.ttl | default(300)),
-            'value': r.value
-          }) -%}
-        {%- endfor -%}
-      {%- endfor -%}
-      {{ out }}
 
-- name: Technitium | Assert record jobs are present (or empty by design)
-  ansible.builtin.assert:
-    that:
-      - _technitium_record_jobs is defined
-    fail_msg: "Failed to build _technitium_record_jobs"
-
-# -----------------------------------------------------------------------------
-# Validate supported record types (expand here as you add mappings)
-# -----------------------------------------------------------------------------
-- name: Technitium | Validate record types are supported by this task
-  ansible.builtin.assert:
-    that:
-      - item.type in ['A']
-    fail_msg: "Unsupported record type '{{ item.type }}' for {{ item.domain }}. Implement mapping before using."
-  loop: "{{ _technitium_record_jobs }}"
-  loop_control:
-    label: "{{ item.domain }} ({{ item.type }})"
-
-# -----------------------------------------------------------------------------
-# Upsert records (idempotent): use overwrite=true (Technitium supports this)
-# -----------------------------------------------------------------------------
-- name: Technitium | Upsert record (overwrite=true)
+- name: Technitium Zones | Enable authoritative zones
   ansible.builtin.uri:
-    url: "{{ _technitium_api_base }}/api/zones/records/add"
+    url: "{{ technitium_zones_api_base }}/api/zones/enable"
     method: POST
+    headers:
+      Authorization: "Bearer {{ technitium_zones_api_token }}"
     body_format: form-urlencoded
     body:
-      token: "{{ technitium_api_token }}"
-      domain: "{{ item.domain }}"
-      zone: "{{ item.zone }}"
-      type: "{{ item.type }}"
-      ttl: "{{ item.ttl }}"
-      overwrite: "true"
-      ipAddress: "{{ item.value }}"
-    status_code: 200
+      token: "{{ technitium_zones_api_token }}"
+      zone: "{{ item.name }}"
+    status_code:
+      - 200
+      - 400
     return_content: true
-  register: _technitium_record_add
-  loop: "{{ _technitium_record_jobs }}"
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_zone_enable
+  loop: "{{ technitium_zone_jobs }}"
   loop_control:
-    label: "{{ item.domain }} ({{ item.type }})"
-  no_log: "{{ technitium_no_log | default(true) }}"
+    label: "{{ item.name }}"
+  failed_when: false
+  changed_when: false
+  no_log: "{{ technitium_zones_no_log | bool }}"
+  when: technitium_enable_declared_zones | default(true)
 
-- name: Technitium | Assert record upserts succeeded (allow already-exists)
+- name: Technitium Zones | Assert zone enable calls succeeded
   ansible.builtin.assert:
     that:
       - item.json is defined
       - item.json.status is defined
-      - item.json.status == 'ok' or
-        (
-          item.json.status == 'error' and
-          (item.json.errorMessage | default('')) is search('record already exists', ignorecase=True)
+      - >-
+        item.json.status == 'ok'
+        or (
+          item.json.status == 'error'
+          and (
+            (item.json.errorMessage | default('')) is search('already', ignorecase=True)
+            or (item.json.errorMessage | default('')) is search('not disabled', ignorecase=True)
+          )
+        )
+    fail_msg: >-
+      Zone enable failed for {{ item.item.name }}.
+      Response: {{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+  loop: "{{ technitium_zone_enable.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: technitium_enable_declared_zones | default(true)
+
+# -----------------------------------------------------------------------------
+# Build forward record jobs
+# -----------------------------------------------------------------------------
+
+- name: Technitium Zones | Build forward record jobs
+  ansible.builtin.set_fact:
+    technitium_forward_record_jobs_raw: >-
+      {%- set out = [] -%}
+      {%- for z in (technitium_zones_forward_record_map | default({}) | dict2items) -%}
+        {%- set zone = z.key -%}
+        {%- set recs = z.value.records | default([]) -%}
+        {%- for r in recs -%}
+          {%- if r.enabled | default(true) | bool -%}
+            {%- set n = r.name | default('@') | string -%}
+            {%- if n in ['', '@'] -%}
+              {%- set fqdn = zone -%}
+            {%- elif n.endswith('.') -%}
+              {%- set fqdn = n | regex_replace('\\.$', '') -%}
+            {%- else -%}
+              {%- set fqdn = n ~ '.' ~ zone -%}
+            {%- endif -%}
+            {%- set _ = out.append({
+              'zone': zone,
+              'domain': fqdn,
+              'name': n,
+              'type': r.type | default('A') | upper,
+              'ttl': r.ttl | default(technitium_zones_default_ttl),
+              'value': r.value | default(''),
+              'record': r,
+              'comments': r.comment | default(r.comments | default('')),
+              'source': 'forward'
+            }) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+
+# -----------------------------------------------------------------------------
+# Build reverse PTR record jobs
+# -----------------------------------------------------------------------------
+
+- name: Technitium Zones | Build reverse PTR record jobs
+  ansible.builtin.set_fact:
+    technitium_reverse_record_jobs_raw: >-
+      {%- set out = [] -%}
+      {%- for rz in technitium_zones_reverse_zone_list | default([]) -%}
+        {%- if rz.enabled | default(true) | bool -%}
+          {%- set zone = rz.zone | default(rz.name) -%}
+          {%- for ptr in rz.ptr_records | default([]) -%}
+            {%- if ptr.enabled | default(true) | bool -%}
+              {%- set hostname = ptr.hostname | string -%}
+              {%- set fqdn = (ptr.ip_last_octet | string) ~ '.' ~ zone -%}
+              {%- set _ = out.append({
+                'zone': zone,
+                'domain': fqdn,
+                'name': ptr.ip_last_octet | string,
+                'type': 'PTR',
+                'ttl': ptr.ttl | default(technitium_zones_default_ttl),
+                'value': hostname,
+                'record': ptr,
+                'comments': ptr.comment | default(ptr.comments | default('')),
+                'source': 'reverse'
+              }) -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Technitium Zones | Combine raw record jobs
+  ansible.builtin.set_fact:
+    technitium_record_jobs_raw: "{{ technitium_forward_record_jobs_raw + technitium_reverse_record_jobs_raw }}"
+
+# -----------------------------------------------------------------------------
+# Validate record jobs
+# -----------------------------------------------------------------------------
+
+- name: Technitium Zones | Validate record jobs have required base fields
+  ansible.builtin.assert:
+    that:
+      - item.zone is defined
+      - item.zone | length > 0
+      - item.domain is defined
+      - item.domain | length > 0
+      - item.type is defined
+      - item.type | length > 0
+      - item.ttl is defined
+      - item.ttl | int > 0
+    fail_msg: "Invalid DNS record job: {{ item }}"
+  loop: "{{ technitium_record_jobs_raw }}"
+  loop_control:
+    label: "{{ item.domain | default('unknown') }} ({{ item.type | default('unknown') }})"
+
+- name: Technitium Zones | Validate CNAME records are not zone apex records
+  ansible.builtin.assert:
+    that:
+      - item.type != 'CNAME' or item.domain != item.zone
+    fail_msg: >-
+      Invalid CNAME at zone apex: {{ item.domain }}.
+      DNS CNAME records must not coexist with apex NS/SOA records.
+  loop: "{{ technitium_record_jobs_raw }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+
+- name: Technitium Zones | Validate supported record types
+  ansible.builtin.assert:
+    that:
+      - item.type in technitium_supported_record_types
+    fail_msg: >-
+      Unsupported record type '{{ item.type }}' for {{ item.domain }}.
+      Add a parameter mapping before using this type.
+  loop: "{{ technitium_record_jobs_raw }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+  vars:
+    technitium_supported_record_types:
+      - A
+      - AAAA
+      - NS
+      - CNAME
+      - PTR
+      - MX
+      - TXT
+      - SRV
+      - DNAME
+      - DS
+      - SSHFP
+      - TLSA
+      - SVCB
+      - HTTPS
+      - URI
+      - CAA
+      - ANAME
+      - FWD
+      - APP
+      - RDATA
+
+# -----------------------------------------------------------------------------
+# Build API-ready record jobs
+# -----------------------------------------------------------------------------
+
+- name: Technitium Zones | Build API-ready record jobs
+  ansible.builtin.set_fact:
+    technitium_record_jobs: >-
+      {%- set out = [] -%}
+      {%- set seen_rrsets = [] -%}
+      {%- for item in technitium_record_jobs_raw -%}
+        {%- set r = item.record -%}
+        {%- set typ = item.type | upper -%}
+        {%- set rrset_key = item.zone ~ '|' ~ item.domain ~ '|' ~ typ -%}
+        {%- set overwrite = 'true' if rrset_key not in seen_rrsets else 'false' -%}
+        {%- if rrset_key not in seen_rrsets -%}
+          {%- set _ = seen_rrsets.append(rrset_key) -%}
+        {%- endif -%}
+
+        {%- set body = {
+          'token': technitium_zones_api_token,
+          'zone': item.zone,
+          'domain': item.domain,
+          'type': typ,
+          'ttl': item.ttl | string,
+          'overwrite': overwrite
+        } -%}
+
+        {%- if item.comments | default('') | length > 0 -%}
+          {%- set _ = body.update({'comments': item.comments}) -%}
+        {%- endif -%}
+
+        {%- if r.expiryTtl is defined -%}
+          {%- set _ = body.update({'expiryTtl': r.expiryTtl | string}) -%}
+        {%- endif -%}
+
+        {%- if typ in ['A', 'AAAA'] -%}
+          {%- set _ = body.update({
+            'ipAddress': r.ipAddress | default(item.value),
+            'ptr': r.ptr | default(false) | bool | ternary('true', 'false'),
+            'createPtrZone': r.createPtrZone | default(false) | bool | ternary('true', 'false'),
+            'updateSvcbHints': r.updateSvcbHints | default(false) | bool | ternary('true', 'false')
+          }) -%}
+
+        {%- elif typ == 'NS' -%}
+          {%- set _ = body.update({
+            'nameServer': r.nameServer | default(item.value)
+          }) -%}
+          {%- if r.glue is defined -%}
+            {%- set _ = body.update({'glue': r.glue}) -%}
+          {%- endif -%}
+
+        {%- elif typ == 'CNAME' -%}
+          {%- set _ = body.update({
+            'cname': r.cname | default(item.value)
+          }) -%}
+
+        {%- elif typ == 'PTR' -%}
+          {%- set _ = body.update({
+            'ptrName': r.ptrName | default(item.value)
+          }) -%}
+
+        {%- elif typ == 'MX' -%}
+          {%- set mx_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'preference': r.preference | default(mx_parts[0] | default(10)) | string,
+            'exchange': r.exchange | default(mx_parts[1] | default(item.value)) | string
+          }) -%}
+
+        {%- elif typ == 'TXT' -%}
+          {%- set _ = body.update({
+            'text': r.text | default(item.value),
+            'splitText': r.splitText | default(false) | bool | ternary('true', 'false')
+          }) -%}
+
+        {%- elif typ == 'SRV' -%}
+          {%- set srv_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'priority': r.priority | default(srv_parts[0] | default(10)) | string,
+            'weight': r.weight | default(srv_parts[1] | default(100)) | string,
+            'port': r.port | default(srv_parts[2] | default(0)) | string,
+            'target': r.target | default(srv_parts[3] | default('')) | string
+          }) -%}
+
+        {%- elif typ == 'DNAME' -%}
+          {%- set _ = body.update({
+            'dname': r.dname | default(item.value)
+          }) -%}
+
+        {%- elif typ == 'DS' -%}
+          {%- set ds_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'keyTag': r.keyTag | default(ds_parts[0] | default('')) | string,
+            'algorithm': r.algorithm | default(ds_parts[1] | default('')) | string,
+            'digestType': r.digestType | default(ds_parts[2] | default('')) | string,
+            'digest': r.digest | default(ds_parts[3] | default('')) | string
+          }) -%}
+
+        {%- elif typ == 'SSHFP' -%}
+          {%- set sshfp_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'sshfpAlgorithm': r.sshfpAlgorithm | default(sshfp_parts[0] | default('')) | string,
+            'sshfpFingerprintType': r.sshfpFingerprintType | default(sshfp_parts[1] | default('')) | string,
+            'sshfpFingerprint': r.sshfpFingerprint | default(sshfp_parts[2] | default('')) | string
+          }) -%}
+
+        {%- elif typ == 'TLSA' -%}
+          {%- set tlsa_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'tlsaCertificateUsage': r.tlsaCertificateUsage | default(tlsa_parts[0] | default('')) | string,
+            'tlsaSelector': r.tlsaSelector | default(tlsa_parts[1] | default('')) | string,
+            'tlsaMatchingType': r.tlsaMatchingType | default(tlsa_parts[2] | default('')) | string,
+            'tlsaCertificateAssociationData': r.tlsaCertificateAssociationData | default(tlsa_parts[3] | default('')) | string
+          }) -%}
+
+        {%- elif typ in ['SVCB', 'HTTPS'] -%}
+          {%- set svc_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'svcPriority': r.svcPriority | default(svc_parts[0] | default(1)) | string,
+            'svcTargetName': r.svcTargetName | default(svc_parts[1] | default('.')) | string,
+            'svcParams': r.svcParams | default((svc_parts[2:] | join('|')) if (svc_parts | length > 2) else 'false') | string,
+            'autoIpv4Hint': r.autoIpv4Hint | default(false) | bool | ternary('true', 'false'),
+            'autoIpv6Hint': r.autoIpv6Hint | default(false) | bool | ternary('true', 'false')
+          }) -%}
+
+        {%- elif typ == 'URI' -%}
+          {%- set uri_parts = (item.value | string).split() -%}
+          {%- set _ = body.update({
+            'uriPriority': r.uriPriority | default(uri_parts[0] | default(10)) | string,
+            'uriWeight': r.uriWeight | default(uri_parts[1] | default(1)) | string,
+            'uri': r.uri | default(uri_parts[2] | default(item.value)) | string
+          }) -%}
+
+        {%- elif typ == 'CAA' -%}
+          {%- set caa_parts = (item.value | string).split(' ', 2) -%}
+          {%- set caa_value = r.caaValue | default(r.caa_value | default(r.value | default(caa_parts[2] | default('')))) | string -%}
+          {%- set _ = body.update({
+            'flags': r.flags | default(caa_parts[0] | default(0)) | string,
+            'tag': r.tag | default(caa_parts[1] | default('issue')) | string,
+            'value': caa_value | regex_replace('^\"', '') | regex_replace('\"$', '')
+          }) -%}
+
+        {%- elif typ == 'ANAME' -%}
+          {%- set _ = body.update({
+            'aname': r.aname | default(item.value)
+          }) -%}
+
+        {%- elif typ == 'FWD' -%}
+          {%- set _ = body.update({
+            'protocol': r.protocol | default('Udp'),
+            'forwarder': r.forwarder | default(item.value),
+            'forwarderPriority': r.forwarderPriority | default(1) | string,
+            'dnssecValidation': r.dnssecValidation | default(false) | bool | ternary('true', 'false')
+          }) -%}
+          {%- if r.proxyType is defined -%}
+            {%- set _ = body.update({'proxyType': r.proxyType}) -%}
+          {%- endif -%}
+          {%- if r.proxyAddress is defined -%}
+            {%- set _ = body.update({'proxyAddress': r.proxyAddress}) -%}
+          {%- endif -%}
+          {%- if r.proxyPort is defined -%}
+            {%- set _ = body.update({'proxyPort': r.proxyPort | string}) -%}
+          {%- endif -%}
+          {%- if r.proxyUsername is defined -%}
+            {%- set _ = body.update({'proxyUsername': r.proxyUsername}) -%}
+          {%- endif -%}
+          {%- if r.proxyPassword is defined -%}
+            {%- set _ = body.update({'proxyPassword': r.proxyPassword}) -%}
+          {%- endif -%}
+
+        {%- elif typ == 'APP' -%}
+          {%- set _ = body.update({
+            'appName': r.appName | default(r.app_name | default('')),
+            'classPath': r.classPath | default(r.class_path | default('')),
+            'recordData': r.recordData | default(r.record_data | default(item.value))
+          }) -%}
+
+        {%- elif typ == 'RDATA' -%}
+          {%- set _ = body.update({
+            'type': r.realType | default(r.real_type | default(r.type | default('TYPE0'))),
+            'rdata': r.rdata | default(item.value)
+          }) -%}
+
+        {%- endif -%}
+
+        {%- set _ = out.append({
+          'zone': item.zone,
+          'domain': item.domain,
+          'type': body.type,
+          'ttl': item.ttl,
+          'overwrite': overwrite,
+          'source': item.source,
+          'body': body
+        }) -%}
+      {%- endfor -%}
+      {{ out }}
+  no_log: "{{ technitium_zones_no_log | bool }}"
+
+# -----------------------------------------------------------------------------
+# Validate type-specific requirements
+# -----------------------------------------------------------------------------
+
+- name: Technitium Zones | Validate API-ready record bodies
+  ansible.builtin.assert:
+    that:
+      - item.body.zone is defined
+      - item.body.domain is defined
+      - item.body.type is defined
+      - item.body.ttl is defined
+      - item.body.type not in ['A', 'AAAA'] or (item.body.ipAddress | default('') | length > 0)
+      - item.body.type != 'NS' or (item.body.nameServer | default('') | length > 0)
+      - item.body.type != 'CNAME' or (item.body.cname | default('') | length > 0)
+      - item.body.type != 'PTR' or (item.body.ptrName | default('') | length > 0)
+      - item.body.type != 'MX' or ((item.body.preference | default('') | length > 0) and (item.body.exchange | default('') | length > 0))
+      - item.body.type != 'TXT' or (item.body.text | default('') | length > 0)
+      - item.body.type != 'SRV' or ((item.body.priority | default('') | length > 0) and (item.body.weight | default('') | length > 0) and (item.body.port | default('') | length > 0) and (item.body.target | default('') | length > 0))
+      - item.body.type != 'DNAME' or (item.body.dname | default('') | length > 0)
+      - item.body.type != 'CAA' or ((item.body.flags | default('') | length > 0) and (item.body.tag | default('') | length > 0) and (item.body.value | default('') | length > 0))
+      - item.body.type != 'ANAME' or (item.body.aname | default('') | length > 0)
+      - item.body.type != 'FWD' or ((item.body.protocol | default('') | length > 0) and (item.body.forwarder | default('') | length > 0))
+      - item.body.type != 'APP' or ((item.body.appName | default('') | length > 0) and (item.body.classPath | default('') | length > 0))
+    fail_msg: >-
+      Record {{ item.domain }} ({{ item.type }}) is missing required API
+      parameters. Body: {{ item.body | dict2items | rejectattr('key', 'equalto', 'token') | list }}
+  loop: "{{ technitium_record_jobs }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }})"
+
+# -----------------------------------------------------------------------------
+# Apply records
+# -----------------------------------------------------------------------------
+
+- name: Technitium Zones | Upsert DNS records
+  ansible.builtin.uri:
+    url: "{{ technitium_zones_api_base }}/api/zones/records/add"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ technitium_zones_api_token }}"
+    body_format: form-urlencoded
+    body: "{{ item.body }}"
+    status_code:
+      - 200
+      - 400
+      - 409
+    return_content: true
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_record_add
+  loop: "{{ technitium_record_jobs }}"
+  loop_control:
+    label: "{{ item.domain }} ({{ item.type }}) overwrite={{ item.overwrite }}"
+  failed_when: false
+  changed_when: >-
+    technitium_record_add.json.status | default('') == 'ok'
+  no_log: "{{ technitium_zones_no_log | bool }}"
+  when: technitium_record_jobs | length > 0
+
+- name: Technitium Zones | Assert record upserts succeeded
+  ansible.builtin.assert:
+    that:
+      - item.json is defined
+      - item.json.status is defined
+      - >-
+        item.json.status == 'ok'
+        or (
+          item.json.status == 'error'
+          and (
+            (item.json.errorMessage | default('')) is search('already', ignorecase=True)
+            or (item.json.errorMessage | default('')) is search('exists', ignorecase=True)
+            or (item.json.errorMessage | default('')) is search('same record', ignorecase=True)
+          )
         )
     fail_msg: >-
       Record upsert failed for {{ item.item.domain }} ({{ item.item.type }}).
-      Response: {{ item.content | default(item.json | default(item)) }}
-  loop: "{{ _technitium_record_add.results | default([]) }}"
+      Response: {{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+  loop: "{{ technitium_record_add.results | default([]) }}"
   loop_control:
     label: "{{ item.item.domain }} ({{ item.item.type }})"
+  when: technitium_record_jobs | length > 0
+
+# -----------------------------------------------------------------------------
+# Verification
+# -----------------------------------------------------------------------------
+
+- name: Technitium Zones | Verify declared zones are readable
+  ansible.builtin.uri:
+    url: "{{ technitium_zones_api_base }}/api/zones/records/get"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ technitium_zones_api_token }}"
+    body_format: form-urlencoded
+    body:
+      token: "{{ technitium_zones_api_token }}"
+      domain: "{{ item.name }}"
+      zone: "{{ item.name }}"
+      listZone: "true"
+    status_code:
+      - 200
+      - 400
+      - 404
+    return_content: true
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_zone_verify
+  loop: "{{ technitium_zone_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  failed_when: false
+  changed_when: false
+  no_log: "{{ technitium_zones_no_log | bool }}"
+  when: technitium_verify_zones_after_apply | default(true)
+
+- name: Technitium Zones | Assert declared zones are readable
+  ansible.builtin.assert:
+    that:
+      - item.json is defined
+      - item.json.status is defined
+      - item.json.status == 'ok'
+    fail_msg: >-
+      Zone verification failed for {{ item.item.name }}.
+      Response: {{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+  loop: "{{ technitium_zone_verify.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: technitium_verify_zones_after_apply | default(true)
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Technitium Zones | Show zones and records summary
+  ansible.builtin.debug:
+    msg:
+      - "Technitium zone and record configuration complete."
+      - "Host: {{ inventory_hostname }}"
+      - "API: {{ technitium_zones_api_base }}"
+      - "Zones declared: {{ technitium_zone_jobs | length }}"
+      - "Records declared: {{ technitium_record_jobs | length }}"
+      - "Forward records: {{ technitium_forward_record_jobs_raw | length }}"
+      - "Reverse PTR records: {{ technitium_reverse_record_jobs_raw | length }}"
+      - "Verification enabled: {{ technitium_verify_zones_after_apply | default(true) }}"

@@ -1,0 +1,452 @@
+---
+# Ansible/roles/packer/tasks/render-and-build.yaml
+
+- block:
+    - name: Set installer type for {{ distro_item.name }}
+      ansible.builtin.set_fact:
+        packer_installer_type: "{{ distro_item.installer_type | default('preseed') }}"
+        packer_distro_family: "{{ distro_item.family | default('debian') }}"
+
+    - name: Ensure Packer directory exists for {{ distro_item.name }}
+      ansible.builtin.file:
+        path: "{{ pkr_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Ensure Packer http and scripts directories exist for {{ distro_item.name }}
+      ansible.builtin.file:
+        path: "{{ pkr_dir }}/{{ item_dir }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - http
+        - scripts
+      loop_control:
+        loop_var: item_dir
+
+    - name: Render Packer HCL template for {{ distro_item.name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/vm.pkr.hcl.j2"
+        dest: "{{ pkr_hcl_path }}"
+        mode: "0644"
+      vars:
+        distro: "{{ distro_item.name }}"
+        distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+        iso_url: "{{ distro_item.iso_url }}"
+        vm_id: "{{ vm_id }}"
+        vm_name: "{{ vm_name }}"
+        node: "{{ node_name }}"
+        iso_filename: "{{ iso_filename }}"
+        iso_host: "{{ iso_host }}"
+        debian_version: "{{ debian_version }}"
+
+    - name: Render Packer prepare-build script for {{ distro_item.name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/prepare-build.sh.j2"
+        dest: "{{ pkr_dir }}/prepare-build.sh"
+        mode: "0755"
+      vars:
+        distro: "{{ distro_item.name }}"
+        distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+        iso_url: "{{ distro_item.iso_url }}"
+        iso_filename: "{{ iso_filename }}"
+        iso_host: "{{ iso_host }}"
+        vm_id: "{{ vm_id }}"
+        vm_name: "{{ vm_name }}"
+        node: "{{ node_name }}"
+
+    - name: Render Debian preseed for {{ distro_item.name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/http/preseed.cfg.j2"
+        dest: "{{ pkr_dir }}/http/preseed.cfg"
+        mode: "0644"
+      vars:
+        distro: "{{ distro_item.name }}"
+        distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+        iso_url: "{{ distro_item.iso_url }}"
+        iso_filename: "{{ iso_filename }}"
+        iso_host: "{{ iso_host }}"
+        vm_id: "{{ vm_id }}"
+        vm_name: "{{ vm_name }}"
+        node: "{{ node_name }}"
+        debian_version: "{{ debian_version }}"
+        preseed_comment: "{{ distro_item.preseed_comment | default('Minimal ' ~ (distro_item.display_name | default(distro_item.name)) ~ ' preseed - ultra-clean for reliability') }}"
+        preseed_hostname: "{{ vm_name }}"
+        preseed_domain: "{{ packer_preseed_domain }}"
+        preseed_mirror_host: "{{ distro_item.preseed_mirror_host | default('deb.debian.org') }}"
+        preseed_mirror_directory: "{{ distro_item.preseed_mirror_directory | default('/debian') }}"
+        preseed_security_path: "{{ distro_item.preseed_security_path | default('/debian-security') }}"
+        preseed_disk: "{{ packer_preseed_disk }}"
+        preseed_bootdev: "{{ packer_preseed_bootdev }}"
+        preseed_root_password: "{{ packer_preseed_root_password }}"
+      when: packer_installer_type == "preseed"
+
+    - name: Remove stale Ubuntu autoinstall files for preseed build {{ distro_item.name }}
+      ansible.builtin.file:
+        path: "{{ pkr_dir }}/http/{{ stale_http_file }}"
+        state: absent
+      loop:
+        - user-data
+        - meta-data
+        - vendor-data
+      loop_control:
+        loop_var: stale_http_file
+      when: packer_installer_type == "preseed"
+
+    - name: Render Ubuntu autoinstall user-data for {{ distro_item.name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/http/user-data.j2"
+        dest: "{{ pkr_dir }}/http/user-data"
+        mode: "0644"
+      vars:
+        distro: "{{ distro_item.name }}"
+        distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+        iso_url: "{{ distro_item.iso_url }}"
+        iso_filename: "{{ iso_filename }}"
+        iso_host: "{{ iso_host }}"
+        vm_id: "{{ vm_id }}"
+        vm_name: "{{ vm_name }}"
+        node: "{{ node_name }}"
+        preseed_hostname: "{{ vm_name }}"
+        preseed_domain: "{{ packer_preseed_domain }}"
+        preseed_mirror_host: "{{ distro_item.preseed_mirror_host | default('archive.ubuntu.com') }}"
+        preseed_mirror_directory: "{{ distro_item.preseed_mirror_directory | default('/ubuntu') }}"
+        preseed_security_path: "{{ distro_item.preseed_security_path | default('/ubuntu') }}"
+        preseed_disk: "{{ packer_preseed_disk }}"
+        preseed_bootdev: "{{ packer_preseed_bootdev }}"
+        preseed_root_password: "{{ packer_preseed_root_password }}"
+      when: packer_installer_type == "autoinstall"
+
+    - name: Render Ubuntu autoinstall meta-data for {{ distro_item.name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/http/meta-data.j2"
+        dest: "{{ pkr_dir }}/http/meta-data"
+        mode: "0644"
+      vars:
+        distro: "{{ distro_item.name }}"
+        distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+        vm_name: "{{ vm_name }}"
+        node: "{{ node_name }}"
+        preseed_hostname: "{{ vm_name }}"
+      when: packer_installer_type == "autoinstall"
+
+    - name: Render Ubuntu autoinstall vendor-data for {{ distro_item.name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/http/vendor-data.j2"
+        dest: "{{ pkr_dir }}/http/vendor-data"
+        mode: "0644"
+      vars:
+        distro: "{{ distro_item.name }}"
+        distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+        vm_name: "{{ vm_name }}"
+        node: "{{ node_name }}"
+        preseed_hostname: "{{ vm_name }}"
+        preseed_domain: "{{ packer_preseed_domain }}"
+      when: packer_installer_type == "autoinstall"
+
+    - name: Remove stale Debian preseed file for autoinstall build {{ distro_item.name }}
+      ansible.builtin.file:
+        path: "{{ pkr_dir }}/http/preseed.cfg"
+        state: absent
+      when: packer_installer_type == "autoinstall"
+
+    - name: Render Packer scripts/cleanup.sh for {{ distro_item.name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/scripts/cleanup.sh.j2"
+        dest: "{{ pkr_dir }}/scripts/cleanup.sh"
+        mode: "0755"
+      vars:
+        vm_name: "{{ vm_name }}"
+        distro: "{{ distro_item.name }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+
+    - name: Render Packer scripts/update-system.sh for {{ distro_item.name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/scripts/update-system.sh.j2"
+        dest: "{{ pkr_dir }}/scripts/update-system.sh"
+        mode: "0755"
+      vars:
+        vm_name: "{{ vm_name }}"
+        distro: "{{ distro_item.name }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+
+    - name: Render Packer scripts/install-cloud-init.sh for {{ distro_item.name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/scripts/install-cloud-init.sh.j2"
+        dest: "{{ pkr_dir }}/scripts/install-cloud-init.sh"
+        mode: "0755"
+      vars:
+        vm_name: "{{ vm_name }}"
+        distro: "{{ distro_item.name }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+
+    - name: Render Packer var-file for {{ distro_item.name }} on {{ node_name }}
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/packer/template.pkrvars.hcl.j2"
+        dest: "{{ varfile_path }}"
+        mode: "0644"
+      vars:
+        distro: "{{ distro_item.name }}"
+        distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
+        distro_family: "{{ packer_distro_family }}"
+        installer_type: "{{ packer_installer_type }}"
+        iso_url: "{{ distro_item.iso_url }}"
+        vm_id: "{{ vm_id }}"
+        vm_name: "{{ vm_name }}"
+        node: "{{ node_name }}"
+        iso_filename: "{{ iso_filename }}"
+        iso_host: "{{ iso_host }}"
+        debian_version: "{{ debian_version }}"
+
+    - name: Set ISO cache and upload paths for {{ distro_item.name }} on {{ node_name }}
+      ansible.builtin.set_fact:
+        packer_iso_cache_dir_resolved: "{{ packer_iso_cache_dir | default(packer_repo_root ~ '/Packer/.iso-cache') }}"
+        packer_local_iso_path: "{{ (packer_iso_cache_dir | default(packer_repo_root ~ '/Packer/.iso-cache')) ~ '/' ~ iso_filename }}"
+        packer_proxmox_iso_upload_dir_resolved: "{{ packer_proxmox_iso_upload_dir | default('/var/lib/vz/template/iso') }}"
+        packer_proxmox_iso_upload_path: "{{ (packer_proxmox_iso_upload_dir | default('/var/lib/vz/template/iso')) ~ '/' ~ iso_filename }}"
+        packer_proxmox_node_ssh_host: "{{ (packer_proxmox_node_ssh_hosts | default({})).get(node_name, node_name) }}"
+        packer_proxmox_node_ssh_user: "{{ packer_proxmox_iso_upload_user | default('root') }}"
+        packer_proxmox_iso_upload_identity_file_resolved: "{{ packer_proxmox_iso_upload_identity_file | default('') }}"
+        packer_proxmox_iso_upload_certificate_file_resolved: "{{ packer_proxmox_iso_upload_certificate_file | default('') }}"
+        packer_proxmox_iso_upload_strict_host_key_checking_resolved: "{{ packer_proxmox_iso_upload_strict_host_key_checking | default('accept-new') }}"
+        packer_proxmox_iso_upload_connect_timeout_resolved: "{{ packer_proxmox_iso_upload_connect_timeout | default(10) }}"
+
+    - name: Set Proxmox ISO upload SSH target for {{ node_name }}
+      ansible.builtin.set_fact:
+        packer_proxmox_node_ssh_target: "{{ packer_proxmox_node_ssh_user }}@{{ packer_proxmox_node_ssh_host }}"
+
+    - name: Ensure local ISO cache directory exists for {{ distro_item.name }}
+      ansible.builtin.file:
+        path: "{{ packer_iso_cache_dir_resolved }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download ISO locally for {{ distro_item.name }}
+      ansible.builtin.get_url:
+        url: "{{ distro_item.iso_url }}"
+        dest: "{{ packer_local_iso_path }}"
+        mode: "0644"
+        force: false
+        timeout: 120
+      register: packer_iso_download_result
+
+    - name: Ensure Proxmox ISO directory exists on {{ node_name }}
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              'ssh',
+              '-o',
+              'StrictHostKeyChecking=' ~ packer_proxmox_iso_upload_strict_host_key_checking_resolved,
+              '-o',
+              'ConnectTimeout=' ~ (packer_proxmox_iso_upload_connect_timeout_resolved | string),
+              '-o',
+              'PreferredAuthentications=publickey',
+              '-o',
+              'PubkeyAuthentication=yes',
+              '-o',
+              'IdentitiesOnly=yes'
+            ]
+            + (
+              ['-i', packer_proxmox_iso_upload_identity_file_resolved]
+              if (packer_proxmox_iso_upload_identity_file_resolved | length > 0)
+              else []
+            )
+            + (
+              ['-o', 'CertificateFile=' ~ packer_proxmox_iso_upload_certificate_file_resolved]
+              if (packer_proxmox_iso_upload_certificate_file_resolved | length > 0)
+              else []
+            )
+            + [
+              packer_proxmox_node_ssh_target,
+              'mkdir -p ' ~ packer_proxmox_iso_upload_dir_resolved
+            ]
+          }}
+      changed_when: false
+
+    - name: Check if ISO already exists on {{ node_name }}
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              'ssh',
+              '-o',
+              'StrictHostKeyChecking=' ~ packer_proxmox_iso_upload_strict_host_key_checking_resolved,
+              '-o',
+              'ConnectTimeout=' ~ (packer_proxmox_iso_upload_connect_timeout_resolved | string),
+              '-o',
+              'PreferredAuthentications=publickey',
+              '-o',
+              'PubkeyAuthentication=yes',
+              '-o',
+              'IdentitiesOnly=yes'
+            ]
+            + (
+              ['-i', packer_proxmox_iso_upload_identity_file_resolved]
+              if (packer_proxmox_iso_upload_identity_file_resolved | length > 0)
+              else []
+            )
+            + (
+              ['-o', 'CertificateFile=' ~ packer_proxmox_iso_upload_certificate_file_resolved]
+              if (packer_proxmox_iso_upload_certificate_file_resolved | length > 0)
+              else []
+            )
+            + [
+              packer_proxmox_node_ssh_target,
+              'test -f ' ~ packer_proxmox_iso_upload_path
+            ]
+          }}
+      register: packer_remote_iso_check
+      changed_when: false
+      failed_when: false
+
+    - name: Upload ISO to Proxmox node {{ node_name }}
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              'scp',
+              '-o',
+              'StrictHostKeyChecking=' ~ packer_proxmox_iso_upload_strict_host_key_checking_resolved,
+              '-o',
+              'ConnectTimeout=' ~ (packer_proxmox_iso_upload_connect_timeout_resolved | string),
+              '-o',
+              'PreferredAuthentications=publickey',
+              '-o',
+              'PubkeyAuthentication=yes',
+              '-o',
+              'IdentitiesOnly=yes'
+            ]
+            + (
+              ['-i', packer_proxmox_iso_upload_identity_file_resolved]
+              if (packer_proxmox_iso_upload_identity_file_resolved | length > 0)
+              else []
+            )
+            + (
+              ['-o', 'CertificateFile=' ~ packer_proxmox_iso_upload_certificate_file_resolved]
+              if (packer_proxmox_iso_upload_certificate_file_resolved | length > 0)
+              else []
+            )
+            + [
+              packer_local_iso_path,
+              packer_proxmox_node_ssh_target ~ ':' ~ packer_proxmox_iso_upload_path
+            ]
+          }}
+      when: packer_remote_iso_check.rc != 0
+      changed_when: true
+
+    - name: Initialize Packer plugins for {{ distro_item.name }}
+      ansible.builtin.command:
+        argv:
+          - packer
+          - init
+          - "{{ pkr_hcl_path }}"
+      args:
+        chdir: "{{ packer_repo_root }}"
+      register: packer_init_result
+      changed_when: >-
+        'Installed plugin' in packer_init_result.stdout
+        or 'Installed plugin' in packer_init_result.stderr
+
+    - name: Validate Packer template for {{ distro_item.name }} on {{ node_name }}
+      ansible.builtin.command:
+        argv:
+          - packer
+          - validate
+          - "-var-file={{ varfile_path }}"
+          - "{{ pkr_hcl_path }}"
+      args:
+        chdir: "{{ packer_repo_root }}"
+      environment:
+        PKR_VAR_proxmox_api_token_id: "{{ packer_proxmox_api_token_id_runtime }}"
+        PKR_VAR_proxmox_api_token_secret: "{{ packer_proxmox_api_token_secret_runtime }}"
+      register: packer_validate_result
+      changed_when: false
+
+    - name: Check if Proxmox VM/template {{ vm_id }} already exists on {{ node_name }}
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              'ssh',
+              '-o',
+              'StrictHostKeyChecking=' ~ packer_proxmox_iso_upload_strict_host_key_checking_resolved,
+              '-o',
+              'ConnectTimeout=' ~ (packer_proxmox_iso_upload_connect_timeout_resolved | string),
+              '-o',
+              'PreferredAuthentications=publickey',
+              '-o',
+              'PubkeyAuthentication=yes',
+              '-o',
+              'IdentitiesOnly=yes'
+            ]
+            + (
+              ['-i', packer_proxmox_iso_upload_identity_file_resolved]
+              if (packer_proxmox_iso_upload_identity_file_resolved | length > 0)
+              else []
+            )
+            + (
+              ['-o', 'CertificateFile=' ~ packer_proxmox_iso_upload_certificate_file_resolved]
+              if (packer_proxmox_iso_upload_certificate_file_resolved | length > 0)
+              else []
+            )
+            + [
+              packer_proxmox_node_ssh_target,
+              'qm status ' ~ (vm_id | string)
+            ]
+          }}
+      register: packer_existing_vm_check
+      changed_when: false
+      failed_when: false
+
+    - name: Skip Packer build because VM/template {{ vm_id }} already exists on {{ node_name }}
+      ansible.builtin.debug:
+        msg: >-
+          Skipping {{ distro_item.name }} on {{ node_name }} because VM/template
+          {{ vm_id }} already exists. Existing VMIDs are treated as completed or
+          intentionally preserved builds.
+      when: packer_existing_vm_check.rc == 0
+
+    - name: Run Packer build for {{ distro_item.name }} on {{ node_name }}
+      ansible.builtin.command:
+        argv:
+          - packer
+          - build
+          - "-var-file={{ varfile_path }}"
+          - "{{ pkr_hcl_path }}"
+      args:
+        chdir: "{{ packer_repo_root }}"
+      environment:
+        PKR_VAR_proxmox_api_token_id: "{{ packer_proxmox_api_token_id_runtime }}"
+        PKR_VAR_proxmox_api_token_secret: "{{ packer_proxmox_api_token_secret_runtime }}"
+      register: packer_build_result
+      changed_when: packer_build_result.rc == 0
+      when: packer_existing_vm_check.rc != 0
+
+  rescue:
+    - name: Report failure while building template
+      ansible.builtin.debug:
+        msg: >-
+          Packer template build aborted for {{ distro_item.name }} on {{ node_name }}:
+          {{ ansible_failed_result.msg | default(ansible_failed_result) }}
+
+    - name: Fail template build for {{ distro_item.name }} on {{ node_name }}
+      ansible.builtin.fail:
+        msg: >-
+          Packer template build failed for {{ distro_item.name }} on {{ node_name }}.
+          Check the task output above for the exact Packer or template error.

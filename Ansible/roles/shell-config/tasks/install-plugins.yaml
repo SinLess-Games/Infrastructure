@@ -1,49 +1,331 @@
 ---
 # =============================================================================
-# Install Zsh Plugins (per-user, Oh My Zsh compatible)
+# shell-config — install-plugins
 # -----------------------------------------------------------------------------
-# - Clones plugins defined in group_vars/all/zsh.yaml
-# - Installs into ~/.oh-my-zsh/custom/plugins/<plugin>
-# - Skips system / non-interactive users
-# - Fully idempotent
+# Installs Zsh plugins per managed interactive user.
+#
+# Design:
+#   - Oh My Zsh compatible.
+#   - Uses shell__home_users built by validate.yaml.
+#   - Skips non-zsh users.
+#   - Skips system/non-interactive users through validation filtering.
+#   - Refuses symlinked plugin directories.
+#   - Clones plugin repositories as the target user.
 # =============================================================================
 
-- name: Ensure Oh My Zsh custom plugins directory exists
-  ansible.builtin.file:
-    path: "{{ item.home_directory }}/.oh-my-zsh/custom/plugins"
-    state: directory
-    owner: "{{ item.name }}"
-    group: "{{ item.name }}"
-    mode: "0755"
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
+# -----------------------------------------------------------------------------
+# Normalize plugin install inputs
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Plugins | Normalize inputs
+  ansible.builtin.set_fact:
+    shell__plugin_users: "{{ shell__home_users | default(shell__resolved_users | default([])) }}"
+    shell__plugin_definitions: "{{ shell__plugins_effective | default(shell_plugins
+      | default(plugins | default([]))) }}"
+    shell__plugin_install_enabled: >-
+      {{
+        shell_install_oh_my_zsh | default(true) | bool
+        and (shell__plugins_effective | default(shell_plugins | default(plugins | default([]))) | length > 0)
+      }}
+    shell__plugin_base_relative_path: "{{ shell_oh_my_zsh_plugins_dir | default('.oh-my-zsh/custom/plugins') }}"
+  changed_when: false
+  tags:
+    - shell
+    - shell-plugins
+
+# -----------------------------------------------------------------------------
+# Validate plugin install inputs
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Plugins | Validate plugin install inputs
+  ansible.builtin.assert:
+    that:
+      - shell__plugin_users is sequence
+      - shell__plugin_users is not string
+      - shell__plugin_users is not mapping
+      - shell__plugin_definitions is sequence
+      - shell__plugin_definitions is not string
+      - shell__plugin_definitions is not mapping
+      - shell__plugin_base_relative_path is string
+      - shell__plugin_base_relative_path | length > 0
+      - shell__plugin_base_relative_path is not search('^/')
+    fail_msg: "Zsh plugin install inputs are invalid."
+    success_msg: "Zsh plugin install inputs are valid."
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+    - shell-plugins-validate
+
+- name: Shell Config | Plugins | Validate plugin definitions
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[A-Za-z0-9._-]+$')
+      - item.repo is defined
+      - item.repo is string
+      - item.repo is match('^https://')
+      - item.version is not defined or item.version is string
+    fail_msg: "Invalid Zsh plugin definition: {{ item | default({}) }}"
+  loop: "{{ shell__plugin_definitions }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-plugin') if item is mapping else
+      'invalid-plugin' }}"
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+    - shell-plugins-validate
+
+# -----------------------------------------------------------------------------
+# Build target user list
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Plugins | Build Zsh plugin user list
+  ansible.builtin.set_fact:
+    shell__zsh_plugin_users: >-
+      {%- set out = [] -%} {%- for user in shell__plugin_users -%}
+        {%- set shell_path = user.shell | default('') -%}
+        {%- if shell_path.endswith('zsh') -%}
+          {%- set _ = out.append(user) -%}
+        {%- endif -%}
+      {%- endfor -%} {{ out }}
+  changed_when: false
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+
+# -----------------------------------------------------------------------------
+# Ensure custom plugin directories exist
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Plugins | Stat Oh My Zsh plugin base directories
+  ansible.builtin.stat:
+    path: "{{ item.home_directory }}/{{ shell__plugin_base_relative_path }}"
+    follow: false
+  register: shell__plugin_base_dir_stats
+  loop: "{{ shell__zsh_plugin_users | default([]) }}"
   loop_control:
     label: "{{ item.name }}"
-  when:
-    - shell_install_oh_my_zsh | bool
-    - plugins is defined
-    - plugins | length > 0
-    - item.shell is defined
-    - item.shell.endswith('zsh')
-    - not (zsh_skip_for_system_users | default(true) and item.shell == '/usr/sbin/nologin')
+  changed_when: false
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+    - shell-plugins-validate
 
-- name: Install Zsh plugins for user
-  become: true
-  become_user: "{{ item.0.name }}"
-  ansible.builtin.git:
-    repo: "{{ item.1.repo }}"
-    dest: "{{ item.0.home_directory }}/.oh-my-zsh/custom/plugins/{{ item.1.name }}"
-    version: "{{ item.1.version | default('HEAD') }}"
-    update: false
-    depth: 1
-  loop: "{{ (shell__home_users | default(shell__resolved_users)) | product(plugins) | list }}"
+- name: Shell Config | Plugins | Refuse symlinked plugin base directories
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to manage symlinked Zsh plugin directory for {{ item.item.name
+      }}: {{ item.item.home_directory }}/{{ shell__plugin_base_relative_path }}
+  loop: "{{ shell__plugin_base_dir_stats.results | default([]) }}"
   loop_control:
-    label: "{{ item.0.name }} -> {{ item.1.name }}"
+    label: "{{ item.item.name }}"
   when:
-    - shell_install_oh_my_zsh | bool
-    - plugins is defined
-    - plugins | length > 0
-    - item.1.name is defined
-    - item.1.repo is defined
-    - item.0.shell is defined
-    - item.0.shell.endswith('zsh')
-    - not (zsh_skip_for_system_users | default(true) and item.0.shell == '/usr/sbin/nologin')
+    - shell__plugin_install_enabled | bool
+    - item.stat.islnk | default(false) | bool
+  tags:
+    - shell
+    - shell-plugins
+    - shell-plugins-validate
+
+- name: Shell Config | Plugins | Ensure Oh My Zsh custom plugins directory exists
+  ansible.builtin.file:
+    path: "{{ item.home_directory }}/{{ shell__plugin_base_relative_path }}"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.shell_config_group | default(item.primary_group |
+      default(item.name)) }}"
+    mode: "{{ shell_plugin_dir_mode | default('0755') }}"
+  become: true
+  loop: "{{ shell__zsh_plugin_users | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+
+# -----------------------------------------------------------------------------
+# Build plugin install jobs
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Plugins | Build plugin install jobs
+  ansible.builtin.set_fact:
+    shell__plugin_install_jobs: >-
+      {%- set jobs = [] -%} {%- for user in shell__zsh_plugin_users |
+      default([]) -%}
+        {%- for plugin in shell__plugin_definitions -%}
+          {%- set _ = jobs.append({
+            'user': user.name,
+            'group': user.shell_config_group | default(user.primary_group | default(user.name)),
+            'home': user.home_directory,
+            'plugin_name': plugin.name,
+            'repo': plugin.repo,
+            'version': plugin.version | default('HEAD'),
+            'dest': user.home_directory ~ '/' ~ shell__plugin_base_relative_path ~ '/' ~ plugin.name
+          }) -%}
+        {%- endfor -%}
+      {%- endfor -%} {{ jobs }}
+  changed_when: false
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+
+- name: Shell Config | Plugins | Validate plugin install jobs
+  ansible.builtin.assert:
+    that:
+      - item.user is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.group is string
+      - item.group | length > 0
+      - item.home is match('^/')
+      - item.plugin_name is match('^[A-Za-z0-9._-]+$')
+      - item.repo is match('^https://')
+      - item.version is string
+      - item.version | length > 0
+      - item.dest is match('^/')
+      - item.dest.startswith(item.home ~ '/' ~ shell__plugin_base_relative_path
+        ~ '/')
+    fail_msg: "Invalid plugin install job: {{ item }}"
+  loop: "{{ shell__plugin_install_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.user }} -> {{ item.plugin_name }}"
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+    - shell-plugins-validate
+
+# -----------------------------------------------------------------------------
+# Symlink safety checks
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Plugins | Stat plugin destination directories
+  ansible.builtin.stat:
+    path: "{{ item.dest }}"
+    follow: false
+  register: shell__plugin_dest_stats
+  loop: "{{ shell__plugin_install_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.user }} -> {{ item.plugin_name }}"
+  changed_when: false
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+    - shell-plugins-validate
+
+- name: Shell Config | Plugins | Refuse symlinked plugin destinations
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to manage symlinked Zsh plugin destination for {{ item.item.user
+      }} -> {{ item.item.plugin_name }}: {{ item.item.dest }}
+  loop: "{{ shell__plugin_dest_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.user }} -> {{ item.item.plugin_name }}"
+  when:
+    - shell__plugin_install_enabled | bool
+    - item.stat.islnk | default(false) | bool
+  tags:
+    - shell
+    - shell-plugins
+    - shell-plugins-validate
+
+- name: Shell Config | Plugins | Refuse non-directory plugin destinations
+  ansible.builtin.fail:
+    msg: >-
+      Plugin destination exists but is not a directory for {{ item.item.user }}
+      -> {{ item.item.plugin_name }}: {{ item.item.dest }}
+  loop: "{{ shell__plugin_dest_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.user }} -> {{ item.item.plugin_name }}"
+  when:
+    - shell__plugin_install_enabled | bool
+    - item.stat.exists | default(false) | bool
+    - not (item.stat.isdir | default(false) | bool)
+  tags:
+    - shell
+    - shell-plugins
+    - shell-plugins-validate
+
+# -----------------------------------------------------------------------------
+# Install plugins
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Plugins | Install Zsh plugins
+  ansible.builtin.git:
+    repo: "{{ item.repo }}"
+    dest: "{{ item.dest }}"
+    version: "{{ item.version }}"
+    update: "{{ shell_plugin_update | default(false) | bool }}"
+    depth: "{{ shell_plugin_depth | default(1) | int }}"
+    accept_hostkey: "{{ shell_git_accept_hostkey | default(true) | bool }}"
+  become: true
+  become_user: "{{ item.user }}"
+  loop: "{{ shell__plugin_install_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.user }} -> {{ item.plugin_name }}"
+  register: shell__plugin_install_results
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+
+- name: Shell Config | Plugins | Ensure plugin ownership and permissions
+  ansible.builtin.file:
+    path: "{{ item.dest }}"
+    state: directory
+    owner: "{{ item.user }}"
+    group: "{{ item.group }}"
+    mode: "{{ shell_plugin_dir_mode | default('0755') }}"
+    recurse: true
+  become: true
+  loop: "{{ shell__plugin_install_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.user }} -> {{ item.plugin_name }}"
+  when: shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Plugins | Show plugin install summary
+  ansible.builtin.debug:
+    msg:
+      - "Zsh plugin installation complete."
+      - "Enabled: {{ shell__plugin_install_enabled | bool }}"
+      - "Users: {{ shell__zsh_plugin_users | default([]) | map(attribute='name')
+        | list | join(', ') if shell__zsh_plugin_users | default([]) | length >
+        0 else 'none' }}"
+      - "Plugin count: {{ shell__plugin_definitions | length }}"
+      - "Install job count: {{ shell__plugin_install_jobs | default([]) | length
+        }}"
+      - >-
+        Changed plugins: {{
+          shell__plugin_install_results.results
+          | default([])
+          | selectattr('changed', 'equalto', true)
+          | map(attribute='item.plugin_name')
+          | list
+          | unique
+          | sort
+          | join(', ')
+          if shell__plugin_install_results is defined
+          else 'none'
+        }}
+  when:
+    - shell_config_show_summary | default(true) | bool
+    - shell__plugin_install_enabled | bool
+  tags:
+    - shell
+    - shell-plugins
+    - shell-summary

@@ -1,115 +1,703 @@
 ---
 # =============================================================================
-# Generate SSH Keys (Local Only)
+# SSH Role - Generate User SSH Keys
 # -----------------------------------------------------------------------------
-# Generates per-user SSH keypairs on the Ansible control node.
-# Never touches remote hosts.
+# Purpose:
+#   Generates per-user SSH keypairs on the Ansible controller.
+#
+# Execution:
+#   - Runs only once.
+#   - Delegates to localhost.
+#   - Never writes private user key material to managed hosts.
 #
 # Output layout:
-#   {{ ssh_output_base }}/
+#   {{ ssh_user_materials_output_dir | default(ssh_output_base) }}/
 #     └── <username>/
 #         ├── id_<type>
 #         └── id_<type>.pub
 #
-# Notes:
-# - This role is often executed in multi-host plays; since tasks are delegated to
-#   localhost, we MUST use run_once to avoid concurrent ssh-keygen races.
-# - "Force regenerate" is implemented by deleting the existing keypair first,
-#   because ssh-keygen prompts before overwriting.
+# Safety:
+#   - Skips absent users.
+#   - Skips users with manage_ssh=false.
+#   - Refuses unsafe output paths.
+#   - Refuses symlinked private/public/certificate files.
+#   - Does not overwrite keys unless ssh_force_regenerate=true.
+#   - Backs up existing key material before forced regeneration.
 # =============================================================================
 
-- name: Validate key generation inputs (controller)
-  ansible.builtin.assert:
-    that:
-      - ssh_output_base is defined
-      - ssh_output_base | length > 0
-      - ssh_role_users is defined
-      - ssh_role_users is iterable
-      - ssh_key_type is defined
-      - ssh_key_type in ['ed25519', 'rsa', 'ecdsa']
-    fail_msg: >-
-      Invalid SSH key generation configuration.
-      Required: ssh_output_base, ssh_role_users, ssh_key_type (ed25519|rsa|ecdsa).
+# -----------------------------------------------------------------------------
+# Normalize inputs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Normalize key generation inputs
+  ansible.builtin.set_fact:
+    ssh_keys_output_base_effective: "{{ ssh_user_materials_output_dir | default(ssh_output_base) }}"
+    ssh_keys_users_effective: "{{ ssh_role_users | default([]) }}"
+    ssh_keys_owner_effective: >-
+      {{
+        ssh_outputs_owner
+        | default(
+            ssh_controller_local_user
+            | default(lookup('ansible.builtin.pipe', 'id -un') | trim)
+          )
+      }}
+    ssh_keys_group_effective: >-
+      {{
+        ssh_outputs_group
+        | default(
+            ssh_controller_local_group
+            | default(lookup('ansible.builtin.pipe', 'id -gn') | trim)
+          )
+      }}
+    ssh_key_bits_effective: "{{ ssh_key_bits | default(4096) | int }}"
+    ssh_force_regenerate_effective: "{{ ssh_force_regenerate | default(false) | bool }}"
+    ssh_keys_backup_enabled_effective: "{{ ssh_keys_backup_before_regenerate | default(true) | bool }}"
   delegate_to: localhost
   become: false
   run_once: true
   changed_when: false
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
 
-- name: Ensure SSH output base directory exists (controller)
-  ansible.builtin.file:
-    path: "{{ ssh_output_base }}"
-    state: directory
-    mode: "0755"
+# -----------------------------------------------------------------------------
+# Validate
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Validate key generation inputs
+  ansible.builtin.assert:
+    that:
+      - ssh_keys_output_base_effective is defined
+      - ssh_keys_output_base_effective is string
+      - ssh_keys_output_base_effective is match('^/')
+      - ssh_keys_output_base_effective | length > 1
+      - ssh_keys_output_base_effective not in ['/']
+      - ssh_keys_output_base_effective not in ['/etc', '/usr', '/var', '/tmp',
+        '/root', '/home']
+      - ssh_keys_users_effective is sequence
+      - ssh_keys_users_effective is not string
+      - ssh_keys_users_effective is not mapping
+      - ssh_key_type is defined
+      - ssh_key_type in ssh_supported_key_types
+    fail_msg: >-
+      Invalid SSH key generation configuration. Required:
+      ssh_user_materials_output_dir or ssh_output_base as a safe absolute path,
+      ssh_role_users as a list, and ssh_key_type in {{ ssh_supported_key_types |
+      default(['ed25519', 'rsa', 'ecdsa']) | join(', ') }}.
+    success_msg: "SSH key generation inputs are valid."
   delegate_to: localhost
   become: false
   run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
 
-- name: Ensure per-user SSH directories exist (controller)
-  ansible.builtin.file:
-    path: "{{ ssh_output_base }}/{{ item.name }}"
-    state: directory
-    mode: "0700"
-  loop: "{{ ssh_role_users }}"
+- name: SSH | Keys | Validate RSA key size
+  ansible.builtin.assert:
+    that:
+      - ssh_key_bits_effective | int >= 3072
+    fail_msg: "ssh_key_bits must be >= 3072 when ssh_key_type=rsa."
+    success_msg: "RSA key size is valid."
+  when: ssh_key_type == "rsa"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Validate ECDSA key size
+  ansible.builtin.assert:
+    that:
+      - ssh_key_bits_effective | int in [256, 384, 521]
+    fail_msg: "ssh_key_bits must be one of 256, 384, or 521 when ssh_key_type=ecdsa."
+    success_msg: "ECDSA key size is valid."
+  when: ssh_key_type == "ecdsa"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Validate user entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+    fail_msg: "Each ssh_role_users entry must be a mapping with a valid Linux username."
+  loop: "{{ ssh_keys_users_effective }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+# -----------------------------------------------------------------------------
+# Build key jobs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Build key generation jobs
+  ansible.builtin.set_fact:
+    ssh_key_generation_jobs: >-
+      {%- set jobs = [] -%} {%- for user in ssh_keys_users_effective -%}
+        {%- set state = user.state | default('present') -%}
+        {%- set manage_ssh = user.manage_ssh | default(users_default_manage_ssh | default(true)) -%}
+        {%- if state == 'present' and manage_ssh | bool -%}
+          {%- set key_dir = ssh_keys_output_base_effective ~ '/' ~ user.name -%}
+          {%- set key_name = 'id_' ~ ssh_key_type -%}
+          {%- set _ = jobs.append({
+            'name': user.name,
+            'comment': user.ssh_key_comment | default(user.name ~ (ssh_key_comment_suffix | default(''))),
+            'directory': key_dir,
+            'private_key_path': key_dir ~ '/' ~ key_name,
+            'public_key_path': key_dir ~ '/' ~ key_name ~ '.pub',
+            'certificate_path': key_dir ~ '/' ~ key_name ~ '-cert.pub',
+            'state': state,
+            'manage_ssh': manage_ssh
+          }) -%}
+        {%- endif -%}
+      {%- endfor -%} {{ jobs }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Assert key generation jobs are valid
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.directory is match('^/')
+      - item.private_key_path is match('^/')
+      - item.public_key_path is match('^/')
+      - item.certificate_path is match('^/')
+      - item.private_key_path.startswith(item.directory ~ '/')
+      - item.public_key_path.startswith(item.directory ~ '/')
+      - item.certificate_path.startswith(item.directory ~ '/')
+    fail_msg: "Invalid SSH key generation job: {{ item }}"
+  loop: "{{ ssh_key_generation_jobs }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
   become: false
   run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
 
-# Force regeneration: remove existing keypair first to avoid ssh-keygen overwrite prompt
-- name: Remove existing SSH keypair for user (force regenerate) (controller)
+# -----------------------------------------------------------------------------
+# Directories
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Ensure SSH user output base directory exists
   ansible.builtin.file:
-    path: "{{ ssh_output_base }}/{{ item.0.name }}/id_{{ ssh_key_type }}{{ item.1 }}"
-    state: absent
-  loop: "{{ ssh_role_users | product(['', '.pub']) | list }}"
+    path: "{{ ssh_keys_output_base_effective }}"
+    state: directory
+    owner: "{{ ssh_keys_owner_effective }}"
+    group: "{{ ssh_keys_group_effective }}"
+    mode: "{{ ssh_outputs_dir_mode | default('0700') }}"
+  delegate_to: localhost
+  become: "{{ ssh_keys_fix_permissions_with_become | default(false) | bool }}"
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Ensure per-user SSH directories exist
+  ansible.builtin.file:
+    path: "{{ item.directory }}"
+    state: directory
+    owner: "{{ ssh_keys_owner_effective }}"
+    group: "{{ ssh_keys_group_effective }}"
+    mode: "0700"
+  loop: "{{ ssh_key_generation_jobs }}"
   loop_control:
-    label: "{{ item.0.name }}{{ item.1 }}"
-  when: (ssh_force_regenerate | default(false)) | bool
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: "{{ ssh_keys_fix_permissions_with_become | default(false) | bool }}"
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+# -----------------------------------------------------------------------------
+# Existing key inspection
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Stat existing private keys
+  ansible.builtin.stat:
+    path: "{{ item.private_key_path }}"
+    follow: false
+  loop: "{{ ssh_key_generation_jobs }}"
+  loop_control:
+    label: "{{ item.name }} private"
+  register: ssh_key_private_stats
   delegate_to: localhost
   become: false
   run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
 
-- name: Generate SSH keypair for user (idempotent) (controller)
+- name: SSH | Keys | Stat existing public keys
+  ansible.builtin.stat:
+    path: "{{ item.public_key_path }}"
+    follow: false
+  loop: "{{ ssh_key_generation_jobs }}"
+  loop_control:
+    label: "{{ item.name }} public"
+  register: ssh_key_public_stats
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Stat existing certificates
+  ansible.builtin.stat:
+    path: "{{ item.certificate_path }}"
+    follow: false
+  loop: "{{ ssh_key_generation_jobs }}"
+  loop_control:
+    label: "{{ item.name }} certificate"
+  register: ssh_key_certificate_stats
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Refuse symlinked private keys
+  ansible.builtin.fail:
+    msg: >-
+      SSH private key for {{ item.item.name }} is a symlink: {{
+      item.item.private_key_path }}. Refusing to use or overwrite symlinked
+      private key material.
+  when: item.stat.islnk | default(false) | bool
+  loop: "{{ ssh_key_private_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Refuse symlinked public keys
+  ansible.builtin.fail:
+    msg: >-
+      SSH public key for {{ item.item.name }} is a symlink: {{
+      item.item.public_key_path }}. Refusing to use or overwrite symlinked
+      public key material.
+  when: item.stat.islnk | default(false) | bool
+  loop: "{{ ssh_key_public_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Refuse symlinked certificates
+  ansible.builtin.fail:
+    msg: >-
+      SSH certificate for {{ item.item.name }} is a symlink: {{
+      item.item.certificate_path }}. Refusing to use or overwrite symlinked
+      certificate material.
+  when: item.stat.islnk | default(false) | bool
+  loop: "{{ ssh_key_certificate_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Assert existing keypairs are complete unless regenerating
+  ansible.builtin.assert:
+    that:
+      - >-
+        ssh_force_regenerate_effective or (
+          (
+            ssh_key_private_stats.results[key_index].stat.exists
+            | default(false)
+            | bool
+          )
+          ==
+          (
+            ssh_key_public_stats.results[key_index].stat.exists
+            | default(false)
+            | bool
+          )
+        )
+    fail_msg: >-
+      Incomplete SSH keypair detected for {{ item.name }}. Private exists={{
+        ssh_key_private_stats.results[key_index].stat.exists | default(false)
+      }}, public exists={{
+        ssh_key_public_stats.results[key_index].stat.exists | default(false)
+      }}. Fix the keypair manually or set ssh_force_regenerate=true.
+  loop: "{{ ssh_key_generation_jobs }}"
+  loop_control:
+    index_var: key_index
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+# -----------------------------------------------------------------------------
+# Forced regeneration backup
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Create timestamp for forced key backup
+  ansible.builtin.set_fact:
+    ssh_keys_backup_timestamp: "{{ lookup('ansible.builtin.pipe', 'date +%Y%m%d%H%M%S') | trim }}"
+  when:
+    - ssh_force_regenerate_effective | bool
+    - ssh_keys_backup_enabled_effective | bool
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Ensure forced-regeneration backup directories exist
+  ansible.builtin.file:
+    path: "{{ item.directory }}/backup-{{ ssh_keys_backup_timestamp }}"
+    state: directory
+    owner: "{{ ssh_keys_owner_effective }}"
+    group: "{{ ssh_keys_group_effective }}"
+    mode: "0700"
+  loop: "{{ ssh_key_generation_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - ssh_force_regenerate_effective | bool
+    - ssh_keys_backup_enabled_effective | bool
+    - ssh_keys_backup_timestamp is defined
+  delegate_to: localhost
+  become: "{{ ssh_keys_fix_permissions_with_become | default(false) | bool }}"
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Backup existing private keys before forced regeneration
+  ansible.builtin.copy:
+    src: "{{ item.item.private_key_path }}"
+    dest: "{{ item.item.directory }}/backup-{{ ssh_keys_backup_timestamp }}/{{
+      item.item.private_key_path | basename }}"
+    remote_src: true
+    owner: "{{ ssh_keys_owner_effective }}"
+    group: "{{ ssh_keys_group_effective }}"
+    mode: "{{ ssh_key_mode_private | default('0600') }}"
+  when:
+    - ssh_force_regenerate_effective | bool
+    - ssh_keys_backup_enabled_effective | bool
+    - ssh_keys_backup_timestamp is defined
+    - item.stat.exists | default(false) | bool
+  loop: "{{ ssh_key_private_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: "{{ ssh_keys_fix_permissions_with_become | default(false) | bool }}"
+  run_once: true
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Backup existing public keys before forced regeneration
+  ansible.builtin.copy:
+    src: "{{ item.item.public_key_path }}"
+    dest: "{{ item.item.directory }}/backup-{{ ssh_keys_backup_timestamp }}/{{
+      item.item.public_key_path | basename }}"
+    remote_src: true
+    owner: "{{ ssh_keys_owner_effective }}"
+    group: "{{ ssh_keys_group_effective }}"
+    mode: "{{ ssh_key_mode_public | default('0644') }}"
+  when:
+    - ssh_force_regenerate_effective | bool
+    - ssh_keys_backup_enabled_effective | bool
+    - ssh_keys_backup_timestamp is defined
+    - item.stat.exists | default(false) | bool
+  loop: "{{ ssh_key_public_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: "{{ ssh_keys_fix_permissions_with_become | default(false) | bool }}"
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Backup existing certificates before forced regeneration
+  ansible.builtin.copy:
+    src: "{{ item.item.certificate_path }}"
+    dest: "{{ item.item.directory }}/backup-{{ ssh_keys_backup_timestamp }}/{{
+      item.item.certificate_path | basename }}"
+    remote_src: true
+    owner: "{{ ssh_keys_owner_effective }}"
+    group: "{{ ssh_keys_group_effective }}"
+    mode: "{{ ssh_key_mode_certificate | default(ssh_key_mode_public |
+      default('0644')) }}"
+  when:
+    - ssh_force_regenerate_effective | bool
+    - ssh_keys_backup_enabled_effective | bool
+    - ssh_keys_backup_timestamp is defined
+    - item.stat.exists | default(false) | bool
+  loop: "{{ ssh_key_certificate_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: "{{ ssh_keys_fix_permissions_with_become | default(false) | bool }}"
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+# -----------------------------------------------------------------------------
+# Forced regeneration removal
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Remove existing private keys before forced regeneration
+  ansible.builtin.file:
+    path: "{{ item.private_key_path }}"
+    state: absent
+  loop: "{{ ssh_key_generation_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ssh_force_regenerate_effective | bool
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Remove existing public keys before forced regeneration
+  ansible.builtin.file:
+    path: "{{ item.public_key_path }}"
+    state: absent
+  loop: "{{ ssh_key_generation_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ssh_force_regenerate_effective | bool
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+- name: SSH | Keys | Remove existing certificates before forced regeneration
+  ansible.builtin.file:
+    path: "{{ item.certificate_path }}"
+    state: absent
+  loop: "{{ ssh_key_generation_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: ssh_force_regenerate_effective | bool
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+# -----------------------------------------------------------------------------
+# Generate keys
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Generate SSH keypairs
   ansible.builtin.command:
     argv: >-
       {{
-        ['ssh-keygen',
-         '-t', ssh_key_type]
-        + ((ssh_key_type == 'rsa')
-            | ternary(['-b', (ssh_key_bits | default(4096)) | string], []))
-        + ['-C', item.name ~ (ssh_key_comment_suffix | default('')),
-           '-f', ssh_output_base ~ '/' ~ item.name ~ '/id_' ~ ssh_key_type,
-           '-N', '']
+        ['ssh-keygen', '-t', ssh_key_type]
+        + (
+            (ssh_key_type in ['rsa', 'ecdsa'])
+            | ternary(['-b', ssh_key_bits_effective | string], [])
+          )
+        + [
+            '-C', item.comment,
+            '-f', item.private_key_path,
+            '-N', ''
+          ]
       }}
   args:
-    creates: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
-  loop: "{{ ssh_role_users }}"
+    creates: "{{ item.private_key_path }}"
+  loop: "{{ ssh_key_generation_jobs }}"
   loop_control:
     label: "{{ item.name }}"
+  register: ssh_key_generate_results
   delegate_to: localhost
   become: false
   run_once: true
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
 
-- name: Set permissions on private key (controller)
+# -----------------------------------------------------------------------------
+# Permissions
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Set permissions on private keys
   ansible.builtin.file:
-    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}"
+    path: "{{ item.private_key_path }}"
     state: file
+    owner: "{{ ssh_keys_owner_effective }}"
+    group: "{{ ssh_keys_group_effective }}"
     mode: "{{ ssh_key_mode_private | default('0600') }}"
-  loop: "{{ ssh_role_users }}"
+  loop: "{{ ssh_key_generation_jobs }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
-  become: false
+  become: "{{ ssh_keys_fix_permissions_with_become | default(false) | bool }}"
   run_once: true
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
 
-- name: Set permissions on public key (controller)
+- name: SSH | Keys | Set permissions on public keys
   ansible.builtin.file:
-    path: "{{ ssh_output_base }}/{{ item.name }}/id_{{ ssh_key_type }}.pub"
+    path: "{{ item.public_key_path }}"
     state: file
+    owner: "{{ ssh_keys_owner_effective }}"
+    group: "{{ ssh_keys_group_effective }}"
     mode: "{{ ssh_key_mode_public | default('0644') }}"
-  loop: "{{ ssh_role_users }}"
+  loop: "{{ ssh_key_generation_jobs }}"
   loop_control:
     label: "{{ item.name }}"
   delegate_to: localhost
+  become: "{{ ssh_keys_fix_permissions_with_become | default(false) | bool }}"
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-generate
+
+# -----------------------------------------------------------------------------
+# Verify
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Verify generated public keys
+  ansible.builtin.command:
+    cmd: "ssh-keygen -l -f {{ item.public_key_path }}"
+  loop: "{{ ssh_key_generation_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: ssh_key_public_verify_results
+  changed_when: false
+  delegate_to: localhost
   become: false
   run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-verify
+
+- name: SSH | Keys | Assert generated public keys are readable
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | length > 0
+    fail_msg: "Generated SSH public key is not readable for {{ item.item.name }}."
+  loop: "{{ ssh_key_public_verify_results.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-keys-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Keys | Show key generation summary
+  ansible.builtin.debug:
+    msg:
+      - "SSH user key generation complete."
+      - "Output base: {{ ssh_keys_output_base_effective }}"
+      - >-
+        Users with SSH material: {{
+          ssh_key_generation_jobs
+          | map(attribute='name')
+          | list
+          | join(', ')
+          if ssh_key_generation_jobs | length > 0
+          else 'none'
+        }}
+      - "Key type: {{ ssh_key_type }}"
+      - "Forced regeneration: {{ ssh_force_regenerate_effective }}"
+      - "Backups enabled: {{ ssh_keys_backup_enabled_effective }}"
+      - "Backup timestamp: {{ ssh_keys_backup_timestamp | default('none') }}"
+      - >-
+        Generated/changed this run: {{
+          ssh_key_generate_results.results
+          | default([])
+          | selectattr('changed', 'equalto', true)
+          | list
+          | length
+        }}
+  when: ssh_role_show_summary | default(true)
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags:
+    - ssh
+    - ssh-keys
+    - ssh-summary

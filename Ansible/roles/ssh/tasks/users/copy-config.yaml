@@ -1,95 +1,469 @@
 ---
 # =============================================================================
-# SSH :: Users :: Install SSH client config
+# SSH Role - Install User SSH Client Config
 # -----------------------------------------------------------------------------
 # Purpose:
-# - Deploy ~/.ssh/config for users
-# - Use Ansible-managed Jinja template
-# - Support global defaults and per-host overrides
+#   Deploys ~/.ssh/config for managed SSH users.
 #
-# Source template:
-#   {{ playbook_dir }}/../templates/ssh/config.j2
+# Design:
+#   - Uses resolved user homes from resolve-homes.yaml when available.
+#   - Falls back to getent passwd when ssh__user_homes is not already defined.
+#   - Skips absent users.
+#   - Skips users with manage_ssh=false.
+#   - Skips non-interactive users by default.
+#   - Supports role-local and legacy playbook-level templates.
+#
+# Source template preference:
+#   1. {{ role_path }}/templates/config.j2
+#   2. {{ role_path }}/templates/ssh_config.j2
+#   3. {{ playbook_dir }}/../templates/ssh/config.j2
+#
+# Output:
+#   <home>/.ssh/config
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Resolve home directories from /etc/passwd (NSS-independent)
+# Normalize inputs
 # -----------------------------------------------------------------------------
 
-- name: Read user home from /etc/passwd for SSH users
-  ansible.builtin.command: "awk -F: '$1==\"{{ item.name }}\" {print $6}' /etc/passwd"
-  loop: "{{ ssh_role_users }}"
+- name: SSH | Client Config | Normalize inputs
+  ansible.builtin.set_fact:
+    ssh_client_config_users_effective: "{{ ssh_role_users | default(users | default([])) }}"
+    ssh_client_config_enabled_effective: "{{ ssh_client_config_enabled |
+      default(ssh.client_config.enabled | default(true) if ssh is defined and
+      ssh.client_config is defined else true) }}"
+    ssh_client_config_skip_noninteractive_effective: "{{ ssh_client_config_skip_noninteractive_users | default(true) | bool }}"
+    ssh_client_config_noninteractive_shells_effective:
+      - /usr/sbin/nologin
+      - /sbin/nologin
+      - /bin/false
+      - /usr/bin/false
+    ssh_client_config_home_map_effective: "{{ ssh__user_homes | default({}) }}"
+    ssh_client_config_default_identity_file_effective: "{{ ssh_client_identity_file
+      | default(ssh.client_config.identity_file | default('~/.ssh/id_ed25519')
+      if ssh is defined and ssh.client_config is defined else
+      '~/.ssh/id_ed25519') }}"
+    ssh_client_config_default_certificate_file_effective: "{{
+      ssh_client_certificate_file | default(ssh.client_config.certificate_file |
+      default('~/.ssh/id_ed25519-cert.pub') if ssh is defined and
+      ssh.client_config is defined else '~/.ssh/id_ed25519-cert.pub') }}"
+    ssh_client_config_hosts_effective: "{{ ssh_client_hosts |
+      default(ssh.client_config.hosts | default([]) if ssh is defined and
+      ssh.client_config is defined else []) }}"
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-client-config
+
+# -----------------------------------------------------------------------------
+# Validate
+# -----------------------------------------------------------------------------
+
+- name: SSH | Client Config | Validate inputs
+  ansible.builtin.assert:
+    that:
+      - ssh_client_config_users_effective is sequence
+      - ssh_client_config_users_effective is not string
+      - ssh_client_config_users_effective is not mapping
+      - ssh_client_config_home_map_effective is mapping
+      - ssh_client_config_hosts_effective is sequence
+      - ssh_client_config_hosts_effective is not string
+      - ssh_client_config_hosts_effective is not mapping
+    fail_msg: "SSH client config inputs are invalid."
+    success_msg: "SSH client config inputs are valid."
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+    - ssh-client-config-validate
+
+- name: SSH | Client Config | Validate user entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+    fail_msg: "Each SSH user entry must be a mapping with a valid Linux username."
+  loop: "{{ ssh_client_config_users_effective }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+    - ssh-client-config-validate
+
+# -----------------------------------------------------------------------------
+# Build candidate users
+# -----------------------------------------------------------------------------
+
+- name: SSH | Client Config | Build candidate user list
+  ansible.builtin.set_fact:
+    ssh_client_config_candidate_users: >-
+      {%- set users_out = [] -%} {%- for user in
+      ssh_client_config_users_effective -%}
+        {%- set state = user.state | default('present') -%}
+        {%- set manage_ssh = user.manage_ssh | default(users_default_manage_ssh | default(true)) -%}
+        {%- set shell = user.shell | default('') -%}
+        {%- set is_noninteractive = shell in ssh_client_config_noninteractive_shells_effective -%}
+        {%- if state == 'present' and manage_ssh | bool -%}
+          {%- if not (ssh_client_config_skip_noninteractive_effective | bool and is_noninteractive) -%}
+            {%- set _ = users_out.append(user) -%}
+          {%- endif -%}
+        {%- endif -%}
+      {%- endfor -%} {{ users_out }}
+  changed_when: false
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+
+# -----------------------------------------------------------------------------
+# Resolve missing home directories
+# -----------------------------------------------------------------------------
+
+- name: SSH | Client Config | Resolve missing user homes with getent
+  ansible.builtin.command:
+    argv:
+      - getent
+      - passwd
+      - "{{ item.name }}"
+  loop: "{{ ssh_client_config_candidate_users | default([]) }}"
   loop_control:
     label: "{{ item.name }}"
-  register: ssh__passwd_home_lookup
+  register: ssh_client_config_getent_passwd
   changed_when: false
   failed_when: false
-  timeout: 10
-  ignore_errors: true
+  when:
+    - ssh_client_config_enabled_effective | bool
+    - item.name not in ssh_client_config_home_map_effective
+  tags:
+    - ssh
+    - ssh-client-config
 
-- name: Initialize SSH user home directory map
+- name: SSH | Client Config | Add resolved homes to home map
   ansible.builtin.set_fact:
-    ssh__home_by_user: "{{ ssh__home_by_user | default({}) }}"
-  changed_when: false
-
-- name: Build SSH user home directory map from existing local users
-  ansible.builtin.set_fact:
-    ssh__home_by_user: "{{ ssh__home_by_user | default({}) | combine({ item.item.name: item.stdout }) }}"
-  loop: "{{ ssh__passwd_home_lookup.results | default([]) }}"
+    ssh_client_config_home_map_effective: >-
+      {{
+        ssh_client_config_home_map_effective
+        | combine({ item.item.name: item.stdout.split(':')[5] })
+      }}
+  loop: "{{ ssh_client_config_getent_passwd.results | default([]) }}"
   loop_control:
     label: "{{ item.item.name | default('unknown') }}"
   when:
-    - (item.rc | default(1)) == 0
-    - (item.stdout | default('') | length) > 0
+    - ssh_client_config_enabled_effective | bool
+    - item is defined
+    - item.skipped is not defined or not item.skipped
+    - item.rc | default(1) == 0
+    - item.stdout is defined
+    - item.stdout.split(':') | length >= 7
+    - item.stdout.split(':')[5] is match('^/')
   changed_when: false
+  tags:
+    - ssh
+    - ssh-client-config
 
 # -----------------------------------------------------------------------------
-# Ensure ~/.ssh exists
+# Build render jobs
 # -----------------------------------------------------------------------------
 
-- name: Ensure ~/.ssh directory exists for users
-  ansible.builtin.file:
-    path: "{{ ssh__home_by_user[item.name] }}/.ssh"
-    state: directory
-    owner: "{{ item.name }}"
-    group: "{{ item.name }}"
-    mode: "0700"
-  loop: "{{ ssh_role_users }}"
+- name: SSH | Client Config | Build render jobs
+  ansible.builtin.set_fact:
+    ssh_client_config_render_jobs: >-
+      {%- set jobs = [] -%} {%- for user in ssh_client_config_candidate_users |
+      default([]) -%}
+        {%- set home = ssh_client_config_home_map_effective[user.name] | default(user.home_directory | default('')) -%}
+        {%- if home | length > 0 -%}
+          {%- set group_name = user.primary_group | default(user.name) -%}
+          {%- set identity_file = user.ssh_client_identity_file | default(ssh_client_config_default_identity_file_effective) -%}
+          {%- set certificate_file = user.ssh_client_certificate_file | default(ssh_client_config_default_certificate_file_effective) -%}
+          {%- if identity_file.startswith('~/') -%}
+            {%- set identity_file = home ~ '/' ~ identity_file[2:] -%}
+          {%- endif -%}
+          {%- if certificate_file.startswith('~/') -%}
+            {%- set certificate_file = home ~ '/' ~ certificate_file[2:] -%}
+          {%- endif -%}
+          {%- set _ = jobs.append({
+            'name': user.name,
+            'group': group_name,
+            'home': home,
+            'ssh_dir': home ~ '/.ssh',
+            'config_path': home ~ '/.ssh/config',
+            'identity_file': identity_file,
+            'certificate_file': certificate_file,
+            'hosts': user.ssh_client_hosts | default(ssh_client_config_hosts_effective),
+            'strict_host_key_checking': user.ssh_client_strict_host_key_checking | default(ssh_client_strict_host_key_checking | default('accept-new')),
+            'identities_only': user.ssh_client_identities_only | default(ssh_client_identities_only | default(true)),
+            'pubkey_authentication': user.ssh_client_pubkey_authentication | default(ssh_client_pubkey_authentication | default(true)),
+            'password_authentication': user.ssh_client_password_authentication | default(ssh_client_password_authentication | default(false)),
+            'server_alive_interval': user.ssh_client_server_alive_interval | default(ssh_client_server_alive_interval | default(30)),
+            'server_alive_count_max': user.ssh_client_server_alive_count_max | default(ssh_client_server_alive_count_max | default(3)),
+            'connect_timeout': user.ssh_client_connect_timeout | default(ssh_client_connect_timeout | default(10)),
+            'user_known_hosts_file': user.ssh_client_user_known_hosts_file | default(ssh_client_user_known_hosts_file | default(home ~ '/.ssh/known_hosts'))
+          }) -%}
+        {%- endif -%}
+      {%- endfor -%} {{ jobs }}
+  changed_when: false
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+
+- name: SSH | Client Config | Validate render jobs
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.home is match('^/')
+      - item.ssh_dir is match('^/')
+      - item.config_path is match('^/')
+      - item.config_path.startswith(item.ssh_dir ~ '/')
+      - item.hosts is sequence
+      - item.hosts is not string
+      - item.hosts is not mapping
+      - item.strict_host_key_checking in
+        ssh_client_valid_strict_host_key_checking_values | default(['yes', 'no',
+        'ask', 'accept-new'])
+      - item.identities_only in [true, false]
+      - item.pubkey_authentication in [true, false]
+      - item.password_authentication in [true, false]
+    fail_msg: "Invalid SSH client config render job: {{ item }}"
+  loop: "{{ ssh_client_config_render_jobs | default([]) }}"
   loop_control:
     label: "{{ item.name }}"
-  when: item.name in ssh__home_by_user
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+    - ssh-client-config-validate
+
+# -----------------------------------------------------------------------------
+# Resolve template source
+# -----------------------------------------------------------------------------
+
+- name: SSH | Client Config | Check role-local config.j2 template
+  ansible.builtin.stat:
+    path: "{{ role_path }}/templates/config.j2"
+  delegate_to: localhost
+  register: ssh_client_config_role_template_stat
+  changed_when: false
+  become: false
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+
+- name: SSH | Client Config | Check role-local ssh_config.j2 template
+  ansible.builtin.stat:
+    path: "{{ role_path }}/templates/ssh_config.j2"
+  delegate_to: localhost
+  register: ssh_client_config_role_alt_template_stat
+  changed_when: false
+  become: false
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+
+- name: SSH | Client Config | Check legacy playbook config.j2 template
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../templates/ssh/config.j2"
+  delegate_to: localhost
+  register: ssh_client_config_legacy_template_stat
+  changed_when: false
+  become: false
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+
+- name: SSH | Client Config | Select template source
+  ansible.builtin.set_fact:
+    ssh_client_config_template_src_effective: >-
+      {{
+        ssh_client_config_template_src
+        | default(
+            (role_path ~ '/templates/config.j2')
+            if ssh_client_config_role_template_stat.stat.exists | default(false)
+            else (
+              (role_path ~ '/templates/ssh_config.j2')
+              if ssh_client_config_role_alt_template_stat.stat.exists | default(false)
+              else (playbook_dir ~ '/../templates/ssh/config.j2')
+            )
+          )
+      }}
+  changed_when: false
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+
+- name: SSH | Client Config | Assert selected template exists
+  ansible.builtin.assert:
+    that:
+      - >-
+        ssh_client_config_template_src is defined or
+        ssh_client_config_role_template_stat.stat.exists | default(false) or
+        ssh_client_config_role_alt_template_stat.stat.exists | default(false) or
+        ssh_client_config_legacy_template_stat.stat.exists | default(false)
+    fail_msg: >-
+      No SSH client config template was found. Expected one of: - {{ role_path
+      }}/templates/config.j2 - {{ role_path }}/templates/ssh_config.j2 - {{
+      playbook_dir }}/../templates/ssh/config.j2 Or set
+      ssh_client_config_template_src to a valid template path.
+    success_msg: "SSH client config template source is available."
+  delegate_to: localhost
+  become: false
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+    - ssh-client-config-validate
+
+# -----------------------------------------------------------------------------
+# Ensure ~/.ssh directories exist
+# -----------------------------------------------------------------------------
+
+- name: SSH | Client Config | Ensure user .ssh directories exist
+  ansible.builtin.file:
+    path: "{{ item.ssh_dir }}"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.group }}"
+    mode: "0700"
+  loop: "{{ ssh_client_config_render_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
 
 # -----------------------------------------------------------------------------
 # Deploy SSH client config
 # -----------------------------------------------------------------------------
 
-- name: Deploy SSH client config for users
+- name: SSH | Client Config | Deploy SSH client config for users
   ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/ssh/config.j2"
-    dest: "{{ ssh__home_by_user[item.name] }}/.ssh/config"
+    src: "{{ ssh_client_config_template_src_effective }}"
+    dest: "{{ item.config_path }}"
     owner: "{{ item.name }}"
-    group: "{{ item.name }}"
-    mode: "0600"
-  loop: "{{ ssh_role_users }}"
+    group: "{{ item.group }}"
+    mode: "{{ ssh_client_config_mode | default('0600') }}"
+    backup: "{{ ssh_client_config_backup | default(false) }}"
+  loop: "{{ ssh_client_config_render_jobs | default([]) }}"
   loop_control:
     label: "{{ item.name }}"
-  when: item.name in ssh__home_by_user
+  become: true
   vars:
-    ansible_template_src: "templates/ssh/config.j2"
-    ssh_client: >-
-      {{
-        {
-          'global': {
-            'strict_host_key_checking': ssh.client_config.strict_host_key_checking | default('accept-new'),
-            'forward_agent': ssh.client_config.forward_agent | default('no'),
-            'forward_x11': ssh.client_config.forward_x11 | default('no'),
-            'server_alive_interval': ssh.client_config.server_alive_interval | default(30),
-            'server_alive_count_max': ssh.client_config.server_alive_count_max | default(3),
-            'identity_file': ssh.client_config.identity_file
-              | default(ssh__home_by_user[item.name] ~ '/.ssh/id_' ~ (ssh_key_type | default('ed25519'))),
-            'certificate_file': ssh.client_config.certificate_file
-              | default(ssh__home_by_user[item.name] ~ '/.ssh/id_' ~ (ssh_key_type | default('ed25519')) ~ '-cert.pub'),
-            'identities_only': ssh.client_config.identities_only | default(true)
-          },
-          'hosts': ssh.client_config.hosts | default([])
-        }
-      }}
+    ansible_template_src: "{{ ssh_client_config_template_src_effective }}"
+    ssh_client:
+      global:
+        strict_host_key_checking: "{{ item.strict_host_key_checking }}"
+        identities_only: "{{ item.identities_only }}"
+        pubkey_authentication: "{{ item.pubkey_authentication }}"
+        password_authentication: "{{ item.password_authentication }}"
+        server_alive_interval: "{{ item.server_alive_interval }}"
+        server_alive_count_max: "{{ item.server_alive_count_max }}"
+        connect_timeout: "{{ item.connect_timeout }}"
+        identity_file: "{{ item.identity_file }}"
+        certificate_file: "{{ item.certificate_file }}"
+        user_known_hosts_file: "{{ item.user_known_hosts_file }}"
+        forward_agent: "{{ item.forward_agent | default('no') }}"
+        forward_x11: "{{ item.forward_x11 | default('no') }}"
+      hosts: "{{ item.hosts }}"
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+
+# -----------------------------------------------------------------------------
+# Remove disabled configs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Client Config | Remove SSH client config when disabled
+  ansible.builtin.file:
+    path: "{{ item.config_path }}"
+    state: absent
+  loop: "{{ ssh_client_config_render_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+  when:
+    - not (ssh_client_config_enabled_effective | bool)
+    - ssh_remove_disabled_client_config | default(false) | bool
+  tags:
+    - ssh
+    - ssh-client-config
+
+# -----------------------------------------------------------------------------
+# Verify
+# -----------------------------------------------------------------------------
+
+- name: SSH | Client Config | Stat rendered SSH client configs
+  ansible.builtin.stat:
+    path: "{{ item.config_path }}"
+    follow: false
+  loop: "{{ ssh_client_config_render_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: ssh_client_config_file_stats
+  changed_when: false
+  when: ssh_client_config_enabled_effective | bool
+  tags:
+    - ssh
+    - ssh-client-config
+    - ssh-client-config-verify
+
+- name: SSH | Client Config | Assert rendered SSH client configs exist
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false) | bool
+      - not (item.stat.islnk | default(false) | bool)
+      - item.stat.pw_name == item.item.name
+      - item.stat.mode == (ssh_client_config_mode | default('0600'))
+    fail_msg: "SSH client config is missing, symlinked, or has incorrect
+      ownership/mode for {{ item.item.name }}."
+    success_msg: "SSH client config is valid for {{ item.item.name }}."
+  loop: "{{ ssh_client_config_file_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - ssh_client_config_enabled_effective | bool
+    - item is defined
+    - item.skipped is not defined or not item.skipped
+  tags:
+    - ssh
+    - ssh-client-config
+    - ssh-client-config-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Client Config | Show client config summary
+  ansible.builtin.debug:
+    msg:
+      - "SSH client config deployment complete."
+      - "Enabled: {{ ssh_client_config_enabled_effective | bool }}"
+      - "Template: {{ ssh_client_config_template_src_effective | default('none')
+        }}"
+      - >-
+        Users configured: {{
+          ssh_client_config_render_jobs
+          | default([])
+          | map(attribute='name')
+          | list
+          | join(', ')
+          if ssh_client_config_render_jobs | default([]) | length > 0
+          else 'none'
+        }}
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-client-config
+    - ssh-summary

@@ -1,0 +1,109 @@
+# Kubernetes/apps/prod/cattle-system/rancher/values.yaml
+
+hostname: rancher.sinlessgames.com
+
+# Rancher server is installed into the Helm release namespace:
+# cattle-system.
+#
+# Rancher will still create/manage some runtime namespaces for Fleet,
+# provisioning, impersonation, global metadata, and UI/plugin systems.
+# Do not force those into cattle-system; that is not a supported Rancher layout.
+
+# Keep Rancher behind your own Istio Gateway/VirtualService.
+# The Rancher chart supports disabling chart-managed ingress when using
+# your own ingress path.
+ingress:
+  enabled: false
+
+# TLS terminates at Istio Gateway.
+# Gateway -> Rancher backend should still be protected by Istio mTLS.
+tls: external
+
+# Keep this blank unless doing a one-time manual bootstrap.
+# If blank, Rancher generates the bootstrap password.
+bootstrapPassword: ""
+
+# For a true production management plane, use 3.
+# For homelab/non-HA management UI, 1 is acceptable.
+replicas: 1
+
+antiAffinity: preferred
+topologyKey: kubernetes.io/hostname
+
+# Rancher agent certificate validation.
+# Use strict unless you have a specific private CA/system-store reason.
+agentTLSMode: strict
+
+privateCA: false
+additionalTrustedCAs: false
+
+# Rancher needs internal cluster ranges excluded from proxy behavior.
+noProxy: "127.0.0.0/8,10.42.0.0/16,10.43.0.0/16,10.10.0.0/16,.svc,.cluster.local,cattle-system.svc"
+
+extraEnv:
+  - name: KUBERNETES_SERVICE_HOST
+    value: 10.10.40.10
+  - name: KUBERNETES_SERVICE_PORT
+    value: "6443"
+
+image:
+  repository: rancher/rancher
+  pullPolicy: IfNotPresent
+  tag: ""
+
+debug: false
+
+# Keep false unless you are doing an air-gapped/system-chart-bundled install.
+useBundledSystemChart: false
+
+hostNetwork: false
+
+auditLog:
+  enabled: true
+  level: 1
+  destination: sidecar
+  maxAge: 7
+  maxBackup: 5
+  maxSize: 100
+  image:
+    repository: rancher/mirrored-bci-micro
+    tag: 15.6.24.2
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 2Gi
+
+startupProbe:
+  timeoutSeconds: 5
+  periodSeconds: 10
+  failureThreshold: 18
+
+livenessProbe:
+  timeoutSeconds: 5
+  periodSeconds: 30
+  failureThreshold: 5
+
+readinessProbe:
+  timeoutSeconds: 5
+  periodSeconds: 30
+  failureThreshold: 5
+
+service:
+  type: ClusterIP
+  disableHTTP: false
+  annotations:
+    security.sinlessgames.io/exposure: cluster-internal
+    security.sinlessgames.io/mtls: istio-strict
+    security.sinlessgames.io/ingress-required: istio-gateway

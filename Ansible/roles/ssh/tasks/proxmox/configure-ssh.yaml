@@ -1,63 +1,415 @@
 ---
-# Ansible/roles/ssh/tasks/proxmox/configure-ssh.yaml
+# =============================================================================
+# SSH Role - Proxmox SSH Configuration
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Applies Proxmox-safe OpenSSH server configuration using an sshd_config.d
+#   drop-in.
+#
+# Security model:
+#   - Public key authentication remains enabled.
+#   - Password authentication remains disabled by default.
+#   - Root login remains public-key/certificate only by default.
+#   - SSH user CA trust is enabled through TrustedUserCAKeys.
+#   - AuthorizedPrincipalsFile enables certificate principal mapping.
+#
+# Safety:
+#   - Validates sshd syntax before reload/restart.
+#   - Uses reload first to avoid interrupting active SSH sessions.
+#   - Verifies effective sshd configuration with sshd -T.
+#   - Keeps MaxAuthTries safely above common ssh-agent lockout thresholds.
+# =============================================================================
 
-- name: Ensure sshd_config.d directory exists
+# -----------------------------------------------------------------------------
+# Normalize Proxmox SSH variables
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox | Normalize SSH configuration variables
+  ansible.builtin.set_fact:
+    proxmox_ssh_sshd_config_path: "{{ ssh_sshd_config_path | default('/etc/ssh/sshd_config') }}"
+    proxmox_ssh_sshd_config_dir: "{{ ssh_sshd_config_dir | default('/etc/ssh/sshd_config.d') }}"
+    proxmox_ssh_managed_config_path: >-
+      {{
+        ssh_proxmox_managed_config_path
+        | default('/etc/ssh/sshd_config.d/50-ansible-proxmox.conf')
+      }}
+    proxmox_ssh_sshd_service_name: "{{ ssh_sshd_service_name | default('ssh') }}"
+    proxmox_ssh_template_src: >-
+      {{
+        ssh_sshd_template_src
+        | default(playbook_dir ~ '/../templates/ssh/sshd_config.j2')
+      }}
+    proxmox_ssh_trusted_user_ca_keys: >-
+      {{
+        ssh_server_trusted_user_ca_keys
+        | default(
+            ssh.server.trusted_user_ca_keys
+            | default('/etc/ssh/ca/ssh_ca.pub')
+            if ssh is defined and ssh.server is defined
+            else '/etc/ssh/ca/ssh_ca.pub'
+          )
+      }}
+    proxmox_ssh_authorized_principals_file: >-
+      {{
+        ssh_server_authorized_principals_file
+        | default(
+            ssh.server.authorized_principals_file
+            | default('/etc/ssh/auth_principals/%u')
+            if ssh is defined and ssh.server is defined
+            else '/etc/ssh/auth_principals/%u'
+          )
+      }}
+    proxmox_ssh_password_authentication: >-
+      {{
+        ssh_server_password_authentication
+        | default(
+            ssh.server.password_authentication
+            | default(false)
+            if ssh is defined and ssh.server is defined
+            else false
+          )
+      }}
+    proxmox_ssh_pubkey_authentication: >-
+      {{
+        ssh_server_pubkey_authentication
+        | default(
+            ssh.server.pubkey_authentication
+            | default(true)
+            if ssh is defined and ssh.server is defined
+            else true
+          )
+      }}
+    proxmox_ssh_permit_root_login: >-
+      {{
+        ssh_server_permit_root_login
+        | default(
+            ssh.server.permit_root_login
+            | default('prohibit-password')
+            if ssh is defined and ssh.server is defined
+            else 'prohibit-password'
+          )
+      }}
+    proxmox_ssh_max_auth_tries: >-
+      {{
+        ssh.server.max_auth_tries
+        | default(ssh_server_max_auth_tries | default(10))
+        if ssh is defined and ssh.server is defined
+        else ssh_server_max_auth_tries | default(10)
+      }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+
+# -----------------------------------------------------------------------------
+# Validate inputs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox | Validate SSH configuration variables
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_sshd_config_path is string
+      - proxmox_ssh_sshd_config_path is match('^/')
+      - proxmox_ssh_sshd_config_dir is string
+      - proxmox_ssh_sshd_config_dir is match('^/')
+      - proxmox_ssh_managed_config_path is string
+      - proxmox_ssh_managed_config_path is match('^/')
+      - proxmox_ssh_managed_config_path.startswith(proxmox_ssh_sshd_config_dir ~
+        '/')
+      - proxmox_ssh_template_src is string
+      - proxmox_ssh_template_src | length > 0
+      - proxmox_ssh_trusted_user_ca_keys is string
+      - proxmox_ssh_trusted_user_ca_keys is match('^/')
+      - proxmox_ssh_authorized_principals_file is string
+      - proxmox_ssh_authorized_principals_file is match('^/')
+      - proxmox_ssh_max_auth_tries | int >= 6
+    fail_msg: >-
+      Proxmox SSH configuration variables are invalid. Confirm sshd paths,
+      template source, CA paths, and MaxAuthTries.
+    success_msg: "Proxmox SSH configuration variables are valid."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-proxmox-validate
+
+- name: SSH | Proxmox | Check selected sshd template exists
+  ansible.builtin.stat:
+    path: "{{ proxmox_ssh_template_src }}"
+  delegate_to: localhost
+  register: proxmox_ssh_template_stat
+  changed_when: false
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-proxmox-validate
+
+- name: SSH | Proxmox | Assert selected sshd template exists
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_template_stat.stat.exists | default(false) | bool
+      - proxmox_ssh_template_stat.stat.isreg | default(false) | bool
+    fail_msg: "Selected sshd template does not exist: {{ proxmox_ssh_template_src }}"
+    success_msg: "Selected sshd template exists."
+  delegate_to: localhost
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-proxmox-validate
+
+# -----------------------------------------------------------------------------
+# Directory and include management
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox | Ensure sshd_config.d directory exists
   ansible.builtin.file:
-    path: /etc/ssh/sshd_config.d
+    path: "{{ proxmox_ssh_sshd_config_dir }}"
     state: directory
     owner: root
     group: root
     mode: "0755"
   become: true
+  tags:
+    - ssh
+    - ssh-proxmox
 
-- name: Ensure sshd_config includes drop-in directory
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    insertafter: BOF
-    regexp: '^\s*Include\s+/etc/ssh/sshd_config\.d/\*\.conf\s*$'
-    line: 'Include /etc/ssh/sshd_config.d/*.conf'
-    state: present
+- name: SSH | Proxmox | Ensure sshd runtime directory exists
+  ansible.builtin.file:
+    path: /run/sshd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
   become: true
+  tags:
+    - ssh
+    - ssh-proxmox
 
-- name: Deploy sshd configuration drop-in
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/ssh/sshd_config.j2"
-    dest: /etc/ssh/sshd_config.d/50-ansible-ssh.conf
+- name: SSH | Proxmox | Ensure sshd_config includes drop-in directory
+  ansible.builtin.lineinfile:
+    path: "{{ proxmox_ssh_sshd_config_path }}"
+    insertafter: BOF
+    regexp: "^\\s*Include\\s+{{ proxmox_ssh_sshd_config_dir | regex_escape
+      }}/\\*\\.conf\\s*$"
+    line: "Include {{ proxmox_ssh_sshd_config_dir }}/*.conf"
+    state: present
     owner: root
     group: root
     mode: "0644"
-  notify: Restart sshd
+    backup: "{{ ssh_sshd_config_backup | default(true) }}"
+  register: proxmox_ssh_include_result
   become: true
+  tags:
+    - ssh
+    - ssh-proxmox
 
-- name: Validate sshd configuration syntax
-  ansible.builtin.command: sshd -t
+# -----------------------------------------------------------------------------
+# Deploy Proxmox SSH drop-in
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox | Deploy sshd configuration drop-in
+  ansible.builtin.template:
+    src: "{{ proxmox_ssh_template_src }}"
+    dest: "{{ proxmox_ssh_managed_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: "{{ ssh_sshd_config_backup | default(true) }}"
+  register: proxmox_ssh_dropin_result
+  become: true
+  vars:
+    ansible_template_src: "{{ proxmox_ssh_template_src }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+
+# -----------------------------------------------------------------------------
+# Validate before reload
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox | Validate sshd configuration syntax
+  ansible.builtin.command:
+    cmd: "sshd -t -f {{ proxmox_ssh_sshd_config_path }}"
+  register: proxmox_ssh_validate_result
   changed_when: false
   become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-proxmox-validate
 
-- name: Read effective sshd configuration
-  ansible.builtin.command: sshd -T
-  register: sshd_effective
-  changed_when: false
-  become: true
+# -----------------------------------------------------------------------------
+# Reload / restart SSH safely
+# -----------------------------------------------------------------------------
 
-- name: Compute expected CA directives (lowercase to match sshd -T)
+- name: SSH | Proxmox | Determine whether SSH reload is required
   ansible.builtin.set_fact:
-    expected_trustedusercakeys: >-
-      trustedusercakeys {{ (ssh.server.trusted_user_ca_keys | default('/etc/ssh/ca/ssh_ca.pub')) | lower }}
-    expected_authorizedprincipalsfile: >-
-      authorizedprincipalsfile {{ (ssh.server.authorized_principals_file | default('/etc/ssh/auth_principals/%u')) | lower }}
+    proxmox_ssh_changed: >-
+      {{
+        proxmox_ssh_include_result is changed
+        or proxmox_ssh_dropin_result is changed
+      }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
 
-- name: Assert SSH CA trust and principals are active
+- name: SSH | Proxmox | Reload SSH service after configuration changes
+  ansible.builtin.service:
+    name: "{{ proxmox_ssh_sshd_service_name }}"
+    state: reloaded
+  register: proxmox_ssh_reload_result
+  failed_when: false
+  become: true
+  when:
+    - proxmox_ssh_changed | bool
+    - ssh_role_reload_sshd | default(true) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+
+- name: SSH | Proxmox | Restart SSH service when reload is unavailable
+  ansible.builtin.service:
+    name: "{{ proxmox_ssh_sshd_service_name }}"
+    state: restarted
+  become: true
+  when:
+    - proxmox_ssh_changed | bool
+    - ssh_role_restart_sshd | default(true) | bool
+    - >-
+      proxmox_ssh_reload_result is not defined or proxmox_ssh_reload_result is
+      failed or proxmox_ssh_reload_result.rc | default(0) != 0
+  tags:
+    - ssh
+    - ssh-proxmox
+
+# -----------------------------------------------------------------------------
+# Verify effective sshd configuration
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox | Read effective sshd configuration
+  ansible.builtin.command:
+    cmd: "sshd -T -f {{ proxmox_ssh_sshd_config_path }}"
+  register: proxmox_ssh_effective
+  changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-proxmox-verify
+
+- name: SSH | Proxmox | Compute expected effective directives
+  ansible.builtin.set_fact:
+    proxmox_ssh_expected_trustedusercakeys: >-
+      trustedusercakeys {{ proxmox_ssh_trusted_user_ca_keys | lower }}
+    proxmox_ssh_expected_authorizedprincipalsfile: >-
+      authorizedprincipalsfile {{ proxmox_ssh_authorized_principals_file | lower
+      }}
+    proxmox_ssh_expected_pubkeyauthentication: >-
+      pubkeyauthentication {{ 'yes' if proxmox_ssh_pubkey_authentication | bool
+      else 'no' }}
+    proxmox_ssh_expected_passwordauthentication: >-
+      passwordauthentication {{ 'yes' if proxmox_ssh_password_authentication |
+      bool else 'no' }}
+    proxmox_ssh_expected_permitrootlogin: >-
+      permitrootlogin {{ proxmox_ssh_permit_root_login | lower }}
+    proxmox_ssh_expected_maxauthtries: >-
+      maxauthtries {{ proxmox_ssh_max_auth_tries | int }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-proxmox-verify
+
+- name: SSH | Proxmox | Assert SSH CA trust and principals are active
   ansible.builtin.assert:
     that:
-      - expected_trustedusercakeys in (sshd_effective.stdout | lower)
-      - expected_authorizedprincipalsfile in (sshd_effective.stdout | lower)
+      - proxmox_ssh_expected_trustedusercakeys in (proxmox_ssh_effective.stdout
+        | lower)
+      - proxmox_ssh_expected_authorizedprincipalsfile in
+        (proxmox_ssh_effective.stdout | lower)
+      - proxmox_ssh_expected_pubkeyauthentication in
+        (proxmox_ssh_effective.stdout | lower)
+      - proxmox_ssh_expected_passwordauthentication in
+        (proxmox_ssh_effective.stdout | lower)
+      - proxmox_ssh_expected_permitrootlogin in (proxmox_ssh_effective.stdout |
+        lower)
     fail_msg: |
-      SSH CA-based authentication is NOT active.
+      Proxmox SSH CA-based authentication configuration is not active.
+
       Expected:
-        - {{ expected_trustedusercakeys }}
-        - {{ expected_authorizedprincipalsfile }}
-      Got:
-        {{ (sshd_effective.stdout_lines
-            | select('match', '^(trustedusercakeys|authorizedprincipalsfile)\\s')
-            | list) | to_nice_yaml }}
+        - {{ proxmox_ssh_expected_trustedusercakeys }}
+        - {{ proxmox_ssh_expected_authorizedprincipalsfile }}
+        - {{ proxmox_ssh_expected_pubkeyauthentication }}
+        - {{ proxmox_ssh_expected_passwordauthentication }}
+        - {{ proxmox_ssh_expected_permitrootlogin }}
+
+      Effective matching directives:
+      {{
+        (
+          proxmox_ssh_effective.stdout_lines
+          | select('match', '^(trustedusercakeys|authorizedprincipalsfile|pubkeyauthentication|passwordauthentication|permitrootlogin|maxauthtries)\\s')
+          | list
+        )
+        | to_nice_yaml
+      }}
+    success_msg: "Proxmox SSH CA trust and authentication policy are active."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-proxmox-verify
+
+- name: SSH | Proxmox | Assert MaxAuthTries is safe
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_expected_maxauthtries in (proxmox_ssh_effective.stdout |
+        lower)
+      - proxmox_ssh_max_auth_tries | int >= 6
+    fail_msg: |
+      Proxmox SSH MaxAuthTries is not safe or not active.
+
+      Expected:
+        - {{ proxmox_ssh_expected_maxauthtries }}
+
+      Effective matching directives:
+      {{
+        (
+          proxmox_ssh_effective.stdout_lines
+          | select('match', '^maxauthtries\\s')
+          | list
+        )
+        | to_nice_yaml
+      }}
+    success_msg: "Proxmox SSH MaxAuthTries is safe."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-proxmox-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox | Show SSH configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "Proxmox SSH configuration complete."
+      - "Host: {{ inventory_hostname }}"
+      - "Service: {{ proxmox_ssh_sshd_service_name }}"
+      - "Main config: {{ proxmox_ssh_sshd_config_path }}"
+      - "Drop-in dir: {{ proxmox_ssh_sshd_config_dir }}"
+      - "Managed drop-in: {{ proxmox_ssh_managed_config_path }}"
+      - "Template: {{ proxmox_ssh_template_src }}"
+      - "TrustedUserCAKeys: {{ proxmox_ssh_trusted_user_ca_keys }}"
+      - "AuthorizedPrincipalsFile: {{ proxmox_ssh_authorized_principals_file }}"
+      - "PasswordAuthentication: {{ proxmox_ssh_password_authentication | bool
+        }}"
+      - "PermitRootLogin: {{ proxmox_ssh_permit_root_login }}"
+      - "MaxAuthTries: {{ proxmox_ssh_max_auth_tries }}"
+      - "Changed: {{ proxmox_ssh_changed | bool }}"
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-summary

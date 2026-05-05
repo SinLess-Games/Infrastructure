@@ -1,4 +1,42 @@
 ---
+# =============================================================================
+# Kubernetes Role Handlers
+# =============================================================================
+# These handlers are grouped with listen directives so a single notify event:
+#
+#   notify: Restart rke2-server
+#   notify: Restart rke2-agent
+#
+# runs the full restart, wait, and assert sequence.
+# =============================================================================
+
+# =============================================================================
+# RKE2 Server Handlers
+# =============================================================================
+
+- name: Check rke2-server service unit before restart
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/systemd/system/rke2-server.service
+    - /usr/local/lib/systemd/system/rke2-server.service
+    - /lib/systemd/system/rke2-server.service
+  register: kubernetes_role_rke2_server_unit_check
+  become: true
+  listen: Restart rke2-server
+
+- name: Determine whether rke2-server service unit exists
+  ansible.builtin.set_fact:
+    kubernetes_role_rke2_server_unit_exists: >-
+      {{
+        kubernetes_role_rke2_server_unit_check.results
+        | default([])
+        | selectattr('stat.exists', 'equalto', true)
+        | list
+        | length > 0
+      }}
+  listen: Restart rke2-server
+
 - name: Restart rke2-server
   ansible.builtin.systemd:
     name: "{{ kubernetes_role_rke2_server_service }}"
@@ -7,15 +45,25 @@
   register: kubernetes_role_rke2_server_restart
   failed_when: false
   become: true
+  when:
+    - kubernetes_role_rke2_server_unit_exists | default(false) | bool
+  listen: Restart rke2-server
 
 - name: Wait for rke2-server to become active after restart
-  ansible.builtin.command: systemctl is-active {{ kubernetes_role_rke2_server_service }}
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ kubernetes_role_rke2_server_service }}"
   register: kubernetes_role_rke2_server_active
   changed_when: false
-  retries: 24
-  delay: 5
+  retries: "{{ kubernetes_wait_for_rke2_active_retries | default(36) | int }}"
+  delay: "{{ kubernetes_wait_for_rke2_active_delay | default(5) | int }}"
   until: kubernetes_role_rke2_server_active.stdout == 'active'
   become: true
+  when:
+    - kubernetes_role_rke2_server_unit_exists | default(false) | bool
+  listen: Restart rke2-server
 
 - name: Assert rke2-server is active after restart attempt
   ansible.builtin.assert:
@@ -25,7 +73,47 @@
       rke2-server did not become active after restart.
       restart_result={{ kubernetes_role_rke2_server_restart | to_nice_json }}
       active_result={{ kubernetes_role_rke2_server_active | to_nice_json }}
+    success_msg: "rke2-server is active after restart."
   become: true
+  when:
+    - kubernetes_role_rke2_server_unit_exists | default(false) | bool
+  listen: Restart rke2-server
+
+- name: Report skipped rke2-server restart when service is not installed
+  ansible.builtin.debug:
+    msg: >-
+      Skipping rke2-server restart because no rke2-server systemd unit exists on
+      {{ inventory_hostname }} yet.
+  when:
+    - not (kubernetes_role_rke2_server_unit_exists | default(false) | bool)
+  listen: Restart rke2-server
+
+# =============================================================================
+# RKE2 Agent Handlers
+# =============================================================================
+
+- name: Check rke2-agent service unit before restart
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/systemd/system/rke2-agent.service
+    - /usr/local/lib/systemd/system/rke2-agent.service
+    - /lib/systemd/system/rke2-agent.service
+  register: kubernetes_role_rke2_agent_unit_check
+  become: true
+  listen: Restart rke2-agent
+
+- name: Determine whether rke2-agent service unit exists
+  ansible.builtin.set_fact:
+    kubernetes_role_rke2_agent_unit_exists: >-
+      {{
+        kubernetes_role_rke2_agent_unit_check.results
+        | default([])
+        | selectattr('stat.exists', 'equalto', true)
+        | list
+        | length > 0
+      }}
+  listen: Restart rke2-agent
 
 - name: Restart rke2-agent
   ansible.builtin.systemd:
@@ -35,15 +123,25 @@
   register: kubernetes_role_rke2_agent_restart
   failed_when: false
   become: true
+  when:
+    - kubernetes_role_rke2_agent_unit_exists | default(false) | bool
+  listen: Restart rke2-agent
 
 - name: Wait for rke2-agent to become active after restart
-  ansible.builtin.command: systemctl is-active {{ kubernetes_role_rke2_agent_service }}
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - "{{ kubernetes_role_rke2_agent_service }}"
   register: kubernetes_role_rke2_agent_active
   changed_when: false
-  retries: 24
-  delay: 5
+  retries: "{{ kubernetes_wait_for_rke2_active_retries | default(36) | int }}"
+  delay: "{{ kubernetes_wait_for_rke2_active_delay | default(5) | int }}"
   until: kubernetes_role_rke2_agent_active.stdout == 'active'
   become: true
+  when:
+    - kubernetes_role_rke2_agent_unit_exists | default(false) | bool
+  listen: Restart rke2-agent
 
 - name: Assert rke2-agent is active after restart attempt
   ansible.builtin.assert:
@@ -53,4 +151,17 @@
       rke2-agent did not become active after restart.
       restart_result={{ kubernetes_role_rke2_agent_restart | to_nice_json }}
       active_result={{ kubernetes_role_rke2_agent_active | to_nice_json }}
+    success_msg: "rke2-agent is active after restart."
   become: true
+  when:
+    - kubernetes_role_rke2_agent_unit_exists | default(false) | bool
+  listen: Restart rke2-agent
+
+- name: Report skipped rke2-agent restart when service is not installed
+  ansible.builtin.debug:
+    msg: >-
+      Skipping rke2-agent restart because no rke2-agent systemd unit exists on
+      {{ inventory_hostname }} yet.
+  when:
+    - not (kubernetes_role_rke2_agent_unit_exists | default(false) | bool)
+  listen: Restart rke2-agent

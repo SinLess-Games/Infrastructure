@@ -1,59 +1,244 @@
 ---
 # =============================================================================
-# Technitium DNS – Local Domains
+# Technitium DNS - Local Domains
 # -----------------------------------------------------------------------------
-# This file defines authoritative local DNS zones managed by Technitium.
+# Purpose:
+#   Defines authoritative DNS zones managed by Technitium DNS Server.
 #
 # Design goals:
-# - Explicit, declarative zone ownership
-# - Clean separation from host-specific records
-# - Easy extension to:
-#     * reverse zones (PTR)
-#     * service discovery (SRV)
-#     * aliases (CNAME)
+#   - Explicit declarative zone ownership
+#   - Clean separation from host-specific DNS records
+#   - Forward zones and reverse zones managed from one place
+#   - Internal-only authoritative DNS
+#   - Production-ready metadata for Ansible validation and future automation
 #
-# These zones are intended to be:
-# - Internal-only
-# - Non-public
-# - Served authoritatively by the Technitium DNS server
+# Important:
+#   - This file is zone-only.
+#   - Host records belong in domain-records.yaml.
+#   - PTR records can be generated later from A records.
+#   - local.sinlessgamesllc.com has been intentionally removed.
 # =============================================================================
 
-technitium_domains:
+# =============================================================================
+# Domain Defaults
+# -----------------------------------------------------------------------------
+# These defaults are role metadata. The role can use them for validation,
+# Technitium API calls, documentation generation, or future policy checks.
+# =============================================================================
+
+technitium_domain_defaults:
+  enabled: true
+  type: "primary"
+  authoritative: true
+  internal_only: true
+  managed_by: "ansible"
+  provider: "technitium"
+  default_ttl: 3600
+
+  # Public certificate issuance should not be used for these local zones.
+  public_ca_allowed: false
+
+  # Dynamic updates should stay disabled unless explicitly needed later.
+  allow_dynamic_updates: false
+
+  # Zone transfers should stay disabled unless you intentionally add secondary
+  # non-Technitium DNS servers later.
+  allow_zone_transfer: false
+
+  # DNSSEC can be enabled later after the base zone automation is stable.
+  dnssec_enabled: false
+
+# =============================================================================
+# Forward Zones
+# =============================================================================
+
+technitium_forward_domains:
   # ---------------------------------------------------------------------------
-  # Sinless Games – internal services
+  # SinLess Games - internal infrastructure namespace
   # ---------------------------------------------------------------------------
-  - name: local.sinlessgames.com
-    type: primary
-    description: "Internal DNS zone for Sinless Games infrastructure"
+  - name: "local.sinlessgames.com"
+    enabled: true
+    type: "primary"
+    zone_role: "forward"
+    environment: "prod"
+    owner: "SinLess Games LLC"
+    description: "Internal authoritative DNS zone for SinLess Games infrastructure."
+    record_source: "technitium_domain_records.local.sinlessgames.com"
+    reverse_generation: true
+    tags:
+      - "internal"
+      - "infrastructure"
+      - "sinless-games"
+      - "technitium-managed"
 
   # ---------------------------------------------------------------------------
-  # Sinless Games LLC – corporate / admin namespace
+  # Helix AI Bot / Platform - internal namespace
   # ---------------------------------------------------------------------------
-  - name: local.sinlessgamesllc.com
-    type: primary
-    description: "Internal DNS zone for Sinless Games LLC systems"
+  - name: "local.helixaibot.com"
+    enabled: true
+    type: "primary"
+    zone_role: "forward"
+    environment: "prod"
+    owner: "SinLess Games LLC"
+    description: "Internal authoritative DNS zone reserved for Helix AI platform infrastructure."
+    record_source: "technitium_domain_records.local.helixaibot.com"
+    reverse_generation: false
+    tags:
+      - "internal"
+      - "helix-ai"
+      - "platform"
+      - "technitium-managed"
+
+# =============================================================================
+# Reverse Zones
+# -----------------------------------------------------------------------------
+# Reverse zones are declared here so PTR records can be generated later from
+# domain-records.yaml without mixing reverse-zone ownership into record data.
+#
+# /24 reverse zone format:
+#   10.10.10.0/24 -> 10.10.10.in-addr.arpa
+# =============================================================================
+
+technitium_reverse_domains:
+  # ---------------------------------------------------------------------------
+  # VLAN 10 / Infrastructure network
+  # ---------------------------------------------------------------------------
+  - name: "10.10.10.in-addr.arpa"
+    enabled: true
+    type: "primary"
+    zone_role: "reverse"
+    environment: "prod"
+    owner: "SinLess Games LLC"
+    network: "10.10.10.0/24"
+    vlan_id: 10
+    description: "Reverse DNS zone for the infrastructure network."
+    ptr_generation: true
+    ptr_source_zone: "local.sinlessgames.com"
+    tags:
+      - "internal"
+      - "reverse-dns"
+      - "infrastructure"
+      - "vlan-10"
+      - "technitium-managed"
 
   # ---------------------------------------------------------------------------
-  # Helix AI Bot / Platform
+  # VLAN 30 / Staging Kubernetes network
   # ---------------------------------------------------------------------------
-  - name: local.helixaibot.com
-    type: primary
-    description: "Internal DNS zone for Helix AI Bot and related services"
+  - name: "30.10.10.in-addr.arpa"
+    enabled: true
+    type: "primary"
+    zone_role: "reverse"
+    environment: "staging"
+    owner: "SinLess Games LLC"
+    network: "10.10.30.0/24"
+    vlan_id: 30
+    description: "Reverse DNS zone for the Kubernetes staging network."
+    ptr_generation: true
+    ptr_source_zone: "local.sinlessgames.com"
+    tags:
+      - "internal"
+      - "reverse-dns"
+      - "kubernetes"
+      - "staging"
+      - "vlan-30"
+      - "technitium-managed"
+
+  # ---------------------------------------------------------------------------
+  # VLAN 40 / Production Kubernetes network
+  # ---------------------------------------------------------------------------
+  - name: "40.10.10.in-addr.arpa"
+    enabled: true
+    type: "primary"
+    zone_role: "reverse"
+    environment: "prod"
+    owner: "SinLess Games LLC"
+    network: "10.10.40.0/24"
+    vlan_id: 40
+    description: "Reverse DNS zone for the Kubernetes production network."
+    ptr_generation: true
+    ptr_source_zone: "local.sinlessgames.com"
+    tags:
+      - "internal"
+      - "reverse-dns"
+      - "kubernetes"
+      - "production"
+      - "vlan-40"
+      - "technitium-managed"
+
+# =============================================================================
+# Combined Zone List
+# -----------------------------------------------------------------------------
+# Backward-compatible list for existing role tasks that loop over:
+#
+#   technitium_domains
+#
+# Newer tasks can use:
+#
+#   technitium_forward_domains
+#   technitium_reverse_domains
+# =============================================================================
+
+technitium_domains: "{{ technitium_forward_domains + technitium_reverse_domains }}"
+
+# =============================================================================
+# Removed / Deprecated Zones
+# -----------------------------------------------------------------------------
+# These are intentionally not included in technitium_domains.
+# Keep this list as documentation and as a guardrail for validation tasks.
+# =============================================================================
+
+technitium_removed_domains:
+  - name: "local.sinlessgamesllc.com"
+    removed: true
+    reason: "Namespace removed; local.sinlessgames.com is the active internal infrastructure zone."
+
+# =============================================================================
+# Validation Expectations
+# =============================================================================
+
+technitium_domain_validation:
+  require_enabled_flag: true
+  require_zone_role: true
+  require_owner: true
+  require_description: true
+  require_tags: true
+
+  allowed_zone_roles:
+    - "forward"
+    - "reverse"
+
+  allowed_types:
+    - "primary"
+
+  required_forward_zones:
+    - "local.sinlessgames.com"
+    - "local.helixaibot.com"
+
+  required_reverse_zones:
+    - "10.10.10.in-addr.arpa"
+    - "30.10.10.in-addr.arpa"
+    - "40.10.10.in-addr.arpa"
+
+  denied_zones:
+    - "local.sinlessgamesllc.com"
 
 # =============================================================================
 # Notes
-# =============================================================================
-# - Records (A / AAAA / CNAME / SRV) should live in:
-#     host_vars/<hostname>.yaml
-#   or a separate records.yaml if you want full decoupling.
+# -----------------------------------------------------------------------------
+# - Records live in:
+#     Ansible/group_vars/technitium/domain-records.yaml
 #
-# - Reverse zones (recommended later):
-#     10.10.10.0/24  ->  10.10.10.in-addr.arpa
+# - This file should contain:
+#     * zone names
+#     * zone ownership metadata
+#     * reverse zone declarations
+#     * validation policy
 #
-# - Keep this file zone-only:
-#     * no IPs
-#     * no records
-#     * no hostnames
+# - This file should not contain:
+#     * host-specific A records
+#     * app-level DNS records
+#     * Kubernetes workload DNS records
+#     * public DNS records
 #
-# Last reviewed: 2025-12
+# Last reviewed: 2026-05
 # =============================================================================

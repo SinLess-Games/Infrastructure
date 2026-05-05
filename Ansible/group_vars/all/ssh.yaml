@@ -1,77 +1,203 @@
-# Ansible/group_vars/all/ssh.yaml
 ---
 # =============================================================================
-# SSH global configuration (CA-backed SSH + sane defaults)
+# Global SSH Configuration
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Defines global SSH client/server policy for managed infrastructure hosts.
+#
+# Security model:
+#   - CA-backed SSH user authentication.
+#   - SSH certificates preferred over raw authorized_keys.
+#   - Password and keyboard-interactive authentication disabled.
+#   - Root SSH allowed only with public key / certificate authentication.
+#   - Host certificates enabled where supported by the ssh role.
+#
+# Ownership boundaries:
+#   - Users are defined in:
+#       Ansible/group_vars/all/users.yaml
+#   - Groups are defined in:
+#       Ansible/group_vars/all/groups.yaml
+#   - This file defines SSH policy, CA paths, principals, client config, and
+#     trusted CA behavior.
+#
+# Notes:
+#   - Avoid storing private keys or CA private material in this file.
+#   - Generated keys/certs should live under .outputs/ and remain gitignored.
+#   - The canonical local DNS zone is local.sinlessgames.com.
 # =============================================================================
 
-# ---- computed building blocks ----
+# =============================================================================
+# Controller-side paths
+# =============================================================================
+
 ssh_controller_repo_root: "{{ playbook_dir }}/../.."
 ssh_controller_outputs_dir: "{{ ssh_controller_repo_root }}/.outputs"
-ssh_controller_root_materials_dir: "{{ ssh_controller_outputs_dir }}/ssh/root"
 
-# ---- SINGLE canonical CA location (NO ssh-ca) ----
+ssh_controller_ssh_output_dir: "{{ ssh_controller_outputs_dir }}/ssh"
+ssh_controller_root_materials_dir: "{{ ssh_controller_ssh_output_dir }}/root"
+
+# Canonical SSH CA output directory.
 ssh_ca_output_dir: "{{ ssh_controller_outputs_dir }}/ssh_ca"
 
-# Keep if you still want “candidates”, but only point at canonical.
+# Public CA key candidates on the controller.
+# Keep this list small and canonical to avoid accidentally trusting stale CAs.
 ssh_controller_ca_pub_candidates:
   - "{{ ssh_ca_output_dir }}/ssh_ca.pub"
 
-# Local DNS zones you want every host to be reachable under
-ssh_local_dns_zones:
-  - "local.sinlessgames.com"
-  - "local.sinlessgamesllc.com"
+# =============================================================================
+# Local DNS / host identity
+# =============================================================================
 
-# Where the CA pubkey is installed on each node (TrustedUserCAKeys)
+ssh_primary_local_domain: "local.sinlessgames.com"
+
+ssh_local_dns_zones:
+  - "{{ ssh_primary_local_domain }}"
+
+ssh_known_host_patterns:
+  - "*.{{ ssh_primary_local_domain }}"
+  - "10.10.*"
+
+# =============================================================================
+# Managed-node SSH paths
+# =============================================================================
+
 ssh_trusted_user_ca_keys_path: "/etc/ssh/ca/ssh_ca.pub"
 
-# Authorized principals layout on each node
 ssh_authorized_principals_dir: "/etc/ssh/auth_principals"
 ssh_authorized_principals_file: "{{ ssh_authorized_principals_dir }}/%u"
 
-# Host certificate path (ed25519 host cert)
 ssh_host_certificate_path: "/etc/ssh/ssh_host_ed25519_key-cert.pub"
 
-# Root identity + cert paths on each node
 ssh_root_identity_file: "/root/.ssh/id_ed25519"
 ssh_root_certificate_file: "/root/.ssh/id_ed25519-cert.pub"
 
-# ---- final structure ----
+# =============================================================================
+# SSH policy defaults
+# =============================================================================
+
+ssh_default_identity_file: "~/.ssh/id_ed25519"
+ssh_default_certificate_file: "~/.ssh/id_ed25519-cert.pub"
+
+ssh_default_strict_host_key_checking: "accept-new"
+
+# =============================================================================
+# Main SSH configuration object
+# =============================================================================
+
 ssh:
+  # ---------------------------------------------------------------------------
+  # Controller-side material
+  # ---------------------------------------------------------------------------
+
   controller:
     repo_root: "{{ ssh_controller_repo_root }}"
     outputs_dir: "{{ ssh_controller_outputs_dir }}"
+    ssh_output_dir: "{{ ssh_controller_ssh_output_dir }}"
     root_materials_dir: "{{ ssh_controller_root_materials_dir }}"
+    ca_output_dir: "{{ ssh_ca_output_dir }}"
     ca_pub_candidates: "{{ ssh_controller_ca_pub_candidates }}"
 
+  # ---------------------------------------------------------------------------
+  # Host identity / DNS
+  # ---------------------------------------------------------------------------
+
   hosts:
+    primary_local_domain: "{{ ssh_primary_local_domain }}"
     zones: "{{ ssh_local_dns_zones }}"
     extra_lines: []
 
+  # ---------------------------------------------------------------------------
+  # Known hosts / CA trust
+  # ---------------------------------------------------------------------------
+
   known_hosts:
-    cert_authority_patterns:
-      - "*.local.sinlessgames.com"
-      - "*.local.sinlessgamesllc.com"
+    enabled: true
+
+    cert_authority_patterns: "{{ ssh_known_host_patterns }}"
+
     trusted_user_ca_keys: "{{ ssh_trusted_user_ca_keys_path }}"
 
-  server:
-    port: 22
-    listen_addresses: ["0.0.0.0"]
+    managed_known_hosts_file: "~/.ssh/known_hosts"
 
+    strict_host_key_checking: "{{ ssh_default_strict_host_key_checking }}"
+
+  # ---------------------------------------------------------------------------
+  # SSH server policy
+  # ---------------------------------------------------------------------------
+
+  server:
+    enabled: true
+
+    port: 22
+
+    listen_addresses:
+      - "0.0.0.0"
+
+    address_family: "any"
+
+    protocol: 2
+
+    # Authentication
     pubkey_authentication: true
     password_authentication: false
+    permit_empty_passwords: false
     kbd_interactive_authentication: false
+    keyboard_interactive_authentication: false
     challenge_response_authentication: false
 
     authentication_methods: "publickey"
+
+    # Root can authenticate with SSH keys/certs, but never passwords.
     permit_root_login: "prohibit-password"
+
     use_pam: true
 
+    # CA-backed user authentication
     trusted_user_ca_keys: "{{ ssh_trusted_user_ca_keys_path }}"
     authorized_principals_dir: "{{ ssh_authorized_principals_dir }}"
     authorized_principals_file: "{{ ssh_authorized_principals_file }}"
 
+    # Host certificate
     enable_host_certificate: true
     host_certificate_path: "{{ ssh_host_certificate_path }}"
+
+    # Session hardening
+    x11_forwarding: false
+    allow_agent_forwarding: false
+    allow_tcp_forwarding: false
+    gateway_ports: "no"
+    permit_tunnel: "no"
+    permit_user_environment: false
+    permit_user_rc: true
+    compression: "delayed"
+
+    # Keepalive / connection controls
+    tcp_keep_alive: true
+    client_alive_interval: 300
+    client_alive_count_max: 2
+    login_grace_time: 30
+    max_auth_tries: 6
+    max_sessions: 10
+    max_startups: "10:30:60"
+
+    # DNS / logging
+    use_dns: false
+    log_level: "VERBOSE"
+    syslog_facility: "AUTH"
+
+    # SFTP
+    sftp_enabled: true
+    sftp_subsystem: "internal-sftp"
+
+    # Optional user allowlist.
+    # Keep empty unless the ssh role explicitly supports AllowUsers rendering.
+    allow_users: []
+
+    # Optional group allowlist.
+    # Keep empty unless the ssh role explicitly supports AllowGroups rendering.
+    allow_groups: []
+
+    # Login banner
     banner_enabled: true
     banner_path: "/etc/issue.net"
     banner_content: |
@@ -87,7 +213,7 @@ ssh:
       Access is restricted to authorized users for legitimate business purposes.
       All access is subject to SinLess Games LLC policies, standards, and Terms
       of Use, and applicable laws and regulations, including but not limited to
-      HIPAA, SOC 2 Trust Services Criteria, PCI DSS, and NIST SP 800-53, GDPR.
+      HIPAA, SOC 2 Trust Services Criteria, PCI DSS, NIST SP 800-53, and GDPR.
 
       This system and all data on it may be monitored, intercepted, recorded,
       copied, audited, inspected, and disclosed by authorized personnel at any
@@ -106,46 +232,209 @@ ssh:
 
       ***************************************************************************
 
-    x11_forwarding: false
-    client_alive_interval: 300
-    client_alive_count_max: 2
-    use_dns: false
-    max_auth_tries: 10
+  # ---------------------------------------------------------------------------
+  # SSH certificate principals
+  # ---------------------------------------------------------------------------
+  # These map local Unix users to allowed SSH certificate principals.
+  # Keep these aligned with Ansible/group_vars/all/users.yaml.
+  #
+  # Important:
+  #   sinless777 is allowed to authenticate as root and breakglass using a valid
+  #   SSH certificate containing the sinless777 principal.
+  # ---------------------------------------------------------------------------
 
   principals:
-    root: ["root", "proxmox", "admin"]
+    root:
+      - root
+      - admin
+      - sinless777
+      - infrastructure-root
+      - infrastructure-admin
+
+    sinless777:
+      - sinless777
+      - admin
+      - infrastructure-admin
+      - infrastructure-operator
+
+    ansible:
+      - ansible
+      - automation
+      - infrastructure-automation
+
+    automation:
+      - automation
+      - gitops
+      - terraform
+
+    breakglass:
+      - breakglass
+      - sinless777
+      - emergency-access
+      - infrastructure-breakglass
+      - infrastructure-admin
+
+  # ---------------------------------------------------------------------------
+  # Root client material
+  # ---------------------------------------------------------------------------
+  # Used when root needs a local SSH identity for controlled automation paths.
+  # ---------------------------------------------------------------------------
 
   root_client:
+    enabled: true
     identity_file: "{{ ssh_root_identity_file }}"
     certificate_file: "{{ ssh_root_certificate_file }}"
     identities_only: true
-    strict_host_key_checking: "accept-new"
+    strict_host_key_checking: "{{ ssh_default_strict_host_key_checking }}"
     password_authentication: false
+    user_known_hosts_file: "/root/.ssh/known_hosts"
+
+  # ---------------------------------------------------------------------------
+  # Authorized keys fallback
+  # ---------------------------------------------------------------------------
+  # Certificates are preferred. Raw authorized_keys are retained only as a
+  # controlled fallback for bootstrap/recovery.
+  # ---------------------------------------------------------------------------
 
   authorized_keys:
     root:
       enabled: true
+      exclusive: false
       keys:
         - "{{ ssh_root_identity_file }}.pub"
 
+    sinless777:
+      enabled: false
+      exclusive: false
+      keys: []
+
+    ansible:
+      enabled: false
+      exclusive: false
+      keys: []
+
+    automation:
+      enabled: false
+      exclusive: false
+      keys: []
+
+    breakglass:
+      enabled: false
+      exclusive: false
+      keys: []
+
+  # ---------------------------------------------------------------------------
+  # Client config
+  # ---------------------------------------------------------------------------
+
   client_config:
+    enabled: true
+
     zones: "{{ ssh_local_dns_zones }}"
-    identity_file: "~/.ssh/id_ed25519"
-    certificate_file: "~/.ssh/id_ed25519-cert.pub"
+
+    identity_file: "{{ ssh_default_identity_file }}"
+    certificate_file: "{{ ssh_default_certificate_file }}"
+
     identities_only: true
-    strict_host_key_checking: "accept-new"
+    strict_host_key_checking: "{{ ssh_default_strict_host_key_checking }}"
     pubkey_authentication: true
     password_authentication: false
+
     server_alive_interval: 30
     server_alive_count_max: 3
+    connect_timeout: 10
+
+    user_known_hosts_file: "~/.ssh/known_hosts"
+
     hosts:
       - pattern: "10.10.*"
-        identity_file: "~/.ssh/id_ed25519"
-        certificate_file: "~/.ssh/id_ed25519-cert.pub"
+        identity_file: "{{ ssh_default_identity_file }}"
+        certificate_file: "{{ ssh_default_certificate_file }}"
         identities_only: true
-        strict_host_key_checking: "accept-new"
-      - pattern: "*.local.sinlessgames.com *.local.sinlessgamesllc.com"
-        identity_file: "~/.ssh/id_ed25519"
-        certificate_file: "~/.ssh/id_ed25519-cert.pub"
+        strict_host_key_checking: "{{ ssh_default_strict_host_key_checking }}"
+        pubkey_authentication: true
+        password_authentication: false
+        server_alive_interval: 30
+        server_alive_count_max: 3
+
+      - pattern: "*.{{ ssh_primary_local_domain }}"
+        identity_file: "{{ ssh_default_identity_file }}"
+        certificate_file: "{{ ssh_default_certificate_file }}"
         identities_only: true
-        strict_host_key_checking: "accept-new"
+        strict_host_key_checking: "{{ ssh_default_strict_host_key_checking }}"
+        pubkey_authentication: true
+        password_authentication: false
+        server_alive_interval: 30
+        server_alive_count_max: 3
+
+      - pattern: "pve-* *.pve.{{ ssh_primary_local_domain }}"
+        identity_file: "{{ ssh_default_identity_file }}"
+        certificate_file: "{{ ssh_default_certificate_file }}"
+        identities_only: true
+        strict_host_key_checking: "{{ ssh_default_strict_host_key_checking }}"
+        pubkey_authentication: true
+        password_authentication: false
+        user: root
+        server_alive_interval: 30
+        server_alive_count_max: 3
+
+  # ---------------------------------------------------------------------------
+  # Validation policy metadata
+  # ---------------------------------------------------------------------------
+
+  policy:
+    require_ca_backed_auth: true
+    require_password_authentication_disabled: true
+    require_keyboard_interactive_disabled: true
+    require_root_password_login_disabled: true
+    require_banner: true
+    require_strict_host_key_checking: true
+
+    allowed_strict_host_key_checking_values:
+      - "yes"
+      - "accept-new"
+
+    protected_users:
+      - root
+      - sinless777
+      - ansible
+      - breakglass
+
+    managed_certificate_users:
+      - root
+      - sinless777
+      - ansible
+      - automation
+      - breakglass
+
+    privileged_principal_delegations:
+      sinless777:
+        allowed_login_users:
+          - root
+          - breakglass
+
+# =============================================================================
+# Backward-compatible top-level aliases
+# -----------------------------------------------------------------------------
+# These preserve compatibility with existing role tasks/templates that still
+# reference the older flat variables directly.
+# =============================================================================
+
+ssh_principals: "{{ ssh.principals }}"
+
+ssh_known_hosts_cert_authority_patterns: "{{ ssh.known_hosts.cert_authority_patterns }}"
+ssh_known_hosts_trusted_user_ca_keys: "{{ ssh.known_hosts.trusted_user_ca_keys }}"
+
+ssh_server_port: "{{ ssh.server.port }}"
+ssh_server_listen_addresses: "{{ ssh.server.listen_addresses }}"
+ssh_server_password_authentication: "{{ ssh.server.password_authentication }}"
+ssh_server_pubkey_authentication: "{{ ssh.server.pubkey_authentication }}"
+ssh_server_permit_root_login: "{{ ssh.server.permit_root_login }}"
+ssh_server_trusted_user_ca_keys: "{{ ssh.server.trusted_user_ca_keys }}"
+ssh_server_authorized_principals_file: "{{ ssh.server.authorized_principals_file }}"
+ssh_server_host_certificate_path: "{{ ssh.server.host_certificate_path }}"
+ssh_server_banner_path: "{{ ssh.server.banner_path }}"
+ssh_server_banner_content: "{{ ssh.server.banner_content }}"
+
+ssh_root_client_identity_file: "{{ ssh.root_client.identity_file }}"
+ssh_root_client_certificate_file: "{{ ssh.root_client.certificate_file }}"

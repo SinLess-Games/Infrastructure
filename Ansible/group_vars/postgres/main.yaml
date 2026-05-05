@@ -160,7 +160,6 @@ postgres_tags:
 postgres_description: "PostgreSQL HA cluster node (Terraform-managed)"
 
 postgres_database_names:
-  - authentik
   - grafana
   - harbor
   - backstage
@@ -168,6 +167,7 @@ postgres_database_names:
   - defectdojo
   - helix
   - sinlessgames
+  - dfir-iris
 
 postgres_users: []
 postgres_databases: []

@@ -1,141 +1,451 @@
 ---
 # =============================================================================
-# Technitium DNS — Reverse Zones + PTR Records
+# Technitium DNS - Reverse Zones + PTR Records
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Ensure declared IPv4 reverse zones exist.
+#   - Apply PTR records from technitium_reverse_zones.
+#   - Keep reverse DNS management separate from forward record management.
+#
+# Design:
+#   - In clustered mode, only the primary node writes reverse zones and PTRs.
+#   - Secondary nodes skip this task because cluster replication should sync data.
+#   - Uses Authorization: Bearer for current Technitium API behavior.
+#   - Also includes token in form data for backward compatibility.
+#   - Uses overwrite=true for PTRs because each reverse owner should have one
+#     canonical PTR target.
+#
+# Expected variables:
+#   - technitium_api_url
+#   - technitium_api_token or technitium_session_token
+#   - technitium_reverse_zones
+#
+# Optional variables:
+#   - technitium_cluster_enabled
+#   - technitium_cluster_primary_host
+#   - technitium_validate_certs
+#   - technitium_api_timeout
+#   - technitium_no_log
+#   - technitium_reverse_zones_ensure_zones
+#   - technitium_verify_reverse_zones_after_apply
 # =============================================================================
-# Expects:
-# technitium_api_url
-# technitium_api_token
-# technitium_reverse_zones:
-#   - zone: "10.10.10.in-addr.arpa"
-#     type: "Primary"            # optional
-#     ptr_records:
-#       - ip_last_octet: 10
-#         hostname: "pxe.local.sinlessgames.com"
-#         ttl: 300               # optional
-# =============================================================================
 
 # -----------------------------------------------------------------------------
-# Preconditions
+# Decide whether this node should manage reverse DNS
 # -----------------------------------------------------------------------------
-- name: Technitium | Assert required vars exist (reverse)
-  ansible.builtin.assert:
-    that:
-      - technitium_api_url is defined
-      - technitium_api_url | length > 0
-      - technitium_api_token is defined
-      - technitium_api_token | length > 0
-      - technitium_reverse_zones is defined
-    fail_msg: >-
-      Missing required variables. Ensure technitium_api_url, technitium_api_token,
-      and technitium_reverse_zones are defined.
 
-- name: Technitium | Normalize API base URL (reverse)
+- name: Technitium Reverse | Determine whether this node manages reverse DNS
   ansible.builtin.set_fact:
-    _technitium_api_url: "{{ technitium_api_url.rstrip('/') }}"
+    technitium_reverse_manage_on_this_node: >-
+      {{
+        not (technitium_cluster_enabled | default(false) | bool)
+        or inventory_hostname == (technitium_cluster_primary_host | default(inventory_hostname))
+      }}
+
+- name: Technitium Reverse | Show secondary skip message
+  ansible.builtin.debug:
+    msg: >-
+      Skipping reverse-zone writes on {{ inventory_hostname }} because
+      Technitium clustering is enabled and this node is not the primary.
+  when:
+    - technitium_cluster_enabled | default(false) | bool
+    - not (technitium_reverse_manage_on_this_node | bool)
+    - technitium_reverse_show_skip_message | default(true)
 
 # -----------------------------------------------------------------------------
-# Ensure reverse zones exist
+# Reverse zone management
 # -----------------------------------------------------------------------------
-- name: Technitium | Ensure reverse zones exist (Primary)
-  ansible.builtin.uri:
-    url: "{{ _technitium_api_url }}/api/zones/create"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      token: "{{ technitium_api_token }}"
-      zone: "{{ item.zone }}"
-      type: "{{ item.type | default('Primary') }}"
-    status_code: 200
-    return_content: true
-  register: _technitium_reverse_zone_create
-  loop: "{{ technitium_reverse_zones }}"
-  loop_control:
-    label: "{{ item.zone }}"
-  failed_when: false
-  no_log: "{{ technitium_no_log | default(true) }}"
 
-- name: Technitium | Assert reverse zone create calls succeeded (allow already-exists)
-  ansible.builtin.assert:
-    that:
-      - item.json is defined
-      - item.json.status is defined
-      - item.json.status in ['ok', 'error']
-      - >
-        (item.json.status == 'ok')
-        or
-        (
-          (item.json.status == 'error')
-          and
-          (
-            (item.json.errorMessage | default('')) is search('Zone already exists')
-          )
-        )
-    fail_msg: >-
-      Reverse zone create failed for {{ item.item.zone }}.
-      Response: {{ item.content | default(item.json | default(item)) }}
-  loop: "{{ _technitium_reverse_zone_create.results | default([]) }}"
-  loop_control:
-    label: "{{ item.item.zone }}"
+- name: Technitium Reverse | Configure reverse zones and PTR records
+  when: technitium_reverse_manage_on_this_node | bool
+  block:
+    # -------------------------------------------------------------------------
+    # Preconditions
+    # -------------------------------------------------------------------------
 
-# -----------------------------------------------------------------------------
-# Flatten PTR jobs
-# -----------------------------------------------------------------------------
-- name: Technitium | Build flattened PTR record jobs
-  ansible.builtin.set_fact:
-    _technitium_ptr_jobs: >-
-      {%- set out = [] -%}
-      {%- for z in (technitium_reverse_zones | default([])) -%}
-        {%- for r in (z.ptr_records | default([])) -%}
-          {%- set oct = (r.ip_last_octet | string) -%}
-          {%- set owner = oct ~ '.' ~ z.zone -%}
-          {%- set _ = out.append({
-            'zone': z.zone,
-            'domain': owner,
-            'ptrName': r.hostname,
-            'ttl': (r.ttl | default(300))
-          }) -%}
-        {%- endfor -%}
-      {%- endfor -%}
-      {{ out }}
+    - name: Technitium Reverse | Assert required variables exist
+      ansible.builtin.assert:
+        that:
+          - technitium_api_url is defined
+          - technitium_api_url | length > 0
+          - technitium_api_token is defined or technitium_session_token is defined
+          - technitium_reverse_zones is defined
+        fail_msg: >-
+          Missing required Technitium reverse-zone variables. Expected
+          technitium_api_url, technitium_api_token or technitium_session_token,
+          and technitium_reverse_zones.
+        success_msg: "Technitium reverse-zone variables passed validation."
+      no_log: true
 
-- name: Technitium | Assert PTR jobs are present (or empty by design)
-  ansible.builtin.assert:
-    that:
-      - _technitium_ptr_jobs is defined
-    fail_msg: "Failed to build _technitium_ptr_jobs"
+    - name: Technitium Reverse | Normalize API and source variables
+      ansible.builtin.set_fact:
+        technitium_reverse_api_base: "{{ technitium_api_url | regex_replace('/+$', '') }}"
+        technitium_reverse_api_token: "{{ technitium_api_token | default(technitium_session_token) }}"
+        technitium_reverse_zone_list: "{{ technitium_dns_reverse_zones | default(technitium_reverse_zones | default([])) }}"
+        technitium_reverse_default_ttl: "{{ technitium_record_default_ttl | default(300) }}"
+        technitium_reverse_no_log: "{{ technitium_no_log | default(true) }}"
+        technitium_reverse_zones_ensure_zones_effective: "{{ technitium_reverse_zones_ensure_zones | default(true) }}"
+        technitium_reverse_verify_after_apply_effective: "{{ technitium_verify_reverse_zones_after_apply | default(true) }}"
+      no_log: true
 
-# -----------------------------------------------------------------------------
-# Upsert PTR records (overwrite=true)
-# -----------------------------------------------------------------------------
-- name: Technitium | Upsert PTR record (overwrite=true)
-  ansible.builtin.uri:
-    url: "{{ _technitium_api_url }}/api/zones/records/add"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      token: "{{ technitium_api_token }}"
-      zone: "{{ item.zone }}"
-      domain: "{{ item.domain }}"
-      type: "PTR"
-      ttl: "{{ item.ttl }}"
-      ptrName: "{{ item.ptrName }}"
-      overwrite: "true"
-    status_code: 200
-    return_content: true
-  register: _technitium_ptr_apply
-  loop: "{{ _technitium_ptr_jobs }}"
-  loop_control:
-    label: "{{ item.domain }} -> {{ item.ptrName }}"
-  no_log: "{{ technitium_no_log | default(true) }}"
+    - name: Technitium Reverse | Assert API token is usable
+      ansible.builtin.assert:
+        that:
+          - technitium_reverse_api_token is defined
+          - technitium_reverse_api_token | length > 0
+        fail_msg: "Technitium API token is missing or empty."
+        success_msg: "Technitium API token is available."
+      no_log: true
 
-- name: Technitium | Assert PTR upserts succeeded
-  ansible.builtin.assert:
-    that:
-      - item.json is defined
-      - (item.json.status | default('')) == 'ok'
-    fail_msg: >-
-      PTR upsert failed for {{ item.item.domain }} -> {{ item.item.ptrName }}.
-      Response: {{ item.content | default(item.json | default(item)) }}
-  loop: "{{ _technitium_ptr_apply.results | default([]) }}"
-  loop_control:
-    label: "{{ item.item.domain }} -> {{ item.item.ptrName }}"
+    - name: Technitium Reverse | Build enabled reverse zone jobs
+      ansible.builtin.set_fact:
+        technitium_reverse_zone_jobs: >-
+          {%- set out = [] -%}
+          {%- for z in technitium_reverse_zone_list | default([]) -%}
+            {%- if z.enabled | default(true) | bool -%}
+              {%- set zone_name = z.zone | default(z.name | default('')) -%}
+              {%- set zone_type_raw = z.type | default('Primary') | string -%}
+              {%- set zone_type = 'Primary' if zone_type_raw | lower == 'primary' else zone_type_raw -%}
+              {%- set _ = out.append({
+                'zone': zone_name,
+                'type': zone_type,
+                'network': z.network | default(''),
+                'vlan_id': z.vlan_id | default(''),
+                'environment': z.environment | default(''),
+                'description': z.description | default(''),
+                'ptr_records': z.ptr_records | default([])
+              }) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ out }}
+
+    - name: Technitium Reverse | Assert enabled reverse zones are valid
+      ansible.builtin.assert:
+        that:
+          - technitium_reverse_zone_jobs is defined
+          - item.zone is defined
+          - item.zone | length > 0
+          - item.zone is search('in-addr\\.arpa$')
+          - item.type is defined
+          - item.type | length > 0
+        fail_msg: "Invalid reverse-zone definition: {{ item }}"
+      loop: "{{ technitium_reverse_zone_jobs }}"
+      loop_control:
+        label: "{{ item.zone | default('unknown-zone') }}"
+
+    # -------------------------------------------------------------------------
+    # Ensure reverse zones exist
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Reverse | Ensure reverse zones exist
+      ansible.builtin.uri:
+        url: "{{ technitium_reverse_api_base }}/api/zones/create"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ technitium_reverse_api_token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_reverse_api_token }}"
+          zone: "{{ item.zone }}"
+          type: "{{ item.type | default('Primary') }}"
+        status_code:
+          - 200
+          - 400
+          - 409
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_api_timeout | default(90) | int }}"
+      register: technitium_reverse_zone_create
+      loop: "{{ technitium_reverse_zone_jobs }}"
+      loop_control:
+        label: "{{ item.zone }}"
+      failed_when: false
+      changed_when: technitium_reverse_zone_create.json.status | default('') == 'ok'
+      no_log: "{{ technitium_reverse_no_log | bool }}"
+      when: technitium_reverse_zones_ensure_zones_effective | bool
+
+    - name: Technitium Reverse | Assert reverse zone create calls succeeded
+      ansible.builtin.assert:
+        that:
+          - item.json is defined
+          - item.json.status is defined
+          - >-
+            item.json.status == 'ok'
+            or (
+              item.json.status == 'error'
+              and (
+                (item.json.errorMessage | default('')) is search('already', ignorecase=True)
+                or (item.json.errorMessage | default('')) is search('exists', ignorecase=True)
+              )
+            )
+        fail_msg: >-
+          Reverse zone create failed for {{ item.item.zone }}.
+          Response={{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+      loop: "{{ technitium_reverse_zone_create.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.zone }}"
+      when: technitium_reverse_zones_ensure_zones_effective | bool
+
+    # -------------------------------------------------------------------------
+    # Build PTR jobs
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Reverse | Build PTR record jobs
+      ansible.builtin.set_fact:
+        technitium_ptr_jobs: >-
+          {%- set out = [] -%}
+          {%- for z in technitium_reverse_zone_jobs | default([]) -%}
+            {%- for r in z.ptr_records | default([]) -%}
+              {%- if r.enabled | default(true) | bool -%}
+                {%- set octet = r.ip_last_octet | string -%}
+                {%- set hostname_raw = r.hostname | string -%}
+                {%- set hostname = hostname_raw if hostname_raw.endswith('.') else hostname_raw ~ '.' -%}
+                {%- set owner = octet ~ '.' ~ z.zone -%}
+                {%- set _ = out.append({
+                  'zone': z.zone,
+                  'domain': owner,
+                  'ip_last_octet': r.ip_last_octet,
+                  'ptrName': r.ptrName | default(hostname),
+                  'ttl': r.ttl | default(technitium_reverse_default_ttl),
+                  'comment': r.comment | default(r.comments | default('')),
+                  'network': z.network | default(''),
+                  'environment': z.environment | default('')
+                }) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endfor -%}
+          {{ out }}
+
+    - name: Technitium Reverse | Assert PTR jobs were built
+      ansible.builtin.assert:
+        that:
+          - technitium_ptr_jobs is defined
+        fail_msg: "Failed to build technitium_ptr_jobs."
+
+    - name: Technitium Reverse | Validate PTR records
+      ansible.builtin.assert:
+        that:
+          - item.zone is defined
+          - item.zone | length > 0
+          - item.domain is defined
+          - item.domain | length > 0
+          - item.ip_last_octet is defined
+          - item.ip_last_octet | int >= 0
+          - item.ip_last_octet | int <= 255
+          - item.ptrName is defined
+          - item.ptrName | length > 1
+          - item.ptrName is search('\\.$')
+          - item.ttl is defined
+          - item.ttl | int > 0
+        fail_msg: "Invalid PTR record definition: {{ item }}"
+      loop: "{{ technitium_ptr_jobs }}"
+      loop_control:
+        label: "{{ item.domain | default('unknown') }} -> {{ item.ptrName | default('unknown') }}"
+
+    - name: Technitium Reverse | Build PTR uniqueness keys
+      ansible.builtin.set_fact:
+        technitium_ptr_unique_keys: >-
+          {{
+            technitium_ptr_jobs
+            | map(attribute='domain')
+            | list
+          }}
+
+    - name: Technitium Reverse | Assert each PTR owner is unique
+      ansible.builtin.assert:
+        that:
+          - technitium_ptr_unique_keys | unique | length == technitium_ptr_unique_keys | length
+        fail_msg: >-
+          Duplicate PTR owners detected in technitium_reverse_zones. Each IP
+          address should have exactly one canonical PTR record.
+
+    # -------------------------------------------------------------------------
+    # Build API-ready PTR jobs
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Reverse | Build API-ready PTR bodies
+      ansible.builtin.set_fact:
+        technitium_ptr_api_jobs: >-
+          {%- set out = [] -%}
+          {%- for ptr in technitium_ptr_jobs | default([]) -%}
+            {%- set body = {
+              'token': technitium_reverse_api_token,
+              'zone': ptr.zone,
+              'domain': ptr.domain,
+              'type': 'PTR',
+              'ttl': ptr.ttl | string,
+              'ptrName': ptr.ptrName,
+              'overwrite': 'true'
+            } -%}
+            {%- if ptr.comment | default('') | length > 0 -%}
+              {%- set _ = body.update({'comments': ptr.comment}) -%}
+            {%- endif -%}
+            {%- set _ = out.append({
+              'zone': ptr.zone,
+              'domain': ptr.domain,
+              'ptrName': ptr.ptrName,
+              'ttl': ptr.ttl,
+              'body': body
+            }) -%}
+          {%- endfor -%}
+          {{ out }}
+      no_log: "{{ technitium_reverse_no_log | bool }}"
+
+    # -------------------------------------------------------------------------
+    # Apply PTR records
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Reverse | Apply PTR records
+      ansible.builtin.uri:
+        url: "{{ technitium_reverse_api_base }}/api/zones/records/add"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ technitium_reverse_api_token }}"
+        body_format: form-urlencoded
+        body: "{{ item.body }}"
+        status_code:
+          - 200
+          - 400
+          - 409
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_api_timeout | default(90) | int }}"
+      register: technitium_ptr_apply
+      loop: "{{ technitium_ptr_api_jobs }}"
+      loop_control:
+        label: "{{ item.domain }} -> {{ item.ptrName }}"
+      failed_when: false
+      changed_when: technitium_ptr_apply.json.status | default('') == 'ok'
+      no_log: "{{ technitium_reverse_no_log | bool }}"
+      when: technitium_ptr_api_jobs | length > 0
+
+    - name: Technitium Reverse | Assert PTR apply calls succeeded
+      ansible.builtin.assert:
+        that:
+          - item.json is defined
+          - item.json.status is defined
+          - >-
+            item.json.status == 'ok'
+            or (
+              item.json.status == 'error'
+              and (
+                (item.json.errorMessage | default('')) is search('already', ignorecase=True)
+                or (item.json.errorMessage | default('')) is search('exists', ignorecase=True)
+                or (item.json.errorMessage | default('')) is search('same record', ignorecase=True)
+              )
+            )
+        fail_msg: >-
+          PTR apply failed for {{ item.item.domain }} -> {{ item.item.ptrName }}.
+          Response={{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+      loop: "{{ technitium_ptr_apply.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.domain }} -> {{ item.item.ptrName }}"
+      when: technitium_ptr_api_jobs | length > 0
+
+    # -------------------------------------------------------------------------
+    # Verification
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Reverse | Verify reverse zones are readable
+      ansible.builtin.uri:
+        url: "{{ technitium_reverse_api_base }}/api/zones/records/get"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ technitium_reverse_api_token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_reverse_api_token }}"
+          domain: "{{ item.zone }}"
+          zone: "{{ item.zone }}"
+          listZone: "true"
+        status_code:
+          - 200
+          - 400
+          - 404
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_api_timeout | default(90) | int }}"
+      register: technitium_reverse_zone_verify
+      loop: "{{ technitium_reverse_zone_jobs }}"
+      loop_control:
+        label: "{{ item.zone }}"
+      failed_when: false
+      changed_when: false
+      no_log: "{{ technitium_reverse_no_log | bool }}"
+      when: technitium_reverse_verify_after_apply_effective | bool
+
+    - name: Technitium Reverse | Assert reverse zones are readable
+      ansible.builtin.assert:
+        that:
+          - item.json is defined
+          - item.json.status is defined
+          - item.json.status == 'ok'
+        fail_msg: >-
+          Reverse zone verification failed for {{ item.item.zone }}.
+          Response={{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+      loop: "{{ technitium_reverse_zone_verify.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.zone }}"
+      when: technitium_reverse_verify_after_apply_effective | bool
+
+    - name: Technitium Reverse | Verify PTR records are readable
+      ansible.builtin.uri:
+        url: "{{ technitium_reverse_api_base }}/api/zones/records/get"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ technitium_reverse_api_token }}"
+        body_format: form-urlencoded
+        body:
+          token: "{{ technitium_reverse_api_token }}"
+          domain: "{{ item.domain }}"
+          zone: "{{ item.zone }}"
+          listZone: "false"
+        status_code:
+          - 200
+          - 400
+          - 404
+        return_content: true
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_api_timeout | default(90) | int }}"
+      register: technitium_ptr_verify
+      loop: "{{ technitium_ptr_api_jobs }}"
+      loop_control:
+        label: "{{ item.domain }} -> {{ item.ptrName }}"
+      failed_when: false
+      changed_when: false
+      no_log: "{{ technitium_reverse_no_log | bool }}"
+      when:
+        - technitium_reverse_verify_after_apply_effective | bool
+        - technitium_ptr_api_jobs | length > 0
+
+    - name: Technitium Reverse | Assert PTR records are readable
+      ansible.builtin.assert:
+        that:
+          - item.json is defined
+          - item.json.status is defined
+          - item.json.status == 'ok'
+        fail_msg: >-
+          PTR verification failed for {{ item.item.domain }} -> {{ item.item.ptrName }}.
+          Response={{ item.json.errorMessage | default(item.content | default('unknown error')) }}
+      loop: "{{ technitium_ptr_verify.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.domain }} -> {{ item.item.ptrName }}"
+      when:
+        - technitium_reverse_verify_after_apply_effective | bool
+        - technitium_ptr_api_jobs | length > 0
+
+    # -------------------------------------------------------------------------
+    # Summary
+    # -------------------------------------------------------------------------
+
+    - name: Technitium Reverse | Show reverse-zone summary
+      ansible.builtin.debug:
+        msg:
+          - "Technitium reverse-zone configuration complete."
+          - "Host: {{ inventory_hostname }}"
+          - "API: {{ technitium_reverse_api_base }}"
+          - "Reverse zones declared: {{ technitium_reverse_zone_jobs | length }}"
+          - "PTR records declared: {{ technitium_ptr_api_jobs | length }}"
+          - "Ensure zones enabled: {{ technitium_reverse_zones_ensure_zones_effective | bool }}"
+          - "Verification enabled: {{ technitium_reverse_verify_after_apply_effective | bool }}"
+          - "Cluster-aware primary-only writes: {{ technitium_cluster_enabled | default(false) | bool }}"

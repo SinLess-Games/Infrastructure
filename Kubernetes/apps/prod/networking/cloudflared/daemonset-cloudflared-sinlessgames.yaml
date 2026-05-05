@@ -30,11 +30,14 @@ spec:
         security.sinlessgames.io/zone: edge-access
       annotations:
         prometheus.io/scrape: "true"
+        prometheus.io/scheme: http
         prometheus.io/port: "2000"
         prometheus.io/path: /metrics
     spec:
       serviceAccountName: cloudflared
       automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
 
       affinity:
         nodeAffinity:
@@ -79,6 +82,7 @@ spec:
             httpGet:
               path: /ready
               port: metrics
+              scheme: HTTP
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 18
@@ -87,6 +91,7 @@ spec:
             httpGet:
               path: /ready
               port: metrics
+              scheme: HTTP
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
@@ -95,6 +100,7 @@ spec:
             httpGet:
               path: /ready
               port: metrics
+              scheme: HTTP
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 6

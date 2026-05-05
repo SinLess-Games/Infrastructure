@@ -1,93 +1,225 @@
 ---
 # =============================================================================
-# Install shell tooling and remove starship
+# shell-config — install
 # -----------------------------------------------------------------------------
-# - zsh: system package
-# - oh-my-zsh: per-user install (git clone, non-destructive)
-# - starship: removed when detected
+# Installs shell tooling and prepares per-user shell framework directories.
+#
+# Installs:
+#   - zsh system package
+#   - Oh My Zsh per interactive user
+#
+# Removes by default:
+#   - starship package/binaries/configs
+#
+# Safety:
+#   - Skips users without valid homes.
+#   - Skips non-zsh users for Oh My Zsh.
+#   - Refuses symlinked Oh My Zsh paths.
+#   - Runs user-owned git clones as the target user.
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# Normalize install controls
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Install | Normalize install controls
+  ansible.builtin.set_fact:
+    shell__install_users: "{{ shell__home_users | default(shell__resolved_users | default([])) }}"
+    shell__install_zsh_enabled: "{{ shell_install_zsh | default(true) | bool }}"
+    shell__install_oh_my_zsh_enabled: "{{ shell_install_oh_my_zsh | default(true) | bool }}"
+    shell__install_starship_enabled: "{{ shell_install_starship | default(false) | bool }}"
+    shell__remove_starship_enabled: "{{ shell_remove_starship | default(true) | bool }}"
+  changed_when: false
+  tags:
+    - shell
+    - shell-install
+
+- name: Shell Config | Install | Validate Starship install/remove controls
+  ansible.builtin.assert:
+    that:
+      - not (shell__install_starship_enabled | bool and
+        shell__remove_starship_enabled | bool)
+    fail_msg: "shell_install_starship and shell_remove_starship cannot both be true."
+    success_msg: "Starship install/remove controls are valid."
+  tags:
+    - shell
+    - shell-install
+    - shell-validate
 
 # -----------------------------------------------------------------------------
 # Zsh
 # -----------------------------------------------------------------------------
 
-- name: Ensure zsh is installed
+- name: Shell Config | Install | Ensure zsh is installed
   ansible.builtin.package:
     name: zsh
     state: present
-  when: shell_install_zsh | default(true)
+  become: true
+  when: shell__install_zsh_enabled | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-zsh
 
 # -----------------------------------------------------------------------------
-# Oh My Zsh (per-user, safe + idempotent)
+# Oh My Zsh users
 # -----------------------------------------------------------------------------
 
-# -----------------------------------------------------------------------------
-# Oh My Zsh (per-user, crash-safe)
-# -----------------------------------------------------------------------------
+- name: Shell Config | Install | Build Oh My Zsh user list
+  ansible.builtin.set_fact:
+    shell__oh_my_zsh_users: >-
+      {%- set out = [] -%} {%- for user in shell__install_users -%}
+        {%- set shell_path = user.shell | default('') -%}
+        {%- if shell_path.endswith('zsh') -%}
+          {%- set _ = out.append(user) -%}
+        {%- endif -%}
+      {%- endfor -%} {{ out }}
+  changed_when: false
+  when: shell__install_oh_my_zsh_enabled | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-oh-my-zsh
 
-- name: Ensure Oh My Zsh directory exists (root, no ownership)
-  ansible.builtin.file:
-    path: "{{ item.home_directory }}/.oh-my-zsh"
-    state: directory
-    mode: "0755"
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
+- name: Shell Config | Install | Stat Oh My Zsh directories
+  ansible.builtin.stat:
+    path: "{{ item.home_directory }}/{{ shell_oh_my_zsh_dir | default('.oh-my-zsh')
+      }}"
+    follow: false
+  register: shell__oh_my_zsh_dir_stats
+  loop: "{{ shell__oh_my_zsh_users | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+  when: shell__install_oh_my_zsh_enabled | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-oh-my-zsh
+
+- name: Shell Config | Install | Refuse symlinked Oh My Zsh directories
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to manage symlinked Oh My Zsh directory for {{ item.item.name }}:
+      {{ item.item.home_directory }}/{{ shell_oh_my_zsh_dir |
+      default('.oh-my-zsh') }}
+  loop: "{{ shell__oh_my_zsh_dir_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
   when:
-    - shell_install_oh_my_zsh
-    - item.shell is defined
-    - item.shell.endswith('zsh')
+    - shell__install_oh_my_zsh_enabled | bool
+    - item.stat.islnk | default(false) | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-oh-my-zsh
 
-- name: Fix ownership of Oh My Zsh directory
-  ansible.builtin.file:
-    path: "{{ item.home_directory }}/.oh-my-zsh"
-    owner: "{{ item.name }}"
-    group: "{{ item.name }}"
-    recurse: true
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
-  when:
-    - shell_install_oh_my_zsh
-    - item.shell is defined
-    - item.shell.endswith('zsh')
-
-- name: Install Oh My Zsh (git clone as user, idempotent)
-  become: false
+- name: Shell Config | Install | Install Oh My Zsh
   ansible.builtin.git:
-    repo: https://github.com/ohmyzsh/ohmyzsh.git
-    dest: "{{ item.home_directory }}/.oh-my-zsh"
-    version: master
-    update: false
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
-  when:
-    - shell_install_oh_my_zsh
-    - item.shell is defined
-    - item.shell.endswith('zsh')
+    repo: "{{ shell_oh_my_zsh_repo }}"
+    dest: "{{ item.home_directory }}/{{ shell_oh_my_zsh_dir | default('.oh-my-zsh')
+      }}"
+    version: "{{ shell_oh_my_zsh_version | default('master') }}"
+    update: "{{ shell_git_update | default(false) | bool }}"
+    depth: "{{ shell_git_depth | default(1) | int }}"
+    accept_hostkey: "{{ shell_git_accept_hostkey | default(true) | bool }}"
+  become: true
+  become_user: "{{ item.name }}"
+  loop: "{{ shell__oh_my_zsh_users | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: shell__install_oh_my_zsh_enabled | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-oh-my-zsh
+
+- name: Shell Config | Install | Ensure Oh My Zsh ownership and directory mode
+  ansible.builtin.file:
+    path: "{{ item.home_directory }}/{{ shell_oh_my_zsh_dir | default('.oh-my-zsh')
+      }}"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.shell_config_group | default(item.primary_group |
+      default(item.name)) }}"
+    mode: "0755"
+    recurse: true
+  become: true
+  loop: "{{ shell__oh_my_zsh_users | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: shell__install_oh_my_zsh_enabled | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-oh-my-zsh
 
 # -----------------------------------------------------------------------------
 # Starship cleanup
 # -----------------------------------------------------------------------------
 
-- name: Remove starship package when requested
+- name: Shell Config | Install | Remove starship package when requested
   ansible.builtin.package:
     name: starship
     state: absent
-  when: shell_remove_starship | bool
+  become: true
+  register: shell__starship_package_remove
   failed_when: false
+  when: shell__remove_starship_enabled | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-starship
 
-- name: Remove starship binaries from common locations
+- name: Shell Config | Install | Remove starship binaries from common locations
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
+  become: true
   loop:
     - /usr/local/bin/starship
     - /usr/bin/starship
     - /home/linuxbrew/.linuxbrew/bin/starship
     - /opt/homebrew/bin/starship
-  when: shell_remove_starship | bool
+  loop_control:
+    label: "{{ item }}"
+  when: shell__remove_starship_enabled | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-starship
 
-- name: Remove starship user config directories
+- name: Shell Config | Install | Remove starship user config paths
   ansible.builtin.file:
     path: "{{ item.0.home_directory }}/{{ item.1 }}"
     state: absent
-  loop: "{{ (shell__home_users | default(shell__resolved_users)) | product(['.config/starship', '.config/starship.toml']) | list }}"
+  become: true
+  loop: "{{ shell__install_users | product(['.config/starship',
+    '.config/starship.toml']) | list }}"
   loop_control:
     label: "{{ item.0.name }} -> {{ item.1 }}"
-  when: shell_remove_starship | bool
+  when: shell__remove_starship_enabled | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-starship
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Install | Show install summary
+  ansible.builtin.debug:
+    msg:
+      - "shell-config install phase complete."
+      - "zsh installed: {{ shell__install_zsh_enabled | bool }}"
+      - "Oh My Zsh enabled: {{ shell__install_oh_my_zsh_enabled | bool }}"
+      - "Oh My Zsh users: {{ shell__oh_my_zsh_users | default([]) |
+        map(attribute='name') | list | join(', ') if shell__oh_my_zsh_users |
+        default([]) | length > 0 else 'none' }}"
+      - "Starship removed: {{ shell__remove_starship_enabled | bool }}"
+  when: shell_config_show_summary | default(true) | bool
+  tags:
+    - shell
+    - shell-install
+    - shell-summary

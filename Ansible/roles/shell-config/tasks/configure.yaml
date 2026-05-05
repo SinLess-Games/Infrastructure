@@ -3,123 +3,549 @@
 # shell-config — configure
 # -----------------------------------------------------------------------------
 # Applies user-level shell configuration:
+#   - XDG config directories
 #   - Zsh environment files
 #   - Native prompt
 #   - Aliases
-#   - ~/bin commands from Ansible/files/bin_commands
+#   - Optional Starship config
+#   - User-local ~/bin commands from Ansible/files/bin_commands
 #
-# Templates are sourced from:
-#   Ansible/templates/
+# Safety:
+#   - Uses shell__home_users built by validate.yaml.
+#   - Skips users without valid home directories.
+#   - Skips non-zsh users for zsh dotfiles.
+#   - Refuses symlinked managed files before overwriting.
+#   - Preserves relative bin command paths.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
+# Normalize configure inputs
 # -----------------------------------------------------------------------------
-- name: Ensure XDG config directory exists
+
+- name: Shell Config | Configure | Normalize inputs
+  ansible.builtin.set_fact:
+    shell__configure_users: "{{ shell__home_users | default(shell__resolved_users | default([])) }}"
+    shell__configure_bin_enabled: "{{ shell_bin_commands_enabled | default(true) | bool }}"
+    shell__configure_prompt_enabled: "{{ shell_prompt_enabled | default(true) | bool }}"
+    shell__configure_starship_enabled: "{{ shell_install_starship | default(false) | bool }}"
+    shell__configure_starship_remove_enabled: "{{ shell_remove_starship | default(true) | bool }}"
+    shell__configure_bin_src: "{{ shell_bin_commands_src }}"
+    shell__configure_bin_dest: "{{ shell_bin_commands_dest | default('bin') }}"
+  changed_when: false
+  tags:
+    - shell
+    - shell-configure
+
+- name: Shell Config | Configure | Build zsh user list
+  ansible.builtin.set_fact:
+    shell__configure_zsh_users: >-
+      {%- set out = [] -%} {%- for user in shell__configure_users -%}
+        {%- if user.shell is defined and user.shell.endswith('zsh') -%}
+          {%- set _ = out.append(user) -%}
+        {%- endif -%}
+      {%- endfor -%} {{ out }}
+  changed_when: false
+  tags:
+    - shell
+    - shell-configure
+    - shell-zsh
+
+# -----------------------------------------------------------------------------
+# Validate configure inputs
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Configure | Validate configure inputs
+  ansible.builtin.assert:
+    that:
+      - shell__configure_users is sequence
+      - shell__configure_users is not string
+      - shell__configure_users is not mapping
+      - shell__configure_bin_dest is string
+      - shell__configure_bin_dest | length > 0
+      - shell__configure_bin_dest is not search('^/')
+      - not (shell__configure_starship_enabled | bool and
+        shell__configure_starship_remove_enabled | bool)
+    fail_msg: "shell-config configure inputs are invalid."
+    success_msg: "shell-config configure inputs are valid."
+  tags:
+    - shell
+    - shell-configure
+    - shell-validate
+
+# -----------------------------------------------------------------------------
+# Template source paths
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Configure | Set template source paths
+  ansible.builtin.set_fact:
+    shell__template_zshenv: "{{ shell_zshenv_template_src | default(playbook_dir ~
+      '/../templates/zsh/.zshenv.j2') }}"
+    shell__template_zshrc: "{{ shell_zshrc_template_src | default(playbook_dir ~
+      '/../templates/zsh/.zshrc.j2') }}"
+    shell__template_prompt: "{{ shell_prompt_template_src | default(playbook_dir ~
+      '/../templates/zsh/prompt.zsh.j2') }}"
+    shell__template_aliases: "{{ shell_aliases_template_src | default(playbook_dir ~
+      '/../templates/zsh/aliases.zsh.j2') }}"
+    shell__template_starship: "{{ shell_starship_config_template_src |
+      default(playbook_dir ~ '/../templates/starship/starship.toml.j2') }}"
+  changed_when: false
+  tags:
+    - shell
+    - shell-configure
+    - shell-templates
+
+- name: Shell Config | Configure | Stat required zsh templates
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop:
+    - name: zshenv
+      path: "{{ shell__template_zshenv }}"
+      required: true
+    - name: zshrc
+      path: "{{ shell__template_zshrc }}"
+      required: true
+    - name: prompt
+      path: "{{ shell__template_prompt }}"
+      required: "{{ shell__configure_prompt_enabled | bool }}"
+    - name: aliases
+      path: "{{ shell__template_aliases }}"
+      required: true
+    - name: starship
+      path: "{{ shell__template_starship }}"
+      required: "{{ shell__configure_starship_enabled | bool }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.path }}"
+  register: shell__template_stats
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  tags:
+    - shell
+    - shell-configure
+    - shell-templates
+
+- name: Shell Config | Configure | Assert required templates exist
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false) | bool
+      - item.stat.isreg | default(false) | bool
+      - not (item.stat.islnk | default(false) | bool)
+    fail_msg: "Required shell template is missing, not a file, or symlinked: {{
+      item.item.path }}"
+  loop: "{{ shell__template_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.item.required | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-templates
+    - shell-validate
+
+# -----------------------------------------------------------------------------
+# Base directories
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Configure | Ensure XDG config directories exist
   ansible.builtin.file:
     path: "{{ item.home_directory }}/.config"
     state: directory
     owner: "{{ item.name }}"
-    group: "{{ item.name }}"
+    group: "{{ item.shell_config_group | default(item.primary_group |
+      default(item.name)) }}"
     mode: "0755"
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
+  become: true
+  loop: "{{ shell__configure_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  tags:
+    - shell
+    - shell-configure
+
+- name: Shell Config | Configure | Ensure zsh completion cache directories exist
+  ansible.builtin.file:
+    path: "{{ item.home_directory }}/{{ shell_completion_cache_dir |
+      default('.cache/zcompdump') | dirname }}"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.shell_config_group | default(item.primary_group |
+      default(item.name)) }}"
+    mode: "0755"
+  become: true
+  loop: "{{ shell__configure_zsh_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: shell_enable_extra_completions | default(true) | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-zsh
+
+# -----------------------------------------------------------------------------
+# Symlink safety for managed dotfiles
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Configure | Build managed zsh file list
+  ansible.builtin.set_fact:
+    shell__managed_zsh_files: >-
+      {%- set out = [] -%} {%- for user in shell__configure_zsh_users -%}
+        {%- set group_name = user.shell_config_group | default(user.primary_group | default(user.name)) -%}
+        {%- set _ = out.append({
+          'user': user.name,
+          'group': group_name,
+          'home': user.home_directory,
+          'path': user.home_directory ~ '/.zshenv',
+          'template': shell__template_zshenv,
+          'mode': shell_zshrc_mode | default('0644'),
+          'name': '.zshenv'
+        }) -%}
+        {%- set _ = out.append({
+          'user': user.name,
+          'group': group_name,
+          'home': user.home_directory,
+          'path': user.home_directory ~ '/.zshrc',
+          'template': shell__template_zshrc,
+          'mode': shell_zshrc_mode | default('0644'),
+          'name': '.zshrc'
+        }) -%}
+        {%- if shell__configure_prompt_enabled | bool -%}
+          {%- set _ = out.append({
+            'user': user.name,
+            'group': group_name,
+            'home': user.home_directory,
+            'path': user.home_directory ~ '/' ~ (shell_prompt_file | default('.zsh_prompt')),
+            'template': shell__template_prompt,
+            'mode': shell_prompt_mode | default('0644'),
+            'name': shell_prompt_file | default('.zsh_prompt')
+          }) -%}
+        {%- endif -%}
+        {%- set _ = out.append({
+          'user': user.name,
+          'group': group_name,
+          'home': user.home_directory,
+          'path': user.home_directory ~ '/.zsh_aliases',
+          'template': shell__template_aliases,
+          'mode': shell_zshrc_mode | default('0644'),
+          'name': '.zsh_aliases'
+        }) -%}
+      {%- endfor -%} {{ out }}
+  changed_when: false
+  tags:
+    - shell
+    - shell-configure
+    - shell-zsh
+
+- name: Shell Config | Configure | Stat managed zsh files
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop: "{{ shell__managed_zsh_files | default([]) }}"
+  loop_control:
+    label: "{{ item.user }} -> {{ item.name }}"
+  register: shell__managed_zsh_file_stats
+  changed_when: false
+  become: true
+  tags:
+    - shell
+    - shell-configure
+    - shell-zsh
+    - shell-validate
+
+- name: Shell Config | Configure | Refuse symlinked managed zsh files
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to overwrite symlinked shell file for {{ item.item.user }}: {{
+      item.item.path }}
+  loop: "{{ shell__managed_zsh_file_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.user }} -> {{ item.item.name }}"
+  when: item.stat.islnk | default(false) | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-zsh
+    - shell-validate
 
 # -----------------------------------------------------------------------------
 # Zsh environment files
 # -----------------------------------------------------------------------------
 
-- name: Install .zshenv
+- name: Shell Config | Configure | Install managed zsh files
   ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/zsh/.zshenv.j2"
-    dest: "{{ item.home_directory }}/.zshenv"
+    src: "{{ item.template }}"
+    dest: "{{ item.path }}"
+    owner: "{{ item.user }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+    backup: "{{ shell_dotfile_backup | default(false) }}"
+  become: true
+  loop: "{{ shell__managed_zsh_files | default([]) }}"
+  loop_control:
+    label: "{{ item.user }} -> {{ item.name }}"
+  vars:
+    user:
+      name: "{{ item.user }}"
+      home_directory: "{{ item.home }}"
+    ansible_template_src: "{{ item.template }}"
+  tags:
+    - shell
+    - shell-configure
+    - shell-zsh
+
+# -----------------------------------------------------------------------------
+# Optional Starship config
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Configure | Ensure Starship config directory exists
+  ansible.builtin.file:
+    path: "{{ item.home_directory }}/.config"
+    state: directory
     owner: "{{ item.name }}"
-    group: "{{ item.name }}"
-    mode: "0644"
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
+    group: "{{ item.shell_config_group | default(item.primary_group |
+      default(item.name)) }}"
+    mode: "0755"
+  become: true
+  loop: "{{ shell__configure_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: shell__configure_starship_enabled | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-starship
+
+- name: Shell Config | Configure | Stat Starship config files
+  ansible.builtin.stat:
+    path: "{{ item.home_directory }}/.config/starship.toml"
+    follow: false
+  register: shell__starship_config_stats
+  loop: "{{ shell__configure_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+  become: true
+  when: shell__configure_starship_enabled | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-starship
+    - shell-validate
+
+- name: Shell Config | Configure | Refuse symlinked Starship config files
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to overwrite symlinked Starship config for {{ item.item.name }}:
+      {{ item.item.home_directory }}/.config/starship.toml
+  loop: "{{ shell__starship_config_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - shell__configure_starship_enabled | bool
+    - item.stat.islnk | default(false) | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-starship
+    - shell-validate
+
+- name: Shell Config | Configure | Install Starship config
+  ansible.builtin.template:
+    src: "{{ shell__template_starship }}"
+    dest: "{{ item.home_directory }}/.config/starship.toml"
+    owner: "{{ item.name }}"
+    group: "{{ item.shell_config_group | default(item.primary_group |
+      default(item.name)) }}"
+    mode: "{{ shell_starship_config_mode | default('0644') }}"
+    backup: "{{ shell_starship_config_backup | default(false) }}"
+  become: true
+  loop: "{{ shell__configure_users }}"
+  loop_control:
+    label: "{{ item.name }}"
   vars:
     user: "{{ item }}"
-  when: item.shell is defined and item.shell.endswith('zsh')
+    ansible_template_src: "{{ shell__template_starship }}"
+  when: shell__configure_starship_enabled | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-starship
 
-- name: Install .zshrc
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/zsh/.zshrc.j2"
-    dest: "{{ item.home_directory }}/.zshrc"
-    owner: "{{ item.name }}"
-    group: "{{ item.name }}"
-    mode: "0644"
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
-  vars:
-    user: "{{ item }}"
-  when: item.shell is defined and item.shell.endswith('zsh')
+# -----------------------------------------------------------------------------
+# Default shell
+# -----------------------------------------------------------------------------
 
-- name: Install .zsh_prompt
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/zsh/prompt.zsh.j2"
-    dest: "{{ item.home_directory }}/.zsh_prompt"
-    owner: "{{ item.name }}"
-    group: "{{ item.name }}"
-    mode: "0644"
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
-  vars:
-    user: "{{ item }}"
-  when: item.shell is defined and item.shell.endswith('zsh')
+- name: Shell Config | Configure | Set default shell for managed users
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    shell: "{{ item.shell | default(shell_default_shell) }}"
+  become: true
+  loop: "{{ shell__configure_users }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.shell | default(shell_default_shell) }}"
+  when:
+    - shell_set_default_shell | default(true) | bool
+    - item.shell is defined
+    - item.shell | length > 0
+  tags:
+    - shell
+    - shell-configure
 
-- name: Install aliases
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/zsh/aliases.zsh.j2"
-    dest: "{{ item.home_directory }}/.zsh_aliases"
-    owner: "{{ item.name }}"
-    group: "{{ item.name }}"
-    mode: "0644"
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
-  vars:
-    user: "{{ item }}"
-  when: item.shell is defined and item.shell.endswith('zsh')
+# -----------------------------------------------------------------------------
+# User-local bin commands
+# -----------------------------------------------------------------------------
 
-- name: Discover managed bin command files
+- name: Shell Config | Configure | Discover managed bin command files
   ansible.builtin.find:
-    paths: "{{ shell_bin_commands_src }}"
+    paths: "{{ shell__configure_bin_src }}"
     file_type: file
     recurse: true
+    hidden: false
   register: shell_bin_command_files
   delegate_to: localhost
   become: false
   run_once: true
-  when: shell_bin_commands_enabled | bool
+  when: shell__configure_bin_enabled | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-bin
 
-- name: Ensure user bin directories exist
+- name: Shell Config | Configure | Build managed bin command jobs
+  ansible.builtin.set_fact:
+    shell__bin_command_jobs: >-
+      {%- set jobs = [] -%} {%- set src_prefix =
+      shell__configure_bin_src.rstrip('/') ~ '/' -%} {%- for user in
+      shell__configure_users -%}
+        {%- set group_name = user.shell_config_group | default(user.primary_group | default(user.name)) -%}
+        {%- for command_file in shell_bin_command_files.files | default([]) -%}
+          {%- set relative_path = command_file.path | regex_replace('^' ~ (src_prefix | regex_escape), '') -%}
+          {%- set _ = jobs.append({
+            'user': user.name,
+            'group': group_name,
+            'home': user.home_directory,
+            'src': command_file.path,
+            'relative_path': relative_path,
+            'relative_dir': relative_path | dirname,
+            'dest_dir': user.home_directory ~ '/' ~ shell__configure_bin_dest ~ '/' ~ (relative_path | dirname),
+            'dest': user.home_directory ~ '/' ~ shell__configure_bin_dest ~ '/' ~ relative_path
+          }) -%}
+        {%- endfor -%}
+      {%- endfor -%} {{ jobs }}
+  changed_when: false
+  when: shell__configure_bin_enabled | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-bin
+
+- name: Shell Config | Configure | Ensure user bin directories exist
   ansible.builtin.file:
-    path: "{{ item.home_directory }}/{{ shell_bin_commands_dest }}"
+    path: "{{ item.home_directory }}/{{ shell__configure_bin_dest }}"
     state: directory
     owner: "{{ item.name }}"
-    group: "{{ item.name }}"
+    group: "{{ item.shell_config_group | default(item.primary_group |
+      default(item.name)) }}"
     mode: "0755"
-  loop: "{{ shell__home_users | default(shell__resolved_users) }}"
+  become: true
+  loop: "{{ shell__configure_users }}"
   loop_control:
     label: "{{ item.name }}"
-  when: shell_bin_commands_enabled | bool
+  when: shell__configure_bin_enabled | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-bin
 
-- name: Ensure nested bin command directories exist
+- name: Shell Config | Configure | Ensure nested bin command directories exist
   ansible.builtin.file:
-    path: "{{ item.0.home_directory }}/{{ shell_bin_commands_dest }}/{{ (item.1.path | regex_replace('^.*/bin_commands/', '')) | dirname }}"
+    path: "{{ item.dest_dir }}"
     state: directory
-    owner: "{{ item.0.name }}"
-    group: "{{ item.0.name }}"
+    owner: "{{ item.user }}"
+    group: "{{ item.group }}"
     mode: "0755"
-  loop: "{{ (shell__home_users | default(shell__resolved_users)) | product(shell_bin_command_files.files | default([])) | list }}"
+  become: true
+  loop: "{{ shell__bin_command_jobs | default([]) }}"
   loop_control:
-    label: "{{ item.0.name }} -> {{ (item.1.path | regex_replace('^.*/bin_commands/', '')) | dirname }}"
+    label: "{{ item.user }} -> {{ item.relative_dir }}"
   when:
-    - shell_bin_commands_enabled | bool
-    - (item.1.path | regex_replace('^.*/bin_commands/', '')) | dirname != '.'
+    - shell__configure_bin_enabled | bool
+    - item.relative_dir != "."
+  tags:
+    - shell
+    - shell-configure
+    - shell-bin
 
-- name: Copy managed bin commands
-  ansible.builtin.copy:
-    src: "{{ item.1.path }}"
-    dest: "{{ item.0.home_directory }}/{{ shell_bin_commands_dest }}/{{ item.1.path | regex_replace('^.*/bin_commands/', '') }}"
-    owner: "{{ item.0.name }}"
-    group: "{{ item.0.name }}"
-    mode: "0755"
-  loop: "{{ (shell__home_users | default(shell__resolved_users)) | product(shell_bin_command_files.files | default([])) | list }}"
+- name: Shell Config | Configure | Stat destination bin command files
+  ansible.builtin.stat:
+    path: "{{ item.dest }}"
+    follow: false
+  register: shell__bin_command_dest_stats
+  become: true
+  changed_when: false
+  loop: "{{ shell__bin_command_jobs | default([]) }}"
   loop_control:
-    label: "{{ item.0.name }} -> {{ item.1.path | regex_replace('^.*/bin_commands/', '') }}"
-  when: shell_bin_commands_enabled | bool
+    label: "{{ item.user }} -> {{ item.relative_path }}"
+  when: shell__configure_bin_enabled | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-bin
+    - shell-validate
+
+- name: Shell Config | Configure | Refuse symlinked destination bin command files
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to overwrite symlinked bin command for {{ item.item.user }}: {{
+      item.item.dest }}
+  loop: "{{ shell__bin_command_dest_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.user }} -> {{ item.item.relative_path }}"
+  when:
+    - shell__configure_bin_enabled | bool
+    - item.stat.islnk | default(false) | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-bin
+    - shell-validate
+
+- name: Shell Config | Configure | Copy managed bin commands
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.user }}"
+    group: "{{ item.group }}"
+    mode: "{{ shell_bin_commands_mode | default('0755') }}"
+  become: true
+  loop: "{{ shell__bin_command_jobs | default([]) }}"
+  loop_control:
+    label: "{{ item.user }} -> {{ item.relative_path }}"
+  when: shell__configure_bin_enabled | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-bin
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Shell Config | Configure | Show configure summary
+  ansible.builtin.debug:
+    msg:
+      - "shell-config configure phase complete."
+      - "Users configured: {{ shell__configure_users | map(attribute='name') |
+        list | join(', ') if shell__configure_users | length > 0 else 'none' }}"
+      - "Zsh users: {{ shell__configure_zsh_users | map(attribute='name') | list
+        | join(', ') if shell__configure_zsh_users | length > 0 else 'none' }}"
+      - "Prompt enabled: {{ shell__configure_prompt_enabled | bool }}"
+      - "Starship config enabled: {{ shell__configure_starship_enabled | bool }}"
+      - "Bin commands enabled: {{ shell__configure_bin_enabled | bool }}"
+      - "Bin command count: {{ shell_bin_command_files.files | default([]) |
+        length if shell__configure_bin_enabled | bool else 0 }}"
+  when: shell_config_show_summary | default(true) | bool
+  tags:
+    - shell
+    - shell-configure
+    - shell-summary

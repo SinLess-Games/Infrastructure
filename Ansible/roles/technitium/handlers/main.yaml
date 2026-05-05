@@ -1,9 +1,143 @@
 ---
 # =============================================================================
-# Handlers for Technitium DNS role
+# Technitium DNS - Handlers
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Handlers used by the Technitium DNS role for OS resolver changes, Docker,
+#   firewall reloads, and Technitium container lifecycle actions.
+#
+# Design:
+#   - Handlers are intentionally safe and idempotent.
+#   - systemd-resolved failures are tolerated because some minimal/containerized
+#     Debian images may not run it.
+#   - Technitium is deployed as a Docker container, not a systemd service.
 # =============================================================================
 
-- name: "Restart systemd-resolved"
+# =============================================================================
+# systemd / resolver handlers
+# =============================================================================
+
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+
+- name: Restart systemd-resolved
   ansible.builtin.systemd:
     name: systemd-resolved
     state: restarted
+    daemon_reload: true
+  become: true
+  failed_when: false
+
+- name: Flush systemd-resolved cache
+  ansible.builtin.command:
+    cmd: resolvectl flush-caches
+  become: true
+  changed_when: false
+  failed_when: false
+
+- name: Flush systemd-resolved cache legacy
+  ansible.builtin.command:
+    cmd: systemd-resolve --flush-caches
+  become: true
+  changed_when: false
+  failed_when: false
+
+# =============================================================================
+# Docker handlers
+# =============================================================================
+
+- name: Restart Docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: Reload Docker
+  ansible.builtin.systemd:
+    name: docker
+    state: reloaded
+    enabled: true
+  become: true
+  failed_when: false
+
+- name: Restart Technitium container
+  community.docker.docker_container:
+    name: "{{ technitium_container_name | default('technitium') }}"
+    state: started
+    restart: true
+  become: true
+  failed_when: false
+
+- name: Stop Technitium container
+  community.docker.docker_container:
+    name: "{{ technitium_container_name | default('technitium') }}"
+    state: stopped
+  become: true
+  failed_when: false
+
+- name: Start Technitium container
+  community.docker.docker_container:
+    name: "{{ technitium_container_name | default('technitium') }}"
+    state: started
+  become: true
+
+# =============================================================================
+# Firewall handlers
+# =============================================================================
+
+- name: Reload UFW
+  community.general.ufw:
+    state: reloaded
+  become: true
+  failed_when: false
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  become: true
+
+- name: Restart netfilter-persistent
+  ansible.builtin.systemd:
+    name: netfilter-persistent
+    state: restarted
+    enabled: true
+  become: true
+  failed_when: false
+
+- name: Save iptables rules
+  ansible.builtin.command:
+    cmd: netfilter-persistent save
+  become: true
+  changed_when: true
+  failed_when: false
+
+# =============================================================================
+# Technitium API settle handlers
+# =============================================================================
+
+- name: Wait for Technitium HTTP API after restart
+  ansible.builtin.wait_for:
+    host: >-
+      {{
+        '127.0.0.1'
+        if (technitium_bind_ip | default('0.0.0.0')) in ['0.0.0.0', '::']
+        else technitium_bind_ip | default(ansible_host | default(inventory_hostname))
+      }}
+    port: "{{ technitium_http_port | default(5380) }}"
+    delay: 3
+    timeout: "{{ technitium_http_wait_timeout | default(120) }}"
+    state: started
+  become: false
+
+- name: Wait for Technitium DNS TCP after restart
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host | default(inventory_hostname) }}"
+    port: "{{ technitium_dns_port | default(53) }}"
+    delay: 3
+    timeout: "{{ technitium_dns_wait_timeout | default(120) }}"
+    state: started
+  become: false

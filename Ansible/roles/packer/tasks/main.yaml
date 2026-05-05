@@ -1,0 +1,199 @@
+---
+# Ansible/roles/packer/tasks/main.yaml
+#
+# Tasks to generate Packer files and invoke Packer builds per distro/node.
+#
+# Output layout:
+#   <repo-root>/Packer/<distro>/
+#
+# Examples:
+#   Packer/debian-12/
+#   Packer/debian-13/
+#   Packer/ubuntu-22.04/
+#
+# Generated var-files:
+#   Ansible/generated/packer/<distro>-template-<node>.pkrvars.hcl
+#
+# Proxmox token source:
+#   .outputs/api-tokens/packer-prov-api-token.txt
+#
+# Expected token file keys:
+#   FULL_TOKENID=packer-prov@pve!packer-automation
+#   TOKEN_SECRET=<secret>
+
+- name: Set repository and Packer output paths
+  ansible.builtin.set_fact:
+    packer_repo_root: "{{ playbook_dir }}/../.."
+    packer_output_root: "{{ packer_root_dir | default(playbook_dir ~ '/../../Packer') }}"
+
+- name: Set Proxmox API token file path
+  ansible.builtin.set_fact:
+    packer_proxmox_api_token_file_resolved: >-
+      {{
+        packer_proxmox_api_token_file
+        | default(packer_repo_root ~ '/.outputs/api-tokens/packer-prov-api-token.txt')
+      }}
+
+- name: Check Proxmox API token file exists
+  ansible.builtin.stat:
+    path: "{{ packer_proxmox_api_token_file_resolved }}"
+  register: packer_proxmox_api_token_file_stat
+
+- name: Validate Proxmox API token file exists
+  ansible.builtin.assert:
+    that:
+      - packer_proxmox_api_token_file_stat.stat.exists
+      - packer_proxmox_api_token_file_stat.stat.isreg
+    fail_msg: >-
+      Proxmox API token file was not found at
+      {{ packer_proxmox_api_token_file_resolved }}.
+      Generate the packer-prov token before running this role.
+
+- name: Read Proxmox API token file
+  ansible.builtin.set_fact:
+    packer_proxmox_api_token_file_content: "{{ lookup('ansible.builtin.file', packer_proxmox_api_token_file_resolved) }}"
+  no_log: true
+
+- name: Extract Proxmox API token ID
+  ansible.builtin.set_fact:
+    packer_proxmox_api_token_id_runtime: >-
+      {{
+        (
+          packer_proxmox_api_token_file_content
+          | regex_search('(?m)^FULL_TOKENID=.*$')
+          | default('', true)
+          | regex_replace('^FULL_TOKENID=', '')
+        )
+        | trim
+      }}
+  no_log: true
+
+- name: Extract Proxmox API token secret
+  ansible.builtin.set_fact:
+    packer_proxmox_api_token_secret_runtime: >-
+      {{
+        (
+          packer_proxmox_api_token_file_content
+          | regex_search('(?m)^TOKEN_SECRET=.*$')
+          | default('', true)
+          | regex_replace('^TOKEN_SECRET=', '')
+        )
+        | trim
+      }}
+  no_log: true
+
+- name: Validate Proxmox API token values were loaded
+  ansible.builtin.assert:
+    that:
+      - packer_proxmox_api_token_id_runtime is defined
+      - packer_proxmox_api_token_id_runtime | length > 0
+      - packer_proxmox_api_token_secret_runtime is defined
+      - packer_proxmox_api_token_secret_runtime | length > 0
+      - "'!' in packer_proxmox_api_token_id_runtime"
+    fail_msg: >-
+      Could not extract valid FULL_TOKENID and TOKEN_SECRET from
+      {{ packer_proxmox_api_token_file_resolved }}.
+      Expected lines like:
+      FULL_TOKENID=packer-prov@pve!packer-automation
+      TOKEN_SECRET=<secret>
+  no_log: true
+
+- name: Ensure root Packer directory exists
+  ansible.builtin.file:
+    path: "{{ packer_output_root }}"
+    state: directory
+    mode: "0755"
+
+- name: Ensure generated vars directory exists
+  ansible.builtin.file:
+    path: "{{ packer_generated_vars_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Validate required Packer role variables
+  ansible.builtin.assert:
+    that:
+      - packer_repo_root is defined
+      - packer_output_root is defined
+      - packer_generated_vars_dir is defined
+      - packer_vm_id_base is defined
+      - packer_distros is defined
+      - packer_distros | length > 0
+      - packer_target_nodes is defined
+      - packer_target_nodes | length > 0
+      - packer_proxmox_api_token_file_resolved is defined
+      - packer_proxmox_api_token_id_runtime is defined
+      - packer_proxmox_api_token_secret_runtime is defined
+    fail_msg: >-
+      Missing required packer role variables. Define packer_distros,
+      packer_target_nodes, packer_vm_id_base, packer_root_dir,
+      packer_generated_vars_dir, and packer_proxmox_api_token_file
+      in Ansible/group_vars/packer/main.yaml.
+
+- name: Validate configured Packer distros
+  ansible.builtin.assert:
+    that:
+      - distro_item.name is defined
+      - distro_item.name | length > 0
+      - distro_item.display_name is defined
+      - distro_item.display_name | length > 0
+      - distro_item.family is defined
+      - distro_item.family in ["debian", "ubuntu"]
+      - distro_item.installer_type is defined
+      - distro_item.installer_type in ["preseed", "autoinstall"]
+      - distro_item.iso_url is defined
+      - distro_item.iso_url is match("^https?://")
+    fail_msg: >-
+      Invalid distro entry in packer_distros. Each distro must define:
+      name, display_name, family, installer_type, and iso_url.
+  loop: "{{ packer_distros }}"
+  loop_control:
+    loop_var: distro_item
+    label: "{{ distro_item.name | default('unnamed-distro') }}"
+
+- name: Validate selected Packer target nodes
+  ansible.builtin.assert:
+    that:
+      - node_item is string
+      - node_item | length > 0
+    fail_msg: "Each packer_target_nodes entry must be a non-empty node hostname."
+  loop: "{{ packer_target_nodes }}"
+  loop_control:
+    loop_var: node_item
+    label: "{{ node_item }}"
+
+- name: Build templates for selected distros and nodes
+  ansible.builtin.include_tasks: render-and-build.yaml
+  loop: "{{ packer_distros | product(packer_target_nodes) | list }}"
+  loop_control:
+    loop_var: packer_pair
+    index_var: packer_build_index
+    label: "{{ packer_pair[0].name }} @ {{ packer_pair[1] }}"
+  vars:
+    distro_item: "{{ packer_pair[0] }}"
+    node_name: "{{ packer_pair[1] }}"
+
+    # Deterministic template VM IDs:
+    # 9000, 9001, 9002, ...
+    vm_id: "{{ (packer_vm_id_base | int) + (packer_build_index | int) }}"
+
+    # Template naming standard:
+    # {distro}-template-{node_hostname}
+    #
+    # Keep this explicit. Do not use nested Jinja patterns like:
+    #   {{distro}}-template-{{node}}
+    vm_name: "{{ packer_pair[0].name }}-template-{{ packer_pair[1] }}"
+
+    # Always generate under repo-root/Packer, never under Ansible/playbooks/Packer.
+    pkr_dir: "{{ packer_output_root }}/{{ packer_pair[0].name }}"
+    pkr_hcl_path: "{{ packer_output_root }}/{{ packer_pair[0].name }}/{{ packer_pair[0].name }}.pkr.hcl"
+
+    # Per-distro/node var-file used by packer validate/build.
+    varfile_path: "{{ packer_generated_vars_dir }}/{{ packer_pair[0].name }}-template-{{ packer_pair[1] }}.pkrvars.hcl"
+
+    # ISO metadata derived from distro iso_url.
+    iso_filename: "{{ packer_pair[0].iso_url.split('/')[-1] }}"
+    iso_host: "{{ packer_pair[0].iso_url.split('/')[2] }}"
+
+    # Kept for Debian templates and legacy template compatibility.
+    debian_version: "{{ (packer_pair[0].release | default(packer_pair[0].name.split('-')[-1])) if (packer_pair[0].family | default('debian')) == 'debian' else '' }}"

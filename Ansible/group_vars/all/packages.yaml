@@ -1,120 +1,401 @@
 ---
-# Shared package catalog for the packages role.
-# Organized by host profile so plays can enable development, production,
-# and shell tooling explicitly.
+# =============================================================================
+# Shared Package Catalog
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Central package catalog for the packages role.
 #
-# Note:
-# Exact language runtime versions are tracked here, but APT alone will not
-# guarantee these versions on Debian. Keep system Python for Ansible/bootstrap,
-# and install pinned developer runtimes with a dedicated role/tooling layer.
+# Design:
+#   - Packages are grouped by host profile.
+#   - Playbooks enable only the profiles they need through packages_enabled_groups.
+#   - Runtime versions are tracked as metadata, not guaranteed through APT.
+#
+# Example:
+#   packages_enabled_groups:
+#     - production
+#     - shell
+#
+# Notes:
+#   - Keep Ansible Python dependencies in Ansible/requirements.txt.
+#   - Keep Galaxy dependencies in Ansible/requirements.yaml.
+#   - Keep workstation/controller Homebrew packages in scripts/configs/Brewfile.
+#   - Avoid installing heavy development tooling on production servers unless
+#     explicitly enabled.
+# =============================================================================
+
+# =============================================================================
+# Runtime Version Metadata
+# -----------------------------------------------------------------------------
+# These are desired developer/runtime versions. APT may not provide these exact
+# versions. Use dedicated runtime roles or tools such as nvm, asdf, mise,
+# pyenv, go installer roles, or Homebrew for exact versions.
+# =============================================================================
 
 development_runtime_versions:
   golang: "1.26.1"
   nodejs: "25.8.1"
   python: "3.14.3"
 
+runtime_installation_policy:
+  system_python_for_ansible: true
+  pin_developer_runtimes_outside_apt: true
+  prefer_homebrew_for_controller_tools: true
+  prefer_vendor_repos_for_specialized_cli_tools: true
+
+# =============================================================================
+# Homebrew Packages for Interactive Shell Hosts
+# -----------------------------------------------------------------------------
+# Optional supplement for controller/workstation hosts.
+# The primary Brewfile remains:
+#   scripts/configs/Brewfile
+# =============================================================================
+
 shell_brew_packages:
   - k9s
   - istioctl
   - thefuck
 
+# =============================================================================
+# APT Package Catalog
+# -----------------------------------------------------------------------------
+# The packages role should consume this map with packages_enabled_groups.
+# =============================================================================
+
 apt_packages:
+  # ---------------------------------------------------------------------------
+  # Bootstrap
+  # ---------------------------------------------------------------------------
+  # Minimal packages needed early in host setup. Safe for nearly every Debian or
+  # Ubuntu managed host.
+  # ---------------------------------------------------------------------------
+
+  bootstrap:
+    - ca-certificates
+    - curl
+    - gnupg
+    - lsb-release
+    - sudo
+    - python3
+    - python3-apt
+
+  # ---------------------------------------------------------------------------
+  # Production baseline
+  # ---------------------------------------------------------------------------
+  # Small, safe baseline for servers and appliances.
+  # ---------------------------------------------------------------------------
+
   production:
     - ca-certificates
-    - gnupg
     - curl
+    - gnupg
     - sudo
     - locales
-    - ethtool
-    - iptables
-    - logrotate
-    - needrestart
-    - unattended-upgrades
+    - lsb-release
     - openssh-server
-    - apparmor
-    - auditd
     - qemu-guest-agent
 
-  development:
-    # Python bootstrap tooling
-    # Keep distro Python for Ansible and package management. Exact developer
-    # Python is tracked above and should be installed separately.
-    - python3
-    - python3-pip
-    - python3-venv
-    - python3-dev
-    - python3-setuptools
-    - pipx
-    # Node/Go runtimes are version-pinned above and should be installed
-    # outside the distro package set.
-    # Java/JVM
-    - openjdk-17-jdk
-    - openjdk-21-jdk
-    - maven
-    - gradle
-    # Go / Rust / C/C++ / LLVM
-    - rustc
-    - cargo
-    - gcc
-    - g++
-    - clang
-    - clang-format
-    - llvm
-    - gdb
-    - valgrind
-    - lldb
-    - ninja-build
-    - ccache
-    # Scripting / linters / proto
-    - shellcheck
-    - shfmt
-    - yamllint
-    - jsonlint
-    - graphviz
-    - protobuf-compiler
-    # IaC / DevOps
-    - ansible
-    - ansible-lint
-    # Containers
-    - docker.io
-    - containerd
-    - podman
-    - buildah
-    - skopeo
-    # Git helpers
-    - git-extras
-    - gh                 # GitHub CLI (may require vendor repo on some releases)
+    # Security / hardening
+    - apparmor
+    - auditd
+    - unattended-upgrades
+    - needrestart
 
-  shell:
-    # Operator tools and interactive shell UX
-    - git
+    # Networking / firewall
+    - ethtool
+    - iproute2
+    - iptables
+    - nftables
+    - net-tools
+
+    # Operations
+    - logrotate
+    - rsync
+    - tar
     - unzip
     - zip
-    - tree
-    - screen
-    - jq
-    - yq
-    - htop
-    - btop
+
+  # ---------------------------------------------------------------------------
+  # Shell / operator UX
+  # ---------------------------------------------------------------------------
+  # Interactive tools for admin/operator accounts.
+  # ---------------------------------------------------------------------------
+
+  shell:
     - bash-completion
+    - btop
+    - colordiff
+    - direnv
+    - dnsutils
+    - fd-find
+    - fzf
+    - git
+    - htop
+    - jq
+    - less
     - moreutils
     - nano
-    - net-tools
-    - dnsutils
-    - traceroute
-    - whois
+    - ncdu
+    - ripgrep
+    - screen
     - time
-    - lsb-release
-    - nmap
-    - tcpdump
-    - zsh
-    - direnv
-    - fzf
-    - colordiff
+    - tmux
+    - traceroute
+    - tree
+    - vim
+    - wget
+    - whois
+    - yq
     - zoxide
-    # Fonts for interactive terminal use
+    - zsh
+
+  # ---------------------------------------------------------------------------
+  # Fonts
+  # ---------------------------------------------------------------------------
+  # Useful for interactive desktop/workstation hosts. Usually unnecessary on
+  # minimal servers.
+  # ---------------------------------------------------------------------------
+
+  fonts:
     - fonts-firacode
     - fonts-hack
     - fonts-inconsolata
     - fonts-noto
     - fonts-noto-color-emoji
+
+  # ---------------------------------------------------------------------------
+  # Development tooling
+  # ---------------------------------------------------------------------------
+  # Heavy tooling for development hosts only.
+  # ---------------------------------------------------------------------------
+
+  development:
+    # Build essentials
+    - build-essential
+    - gcc
+    - g++
+    - make
+    - pkg-config
+    - cmake
+    - ninja-build
+    - ccache
+
+    # Python bootstrap tooling
+    - python3
+    - python3-dev
+    - python3-pip
+    - python3-setuptools
+    - python3-venv
+    - pipx
+
+    # Java / JVM
+    - openjdk-17-jdk
+    - openjdk-21-jdk
+    - maven
+    - gradle
+
+    # Rust / C / C++ / LLVM
+    - rustc
+    - cargo
+    - clang
+    - clang-format
+    - llvm
+    - lldb
+    - gdb
+    - valgrind
+
+    # Scripting / linting / schemas / diagrams
+    - shellcheck
+    - shfmt
+    - yamllint
+    - graphviz
+    - protobuf-compiler
+
+    # Git helpers
+    - git-extras
+
+  # ---------------------------------------------------------------------------
+  # Containers
+  # ---------------------------------------------------------------------------
+  # Container runtimes and image tooling. Enable only on hosts intended to build
+  # or run containers outside Kubernetes.
+  # ---------------------------------------------------------------------------
+
+  containers:
+    - containerd
+    - docker.io
+    - podman
+    - buildah
+    - skopeo
+    - uidmap
+    - slirp4netns
+    - fuse-overlayfs
+
+  # ---------------------------------------------------------------------------
+  # Virtualization / Proxmox-adjacent tools
+  # ---------------------------------------------------------------------------
+  # Useful on hypervisors, template builders, and VM automation hosts.
+  # ---------------------------------------------------------------------------
+
+  virtualization:
+    - cloud-guest-utils
+    - cloud-image-utils
+    - genisoimage
+    - libguestfs-tools
+    - qemu-utils
+    - virtinst
+
+  # ---------------------------------------------------------------------------
+  # Networking diagnostics
+  # ---------------------------------------------------------------------------
+  # Useful for DNS, PXE, Kubernetes, and homelab troubleshooting.
+  # ---------------------------------------------------------------------------
+
+  networking:
+    - arp-scan
+    - bind9-dnsutils
+    - dnsutils
+    - ipcalc
+    - iperf3
+    - lldpd
+    - mtr
+    - nmap
+    - openssl
+    - socat
+    - tcpdump
+    - telnet
+    - traceroute
+    - whois
+
+  # ---------------------------------------------------------------------------
+  # Storage diagnostics
+  # ---------------------------------------------------------------------------
+
+  storage:
+    - fio
+    - hdparm
+    - iotop
+    - lsof
+    - smartmontools
+    - sysstat
+
+  # ---------------------------------------------------------------------------
+  # Observability / troubleshooting
+  # ---------------------------------------------------------------------------
+
+  observability:
+    - auditd
+    - bpftrace
+    - dstat
+    - iftop
+    - iotop
+    - lsof
+    - strace
+    - sysstat
+    - tcpdump
+
+  # ---------------------------------------------------------------------------
+  # GitHub / DevOps CLI tools
+  # ---------------------------------------------------------------------------
+  # Some distros may require vendor repositories for newer versions.
+  # Keep this profile optional.
+  # ---------------------------------------------------------------------------
+
+  devops_cli:
+    - gh
+
+# =============================================================================
+# Recommended Host Profiles
+# -----------------------------------------------------------------------------
+# Optional metadata for playbooks or validation tasks.
+# =============================================================================
+
+package_profiles:
+  minimal_server:
+    - bootstrap
+    - production
+
+  production_server:
+    - bootstrap
+    - production
+    - shell
+
+  dns_server:
+    - bootstrap
+    - production
+    - shell
+    - networking
+
+  proxmox_host:
+    - bootstrap
+    - production
+    - shell
+    - networking
+    - storage
+    - virtualization
+
+  kubernetes_node:
+    - bootstrap
+    - production
+    - shell
+    - networking
+    - containers
+
+  development_workstation:
+    - bootstrap
+    - production
+    - shell
+    - fonts
+    - development
+    - containers
+    - networking
+    - storage
+    - devops_cli
+
+# =============================================================================
+# Package Policy Metadata
+# =============================================================================
+
+packages_policy:
+  require_known_groups: true
+  allow_empty_groups: false
+  install_recommends_default: false
+  update_cache_default: true
+  cache_valid_time_seconds: 3600
+
+  production_safe_groups:
+    - bootstrap
+    - production
+    - shell
+    - networking
+    - storage
+    - observability
+
+  heavy_groups:
+    - development
+    - containers
+    - virtualization
+    - fonts
+
+  optional_groups:
+    - devops_cli
+    - fonts
+
+  packages_managed_elsewhere:
+    python:
+      - ansible
+      - ansible-lint
+      - mkdocs
+      - mkdocs-material
+    homebrew:
+      - terraform
+      - kubectl
+      - helm
+      - k9s
+      - flux
+      - istioctl
+      - vault
+      - go-task
+    runtime_roles:
+      - nodejs
+      - golang
+      - python

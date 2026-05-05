@@ -1,84 +1,165 @@
 # =============================================================================
 # Python Requirements for Ansible Tooling
 # -----------------------------------------------------------------------------
-# This file defines the Python execution environment for:
-#   - Ansible Core + Galaxy
-#   - Proxmox automation
-#   - RKE2 / Kubernetes management
-#   - CI linting and documentation
+# Purpose:
+#   Defines the Python execution environment for the Infrastructure repo.
 #
-# Always install inside a virtual environment.
+# Covers:
+#   - Ansible Core + Galaxy
+#   - Ansible developer tooling
+#   - Proxmox automation
+#   - Docker / container automation
+#   - Kubernetes / RKE2 management
+#   - Cloudflare automation
+#   - CI linting
+#   - MkDocs documentation
+#
+# Recommended Python:
+#   - Python 3.12+
+#
+# Notes:
+#   - Install inside a virtual environment.
+#   - Keep this file pinned for reproducible local and CI execution.
 # =============================================================================
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Core Ansible
-# -----------------------------------------------------------------------------
+# =============================================================================
 
-ansible==10.1.0                # Meta-package (includes ansible-core)
-ansible-core==2.17.3           # Explicit pin for execution engine
-ansible-lint==24.6.1           # Best-practice enforcement
-ansible-creator==24.6.1        # Role & collection scaffolding
+ansible==13.6.0
+ansible-core==2.20.5
 
+# =============================================================================
+# Ansible Developer Tooling
 # -----------------------------------------------------------------------------
-# Networking / Infra APIs
-# -----------------------------------------------------------------------------
+# ansible-lint:
+#   Static analysis and best-practice checks for playbooks, roles, and tasks.
+#
+# ansible-creator:
+#   Role and collection scaffolding.
+# =============================================================================
 
-requests==2.32.4               # HTTP client (shared dependency)
-urllib3==2.2.3                 # Explicit pin to avoid indirect breakage
-netaddr==1.3.0                 # IP/CIDR manipulation
-cloudflare==3.0.1              # Cloudflare API client (DNS, Tunnels)
+ansible-lint==26.4.0
+ansible-creator==26.4.3
 
+# =============================================================================
+# HTTP / Networking / Infrastructure APIs
+# =============================================================================
+
+requests==2.33.1
+urllib3==2.6.3
+netaddr==1.3.0
+jmespath==1.1.0
+packaging==26.2
+
+# =============================================================================
+# Cloudflare
 # -----------------------------------------------------------------------------
+# Used for Cloudflare DNS, tunnels, and API-backed automation.
+# Major version 5.x uses the newer official Cloudflare Python client shape.
+# =============================================================================
+
+cloudflare==5.0.0
+
+# =============================================================================
 # Proxmox
 # -----------------------------------------------------------------------------
+# proxmoxer:
+#   Proxmox VE / PBS / PMG API client.
+#
+# paramiko:
+#   Optional SSH backend support for proxmoxer and other automation paths.
+# =============================================================================
 
-proxmoxer==2.0.1               # Proxmox VE API client
-# NOTE: Requires 'requests' and 'urllib3'
+proxmoxer==2.3.0
+paramiko==4.0.0
 
+# =============================================================================
+# Docker / Container Automation
 # -----------------------------------------------------------------------------
+# The community.docker collection uses the Docker SDK for some modules.
+# Remote hosts may still install python3-docker through apt, but this keeps
+# controller-side tooling available too.
+# =============================================================================
+
+docker==7.1.0
+
+# =============================================================================
 # Cryptography / Auth
 # -----------------------------------------------------------------------------
+# passlib remains useful for Ansible user password hashing.
+#
+# bcrypt is pinned below 5.x for passlib compatibility and to avoid the newer
+# bcrypt 5 behavior where passwords longer than 72 bytes raise ValueError.
+# =============================================================================
 
-cryptography==45.0.5           # TLS, SSH, PKI (community.crypto)
-passlib[bcrypt]==1.7.4         # Secure password hashing
+cryptography==48.0.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.3.0
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Kubernetes / RKE2
 # -----------------------------------------------------------------------------
+# kubernetes:
+#   Official Kubernetes Python client.
+#
+# openshift:
+#   Legacy dynamic-client dependency still expected by some Ansible Kubernetes
+#   workflows and older collection paths.
+#
+# jsonpatch:
+#   Useful for Kubernetes patch operations.
+# =============================================================================
 
-kubernetes==31.0.0             # Official Kubernetes Python client
-openshift==0.13.2              # Required for k8s dynamic client
-pyyaml==6.0.2                  # YAML parsing
-jmespath==1.0.1                # JSON queries for facts and filters
+kubernetes==35.0.0
+openshift==0.13.2
+jsonpatch==1.33
+PyYAML==6.0.3
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Documentation / Diagrams
 # -----------------------------------------------------------------------------
+# Keep MkDocs on 1.6.x for mkdocs-material compatibility.
+# Do not move to MkDocs 2.x until the plugin/theme ecosystem is ready.
+# =============================================================================
 
 mkdocs==1.6.1
-mkdocs-material==9.5.42
-mkdocs-mermaid2-plugin==1.2.1
-
-# -----------------------------------------------------------------------------
-# Optional (CI / Quality Gates)
-# -----------------------------------------------------------------------------
-# Uncomment if used in pipelines
-# yamllint==1.35.1
-# pre-commit==3.8.0
-# rich==13.9.2
+mkdocs-material==9.7.6
+mkdocs-mermaid2-plugin==1.2.3
+pymdown-extensions==10.21.2
 
 # =============================================================================
-# Notes
+# CI / Quality Gates
 # =============================================================================
-# - Install with:
-#     python -m venv .venv
-#     source .venv/bin/activate
-#     pip install --upgrade pip setuptools wheel
-#     pip install -r Ansible/requirements.txt
+
+yamllint==1.38.0
+pre-commit==4.6.0
+rich==15.0.0
+
+# =============================================================================
+# Install
+# =============================================================================
+# python -m venv .venv
+# source .venv/bin/activate
+# python -m pip install --upgrade pip setuptools wheel
+# python -m pip install -r Ansible/requirements.txt
 #
-# - Versions pinned as of 2025-09
-# - Upgrade ONLY alongside:
+# =============================================================================
+# Maintenance Notes
+# =============================================================================
+# - Updated: 2026-05
+# - Upgrade Python dependencies together with:
 #     * ansible-core
-#     * galaxy collections
-#     * kubernetes.core
+#     * ansible community package
+#     * Ansible Galaxy collections
+#     * kubernetes.core collection
+#     * community.docker collection
+#     * community.general collection
+#
+# - After upgrades, validate with:
+#     ansible --version
+#     ansible-galaxy collection list
+#     ansible-lint Ansible/
+#     yamllint Ansible/
+#     mkdocs build --strict
 # =============================================================================

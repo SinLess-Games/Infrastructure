@@ -1,4 +1,13 @@
-# Packer configuration
+# Generated Packer HCL for debian-12
+# Ansible/templates/packer/vm.pkr.hcl.j2
+#
+# This template is rendered by Ansible into:
+#   Packer/<distro>/<distro>.pkr.hcl
+#
+# Supported installer flows:
+#   - Debian: preseed
+#   - Ubuntu live-server: autoinstall / NoCloud
+
 packer {
   required_plugins {
     proxmox = {
@@ -8,145 +17,209 @@ packer {
   }
 }
 
-# Packer variables
+# -----------------------------------------------------------------------------
+# Proxmox connection
+# -----------------------------------------------------------------------------
+
 variable "proxmox_endpoint" {
-  description = "Proxmox API endpoint URL (for example: https://pve-01:8006/api2/json)"
-  type        = string
+  type = string
 }
 
 variable "proxmox_api_token_id" {
-  description = "Proxmox API token ID (user@realm!token-name)"
-  type        = string
-  sensitive   = true
+  type      = string
+  sensitive = true
 }
 
 variable "proxmox_api_token_secret" {
-  description = "Proxmox API token secret"
-  type        = string
-  sensitive   = true
+  type      = string
+  sensitive = true
 }
 
 variable "proxmox_node" {
-  description = "Proxmox cluster node name for VM build placement (for example: pve-01, not an IP address)"
-  type        = string
-
-  validation {
-    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9._-]*$", var.proxmox_node)) && !can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", var.proxmox_node))
-    error_message = "Proxmox node must be a Proxmox node name (for example pve-01), not an IP address."
-  }
+  type = string
 }
 
 variable "proxmox_insecure_skip_tls_verify" {
-  description = "Skip TLS verification when connecting to Proxmox API"
-  type        = bool
-  default     = true
+  type    = bool
+  default = true
 }
 
+# -----------------------------------------------------------------------------
+# Proxmox storage
+# -----------------------------------------------------------------------------
+
 variable "proxmox_iso_storage" {
-  description = "Proxmox ISO storage pool"
-  type        = string
-  default     = "ISOs"
+  type    = string
+  default = "local"
 }
 
 variable "proxmox_vm_storage" {
-  description = "Proxmox VM disk storage pool"
-  type        = string
-  default     = "vm_disks_01"
+  type    = string
+  default = "local-lvm"
 }
+
+# -----------------------------------------------------------------------------
+# VM template identity
+# -----------------------------------------------------------------------------
 
 variable "vm_name" {
-  description = "VM template name"
-  type        = string
-  default     = "debian-12-template"
+  type    = string
+  default = "debian-12-template-pve-05"
 }
 
+variable "vm_id" {
+  type    = number
+  default = 9002
+}
+
+variable "template_description" {
+  type    = string
+  default = "Debian 12 template built by Packer for pve-05"
+}
+
+# -----------------------------------------------------------------------------
+# VM hardware
+# -----------------------------------------------------------------------------
+
 variable "vm_memory" {
-  description = "VM memory in MB"
-  type        = number
-  default     = 2048
+  type    = number
+  default = 2048
 }
 
 variable "vm_cores" {
-  description = "VM CPU cores"
-  type        = number
-  default     = 2
+  type    = number
+  default = 2
 }
 
 variable "vm_sockets" {
-  description = "VM CPU sockets"
-  type        = number
-  default     = 1
+  type    = number
+  default = 1
+}
+
+variable "vm_disk_size" {
+  type    = string
+  default = "20G"
+}
+
+variable "vm_bridge" {
+  type    = string
+  default = "vmbr0"
+}
+
+variable "disable_kvm" {
+  type    = bool
+  default = false
+}
+
+# -----------------------------------------------------------------------------
+# ISO / distro metadata
+# -----------------------------------------------------------------------------
+
+variable "iso_filename" {
+  type    = string
+  default = "debian-12.13.0-amd64-netinst.iso"
+}
+
+variable "iso_url" {
+  type    = string
+  default = "https://cloudfront.debian.net/cdimage/archive/latest-oldstable/amd64/iso-cd/debian-12.13.0-amd64-netinst.iso"
+}
+
+variable "distro" {
+  type    = string
+  default = "debian-12"
+}
+
+variable "distro_family" {
+  type    = string
+  default = "debian"
+}
+
+variable "installer_type" {
+  type    = string
+  default = "preseed"
 }
 
 variable "debian_version" {
-  description = "Debian version"
-  type        = string
-  default     = "12"
+  type    = string
+  default = "bookworm"
 }
 
-variable "debian_iso_url" {
-  description = "Debian ISO URL"
-  type        = string
-  default     = "https://cloudfront.debian.net/cdimage/archive/latest-oldstable/amd64/iso-cd/debian-12.13.0-amd64-netinst.iso"
+# -----------------------------------------------------------------------------
+# SSH used by Packer after install
+# -----------------------------------------------------------------------------
+
+variable "ssh_username" {
+  type = string
+  default = "root"
 }
 
-variable "debian_iso_checksum" {
-  description = "Debian ISO checksum"
-  type        = string
-  default     = "sha256:2b880ffabe36dbe04a662a3125e5ecae4db69d0acce257dd74615bbf165ad76e"
+variable "ssh_password" {
+  type      = string
+  sensitive = true
+  default   = "packer"
 }
 
-# Packer source
-source "proxmox-iso" "debian12" {
-  # Proxmox connection
+variable "ssh_timeout" {
+  type    = string
+  default = "60m"
+}
+
+variable "ssh_handshake_attempts" {
+  type    = number
+  default = 300
+}
+
+# -----------------------------------------------------------------------------
+# Proxmox ISO builder
+# -----------------------------------------------------------------------------
+
+source "proxmox-iso" "vm_template" {
   proxmox_url              = var.proxmox_endpoint
   username                 = var.proxmox_api_token_id
   token                    = var.proxmox_api_token_secret
   node                     = var.proxmox_node
   insecure_skip_tls_verify = var.proxmox_insecure_skip_tls_verify
 
-  # VM Configuration
-  vm_id   = 9001
+  vm_id   = var.vm_id
   vm_name = var.vm_name
+
   memory  = var.vm_memory
   cores   = var.vm_cores
   sockets = var.vm_sockets
 
-  # Storage configuration
   scsi_controller = "virtio-scsi-pci"
+
   disks {
-    type              = "virtio"
-    disk_size         = "20G"
-    storage_pool      = var.proxmox_vm_storage
-    format            = "raw"
+    type         = "virtio"
+    disk_size    = var.vm_disk_size
+    storage_pool = var.proxmox_vm_storage
+    format       = "raw"
   }
 
-  # Cloud-init drive
   cloud_init              = true
   cloud_init_storage_pool = var.proxmox_vm_storage
 
-  # Network configuration
   network_adapters {
     model  = "virtio"
-    bridge = "vmbr0"
+    bridge = var.vm_bridge
   }
 
-  # VNC Console
   vga {
     type   = "std"
     memory = 16
   }
 
-  # ISO configuration
   boot_iso {
     type     = "scsi"
-    iso_file = "${var.proxmox_iso_storage}:iso/debian-12.13.0-amd64-netinst.iso"
+    iso_file = "${var.proxmox_iso_storage}:iso/${var.iso_filename}"
     unmount  = true
   }
 
-  # Boot and firmware
-  bios = "seabios"
-  
+  bios      = "seabios"
+  boot_wait = "15s"
+
+  # Debian installer / preseed.
   boot_command = [
     "<esc><wait>",
     "auto ",
@@ -155,68 +228,62 @@ source "proxmox-iso" "debian12" {
     "debian-installer/locale=en_US.UTF-8 ",
     "keyboard-configuration/xkb-keymap=us ",
     "netcfg/choose_interface=auto ",
-    "hostname=debian12 ",
-    "domain=local ",
+    "hostname=debian-12-template-pve-05 ",
+    "domain=local.sinlessgamesllc.com ",
     "fb=false ",
     "debconf/frontend=noninteractive ",
     "--- <enter>"
   ]
 
-  http_directory = "http"
+  http_directory = "${path.root}/http"
   http_port_min  = 8802
   http_port_max  = 8820
 
-  # Boot wait
-  boot_wait = "15s"
+  ssh_username           = var.ssh_username
+  ssh_password           = var.ssh_password
+  ssh_timeout            = var.ssh_timeout
+  ssh_wait_timeout       = var.ssh_timeout
+  ssh_handshake_attempts = var.ssh_handshake_attempts
 
-  # SSH configuration
-  ssh_username           = "root"
-  ssh_password           = "packer"
-  ssh_timeout            = "30m"
-  ssh_wait_timeout       = "20m"
-  ssh_handshake_attempts = 150
+  disable_kvm = var.disable_kvm
 
-  # Shutdown settings
-  disable_kvm = false
-
-  # Template configuration
   template_name        = var.vm_name
-  template_description = "Debian ${var.debian_version} template built by Packer"
-
+  template_description = var.template_description
 }
 
-# Build configuration
-build {
-  name    = "debian-12"
-  sources = ["source.proxmox-iso.debian12"]
+# -----------------------------------------------------------------------------
+# Build
+# -----------------------------------------------------------------------------
 
-  # Wait for boot
+build {
+  name    = "debian-12-pve-05"
+  sources = ["source.proxmox-iso.vm_template"]
+
   provisioner "shell" {
-    inline       = ["echo 'Waiting for system to stabilize...'"]
+    inline = [
+      "echo 'Waiting for system to stabilize before provisioning...'"
+    ]
     pause_before = "30s"
   }
 
-  # Update system
   provisioner "shell" {
     script = "${path.root}/scripts/update-system.sh"
   }
 
-  # Install cloud-init (optional but recommended for cloud environments)
   provisioner "shell" {
     script = "${path.root}/scripts/install-cloud-init.sh"
   }
 
-  # Clean up
   provisioner "shell" {
     script = "${path.root}/scripts/cleanup.sh"
   }
 
-  # Shutdown VM to convert to template
   provisioner "shell" {
-    inline            = ["shutdown -P now"]
+    inline = [
+      "shutdown -P now"
+    ]
     expect_disconnect = true
     timeout           = "5m"
     skip_clean        = true
   }
-
 }

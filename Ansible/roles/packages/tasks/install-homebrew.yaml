@@ -2,49 +2,475 @@
 # =============================================================================
 # packages — install-homebrew
 # -----------------------------------------------------------------------------
-# Installs Homebrew (Linuxbrew) if enabled and not already present
+# Installs and manages Homebrew/Linuxbrew packages when enabled.
 #
-# Design goals:
-# - Safe (no reinstallation)
-# - Idempotent
-# - Non-interactive
-# - Works under sudo
+# Design:
+#   - Linux-focused for the Infrastructure control node.
+#   - Safe under sudo.
+#   - Installs Homebrew as packages_homebrew_user, never as root.
+#   - Idempotent package installation.
+#   - Does not require community.general.homebrew.
 # =============================================================================
 
-- name: Check if Homebrew is already installed
-  become: false
-  ansible.builtin.command: "{{ packages_homebrew_bin }} --version"
-  register: brew_check
+# -----------------------------------------------------------------------------
+# Skip fast when disabled
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Set Homebrew enable flag
+  ansible.builtin.set_fact:
+    packages__homebrew_enabled: "{{ packages_install_homebrew | default(false) | bool }}"
+  changed_when: false
+  tags:
+    - packages
+    - packages-homebrew
+
+# -----------------------------------------------------------------------------
+# Validate host support
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Assert host OS is supported
+  ansible.builtin.assert:
+    that:
+      - ansible_system == "Linux"
+    fail_msg: >-
+      Homebrew installation in this role is currently Linuxbrew-focused.
+      ansible_system={{ ansible_system }} is not supported by this task file.
+    success_msg: "Linuxbrew is supported on this host."
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+    - packages-homebrew-validate
+
+- name: Packages | Homebrew | Assert Homebrew user is not root
+  ansible.builtin.assert:
+    that:
+      - packages_homebrew_user is defined
+      - packages_homebrew_user | length > 0
+      - packages_homebrew_user != "root"
+    fail_msg: "Homebrew must be installed as a non-root user."
+    success_msg: "Homebrew target user is valid."
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+    - packages-homebrew-validate
+
+# -----------------------------------------------------------------------------
+# Resolve Homebrew user account
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Resolve Homebrew user passwd entry
+  ansible.builtin.command:
+    argv:
+      - getent
+      - passwd
+      - "{{ packages_homebrew_user }}"
+  register: packages__homebrew_user_getent
   changed_when: false
   failed_when: false
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
 
-- name: Install Homebrew (Linuxbrew)
-  become: false
-  ansible.builtin.shell: |
-    NONINTERACTIVE=1 \
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  args:
-    creates: "{{ packages_homebrew_bin }}"
-  environment:
-    HOME: "{{ lookup('env', 'HOME') }}"
-    USER: "{{ packages_homebrew_user }}"
+- name: Packages | Homebrew | Assert Homebrew user exists
+  ansible.builtin.assert:
+    that:
+      - packages__homebrew_user_getent.rc == 0
+      - packages__homebrew_user_getent.stdout is defined
+      - packages__homebrew_user_getent.stdout.split(':') | length >= 7
+    fail_msg: "Homebrew user does not exist: {{ packages_homebrew_user }}"
+    success_msg: "Homebrew user exists."
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+    - packages-homebrew-validate
+
+- name: Packages | Homebrew | Resolve Homebrew user home and group
+  ansible.builtin.set_fact:
+    packages__homebrew_home: "{{ packages__homebrew_user_getent.stdout.split(':')[5] }}"
+    packages__homebrew_group_effective: "{{ packages_homebrew_group | default(packages_homebrew_user) }}"
+    packages__homebrew_env: >-
+      {{
+        packages_homebrew_environment
+        | default({})
+        | combine({
+            'HOME': packages__homebrew_user_getent.stdout.split(':')[5],
+            'USER': packages_homebrew_user
+          })
+      }}
+  changed_when: false
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+# -----------------------------------------------------------------------------
+# Prepare Linuxbrew prefix
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Ensure Linuxbrew parent directory exists
+  ansible.builtin.file:
+    path: "{{ packages_homebrew_prefix | dirname }}"
+    state: directory
+    owner: "{{ packages_homebrew_user }}"
+    group: "{{ packages__homebrew_group_effective }}"
+    mode: "0755"
+  become: true
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+- name: Packages | Homebrew | Check if Homebrew is already installed
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "--version"
+  register: packages__homebrew_check
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+# -----------------------------------------------------------------------------
+# Bootstrap Homebrew
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Assert bootstrap is allowed when brew is missing
+  ansible.builtin.assert:
+    that:
+      - packages_homebrew_bootstrap | default(true) | bool
+    fail_msg: >-
+      Homebrew is missing at {{ packages_homebrew_bin }}, but
+      packages_homebrew_bootstrap=false.
+    success_msg: "Homebrew bootstrap is allowed."
   when:
-    - brew_check.rc != 0
-    - ansible_system == "Linux"
+    - packages__homebrew_enabled | bool
+    - packages__homebrew_check.rc | default(1) != 0
+  tags:
+    - packages
+    - packages-homebrew
+    - packages-homebrew-validate
 
-- name: Ensure Homebrew is available system-wide
+- name: Packages | Homebrew | Install Homebrew Linuxbrew
+  ansible.builtin.shell: |
+    set -euo pipefail
+    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL {{ packages_homebrew_install_url | quote }})"
+  args:
+    executable: /bin/bash
+    creates: "{{ packages_homebrew_bin }}"
+  register: packages__homebrew_install
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when:
+    - packages__homebrew_enabled | bool
+    - packages__homebrew_check.rc | default(1) != 0
+    - packages_homebrew_bootstrap | default(true) | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+- name: Packages | Homebrew | Verify Homebrew after bootstrap
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "--version"
+  register: packages__homebrew_verify
+  changed_when: false
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+    - packages-homebrew-verify
+
+# -----------------------------------------------------------------------------
+# System-wide shell environment
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Install system-wide profile script
   ansible.builtin.copy:
     dest: /etc/profile.d/homebrew.sh
+    owner: root
+    group: root
     mode: "0644"
     content: |
-      # Homebrew (Linuxbrew)
+      # Managed by Ansible - packages role
+      # Homebrew / Linuxbrew environment
+
       if [ -d "{{ packages_homebrew_prefix }}" ]; then
         export HOMEBREW_PREFIX="{{ packages_homebrew_prefix }}"
         export HOMEBREW_CELLAR="{{ packages_homebrew_prefix }}/Cellar"
         export HOMEBREW_REPOSITORY="{{ packages_homebrew_prefix }}/Homebrew"
-        export PATH="{{ packages_homebrew_prefix }}/bin:{{ packages_homebrew_prefix }}/sbin:$PATH"
-        export MANPATH="{{ packages_homebrew_prefix }}/share/man:$MANPATH"
-        export INFOPATH="{{ packages_homebrew_prefix }}/share/info:$INFOPATH"
+
+        case ":$PATH:" in
+          *:"{{ packages_homebrew_prefix }}/bin":*) ;;
+          *) export PATH="{{ packages_homebrew_prefix }}/bin:{{ packages_homebrew_prefix }}/sbin:$PATH" ;;
+        esac
+
+        if [ -d "{{ packages_homebrew_prefix }}/share/man" ]; then
+          export MANPATH="{{ packages_homebrew_prefix }}/share/man:${MANPATH:-}"
+        fi
+
+        if [ -d "{{ packages_homebrew_prefix }}/share/info" ]; then
+          export INFOPATH="{{ packages_homebrew_prefix }}/share/info:${INFOPATH:-}"
+        fi
+
+        export HOMEBREW_NO_ANALYTICS=1
+        export HOMEBREW_NO_ENV_HINTS=1
       fi
+  become: true
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+# -----------------------------------------------------------------------------
+# Homebrew maintenance
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Disable Homebrew analytics
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "analytics"
+      - "off"
+  register: packages__homebrew_analytics
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+- name: Packages | Homebrew | Update Homebrew metadata
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "update"
+  register: packages__homebrew_update
+  changed_when: >-
+    'Already up-to-date' not in (packages__homebrew_update.stdout | default(''))
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
   when:
-    - ansible_system == "Linux"
+    - packages__homebrew_enabled | bool
+    - packages_homebrew_update | default(true) | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+# -----------------------------------------------------------------------------
+# Taps
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Normalize Homebrew taps
+  ansible.builtin.set_fact:
+    packages__homebrew_taps: >-
+      {{
+        packages_homebrew_taps
+        | default([])
+        | map('string')
+        | map('trim')
+        | reject('equalto', '')
+        | unique
+        | sort
+        | list
+      }}
+  changed_when: false
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+- name: Packages | Homebrew | List existing Homebrew taps
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "tap"
+  register: packages__homebrew_existing_taps
+  changed_when: false
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+- name: Packages | Homebrew | Add Homebrew taps
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "tap"
+      - "{{ item }}"
+  loop: "{{ packages__homebrew_taps | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  register: packages__homebrew_tap_results
+  changed_when: true
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when:
+    - packages__homebrew_enabled | bool
+    - item not in (packages__homebrew_existing_taps.stdout_lines | default([]))
+  tags:
+    - packages
+    - packages-homebrew
+
+# -----------------------------------------------------------------------------
+# Formula installation
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Normalize Homebrew package list
+  ansible.builtin.set_fact:
+    packages__homebrew_packages: >-
+      {{
+        packages_role_brew_packages
+        | default([])
+        | map('string')
+        | map('trim')
+        | reject('equalto', '')
+        | unique
+        | sort
+        | list
+      }}
+  changed_when: false
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+- name: Packages | Homebrew | Check installed Homebrew formulae
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "list"
+      - "--formula"
+      - "{{ item }}"
+  loop: "{{ packages__homebrew_packages | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  register: packages__homebrew_formula_checks
+  changed_when: false
+  failed_when: false
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when: packages__homebrew_enabled | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+- name: Packages | Homebrew | Install Homebrew formulae
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "install"
+      - "{{ item.item }}"
+  loop: "{{ packages__homebrew_formula_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: packages__homebrew_install_formula_results
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when:
+    - packages__homebrew_enabled | bool
+    - item.rc | default(1) != 0
+  tags:
+    - packages
+    - packages-homebrew
+
+# -----------------------------------------------------------------------------
+# Optional upgrade / cleanup
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Upgrade installed Homebrew formulae
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "upgrade"
+  register: packages__homebrew_upgrade
+  changed_when: >-
+    (packages__homebrew_upgrade.stdout | default('') | trim | length) > 0
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when:
+    - packages__homebrew_enabled | bool
+    - packages_homebrew_upgrade | default(false) | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+- name: Packages | Homebrew | Cleanup Homebrew cache
+  ansible.builtin.command:
+    argv:
+      - "{{ packages_homebrew_bin }}"
+      - "cleanup"
+  register: packages__homebrew_cleanup
+  changed_when: >-
+    (packages__homebrew_cleanup.stdout | default('') | trim | length) > 0
+  become: true
+  become_user: "{{ packages_homebrew_user }}"
+  environment: "{{ packages__homebrew_env }}"
+  when:
+    - packages__homebrew_enabled | bool
+    - packages_homebrew_cleanup | default(false) | bool
+  tags:
+    - packages
+    - packages-homebrew
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Packages | Homebrew | Show Homebrew summary
+  ansible.builtin.debug:
+    msg:
+      - "Homebrew processing complete."
+      - "Enabled: {{ packages__homebrew_enabled | bool }}"
+      - "User: {{ packages_homebrew_user }}"
+      - "Home: {{ packages__homebrew_home | default('unknown') }}"
+      - "Prefix: {{ packages_homebrew_prefix }}"
+      - "Binary: {{ packages_homebrew_bin }}"
+      - "Version: {{ packages__homebrew_verify.stdout_lines | default([]) |
+        first | default('unknown') }}"
+      - "Taps requested: {{ packages__homebrew_taps | default([]) | length }}"
+      - "Formulae requested: {{ packages__homebrew_packages | default([]) |
+        length }}"
+      - >-
+        Formulae installed this run: {{
+          packages__homebrew_install_formula_results.results
+          | default([])
+          | selectattr('changed', 'equalto', true)
+          | map(attribute='item.item')
+          | list
+          | join(', ')
+          if packages__homebrew_install_formula_results is defined
+          else 'none'
+        }}
+  when:
+    - packages__homebrew_enabled | bool
+    - packages_show_summary | default(true) | bool
+  tags:
+    - packages
+    - packages-homebrew
+    - packages-summary

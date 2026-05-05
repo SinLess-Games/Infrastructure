@@ -1,152 +1,426 @@
 # =====================================================================
-# aliases.zsh — common CLI aliases
-# This file is sourced by .zshrc. Keep logic minimal and side-effect free.
+# aliases.zsh — common interactive CLI aliases and helper functions
+# ---------------------------------------------------------------------
+# This file is sourced by .zshrc.
+#
+# Keep this file:
+#   - interactive-shell only
+#   - low side-effect
+#   - safe for production systems
+#
+# Avoid destructive aliases that run immediately or remove large amounts
+# of data without confirmation.
 # =====================================================================
 
-# -------------------------- Basic Aliases -----------------------------
-alias ll='ls -l'
-alias la='ls -A'
+# ---------------------------------------------------------------------
+# Guard: aliases/functions are only useful in interactive shells
+# ---------------------------------------------------------------------
+
+case "$-" in
+  *i*) ;;
+  *) return 0 2>/dev/null || exit 0 ;;
+esac
+
+# ---------------------------------------------------------------------
+# Shell Options
+# ---------------------------------------------------------------------
+
+setopt no_nomatch 2>/dev/null || true
+
+# ---------------------------------------------------------------------
+# Basic Aliases
+# ---------------------------------------------------------------------
+
+alias ll='ls -lh'
+alias la='ls -lah'
 alias l='ls -CF'
 alias c='clear'
+alias cls='clear'
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
 alias mkdirp='mkdir -p'
-alias path='echo -e ${PATH//:/\\n}'
+alias reload='exec zsh'
+alias path='print -l ${(s.:.)PATH}'
 
-# -------------------------- File & Editing ----------------------------
+# ---------------------------------------------------------------------
+# File and Editing
+# ---------------------------------------------------------------------
+
 alias e='nvim'
 alias v='nvim'
-alias cat='bat --style=plain --paging=never 2>/dev/null || command cat'
+alias svim='sudoedit'
 alias grep='grep --color=auto'
+alias egrep='egrep --color=auto'
+alias fgrep='fgrep --color=auto'
 
-# -------------------------- System Info -------------------------------
+if command -v bat >/dev/null 2>&1; then
+  alias cat='bat --style=plain --paging=never'
+  alias batp='bat --style=plain --paging=always'
+elif command -v batcat >/dev/null 2>&1; then
+  alias cat='batcat --style=plain --paging=never'
+  alias batp='batcat --style=plain --paging=always'
+fi
+
+if command -v eza >/dev/null 2>&1; then
+  alias ls='eza --group-directories-first'
+  alias ll='eza -lh --group-directories-first --git'
+  alias la='eza -lah --group-directories-first --git'
+  alias tree='eza --tree --group-directories-first'
+fi
+
+# ---------------------------------------------------------------------
+# System Info
+# ---------------------------------------------------------------------
+
 alias cpu='lscpu'
 alias mem='free -h'
-alias ds='du -sh *'
+alias disk='df -h'
+alias disks='lsblk -o NAME,SIZE,FSTYPE,TYPE,MOUNTPOINTS'
+alias ds='du -sh -- * 2>/dev/null'
 alias ports='ss -tulpn'
 alias ipinfo='ip -c a'
-alias myip='curl -s https://ipinfo.io/ip'
+alias myip='curl -fsS https://ipinfo.io/ip'
 alias sctl='sudo systemctl'
 alias j='journalctl -xe'
+alias jf='journalctl -xef'
+alias bootlog='journalctl -b -p warning..alert'
+alias services='systemctl --type=service --state=running'
+alias failed='systemctl --failed'
 
-# -------------------------- Git Aliases -------------------------------
-alias gs='git status'
+# ---------------------------------------------------------------------
+# Git
+# ---------------------------------------------------------------------
+
+alias g='git'
+alias gs='git status --short --branch'
+alias gst='git status'
 alias gl='git log --oneline --graph --decorate'
+alias gla='git log --oneline --graph --decorate --all'
 alias gll='git log --stat'
 alias gd='git diff'
 alias gds='git diff --staged'
+alias ga='git add'
+alias gaa='git add .'
 alias gc='git commit -m'
 alias gca='git commit -am'
 alias gco='git checkout'
 alias gcb='git checkout -b'
-alias gpull='git pull --rebase'
+alias gsw='git switch'
+alias gswc='git switch -c'
+alias gpull='git pull --rebase --autostash'
 alias gp='git push'
 alias gpf='git push --force-with-lease'
-alias ga='git add .'
 alias gr='git restore'
-alias grs='git restore --staged .'
+alias grs='git restore --staged'
+alias grsa='git restore --staged .'
+alias gundo='git reset --soft HEAD~1'
+alias gtags='git tag --sort=-creatordate'
+alias gb='git branch'
+alias gba='git branch -a'
+alias gclean-preview='git clean -xdfn'
 alias gclean='git clean -xdf'
-alias gundo='git reset HEAD~1'
 
-# -------------------------- Kubernetes -------------------------------
-alias k='kubectl'
+# ---------------------------------------------------------------------
+# GitHub CLI
+# ---------------------------------------------------------------------
+
+if command -v gh >/dev/null 2>&1; then
+  alias ghi='gh issue list'
+  alias ghpr='gh pr list'
+  alias ghprc='gh pr create'
+  alias ghprv='gh pr view --web'
+  alias ghw='gh workflow list'
+  alias ghr='gh run list'
+  alias ghrw='gh run watch'
+fi
+
+# ---------------------------------------------------------------------
+# Kubernetes
+# ---------------------------------------------------------------------
+
+if command -v kubecolor >/dev/null 2>&1; then
+  alias k='kubecolor'
+  alias kubectl='kubecolor'
+else
+  alias k='kubectl'
+fi
+
 alias ka='kubectl apply -f'
 alias kd='kubectl delete -f'
+alias kdiff='kubectl diff -f'
 alias kga='kubectl get all'
 alias kgp='kubectl get pods -o wide'
 alias kgn='kubectl get nodes -o wide'
+alias kgns='kubectl get namespaces'
 alias kgc='kubectl config get-contexts'
 alias kuc='kubectl config use-context'
+alias kctx-current='kubectl config current-context'
 alias kdn='kubectl describe node'
 alias kdp='kubectl describe pod'
+alias kdd='kubectl describe deployment'
+alias kds='kubectl describe service'
 alias kl='kubectl logs'
 alias klf='kubectl logs -f'
 alias kexec='kubectl exec -it'
 alias ktop='kubectl top pod'
+alias ktopn='kubectl top node'
 alias kns='kubectl config set-context --current --namespace'
-alias kctx='kubectx'
-alias kn='kubens'
+alias kapi='kubectl api-resources'
+alias kevents='kubectl get events --sort-by=.lastTimestamp'
+alias kpods-bad='kubectl get pods --all-namespaces --field-selector=status.phase!=Running,status.phase!=Succeeded'
 
-# -------------------------- Helm -------------------------------------
+if command -v kubectx >/dev/null 2>&1; then
+  alias kctx='kubectx'
+fi
+
+if command -v kubens >/dev/null 2>&1; then
+  alias kn='kubens'
+fi
+
+if command -v k9s >/dev/null 2>&1; then
+  alias k9s-prod='k9s --context rke2-prod'
+fi
+
+# ---------------------------------------------------------------------
+# Helm
+# ---------------------------------------------------------------------
+
 alias h='helm'
+alias hs='helm search repo'
+alias hls='helm list --all-namespaces'
 alias hi='helm install'
 alias hu='helm upgrade'
-alias hd='helm delete'
+alias hui='helm upgrade --install'
+alias hd='helm uninstall'
 alias hrs='helm repo update'
+alias hrv='helm repo list'
+alias ht='helm template'
+alias hlint='helm lint'
 
-# -------------------------- Terraform -------------------------------
+# ---------------------------------------------------------------------
+# Terraform / OpenTofu
+# ---------------------------------------------------------------------
+
+if command -v tofu >/dev/null 2>&1; then
+  alias tofu-init='tofu init'
+  alias tofu-plan='tofu plan'
+  alias tofu-apply='tofu apply'
+  alias tofu-destroy='tofu destroy'
+  alias tofu-fmt='tofu fmt -recursive'
+  alias tofu-validate='tofu validate'
+fi
+
 alias tf='terraform'
 alias tfi='terraform init'
 alias tfp='terraform plan'
 alias tfa='terraform apply'
 alias tfd='terraform destroy'
-alias tff='terraform fmt'
+alias tff='terraform fmt -recursive'
 alias tfv='terraform validate'
 alias tfs='terraform state list'
+alias tfo='terraform output'
+alias tfw='terraform workspace list'
 
-# -------------------------- Ansible ----------------------------------
+# ---------------------------------------------------------------------
+# Ansible
+# ---------------------------------------------------------------------
+
 alias a='ansible'
 alias ap='ansible-playbook'
 alias av='ansible-vault'
 alias ainv='ansible-inventory --graph'
 alias pingall='ansible all -m ping'
+alias alint='ansible-lint'
+alias acheck='ansible-playbook --check --diff'
 
-# -------------------------- Docker / Compose --------------------------
+# ---------------------------------------------------------------------
+# Docker / Compose
+# ---------------------------------------------------------------------
+
+alias d='docker'
 alias dps='docker ps'
 alias dpa='docker ps -a'
 alias dimg='docker images'
 alias dstats='docker stats'
-alias dstop='docker stop $(docker ps -aq)'
-alias drm='docker rm $(docker ps -aq)'
-alias drmi='docker rmi $(docker images -q)'
 alias dlogin='docker exec -it'
+alias dlogs='docker logs'
+alias dlogsf='docker logs -f'
 alias dc='docker compose'
-
-if command -v docker-compose >/dev/null 2>&1; then
-  alias dco='docker-compose'
-fi
-
 alias dcb='docker compose build'
 alias dcu='docker compose up'
 alias dcud='docker compose up -d'
 alias dcd='docker compose down'
 alias dcl='docker compose logs'
 alias dclf='docker compose logs -f'
+alias dcp='docker compose ps'
+alias dcr='docker compose restart'
+alias dce='docker compose exec'
 
-# -------------------------- Networking & Debug ------------------------
+if command -v docker-compose >/dev/null 2>&1; then
+  alias dco='docker-compose'
+fi
+
+docker-stop-all() {
+  local containers
+  containers="$(docker ps -q)"
+  if [[ -z "$containers" ]]; then
+    print "No running containers."
+    return 0
+  fi
+
+  print "Stopping all running containers:"
+  docker ps --format '  {{.Names}}  {{.Image}}'
+  read "reply?Continue? [y/N] "
+  [[ "$reply" == [Yy] ]] || return 1
+
+  docker stop ${=containers}
+}
+
+docker-remove-stopped() {
+  local containers
+  containers="$(docker ps -aq --filter status=exited)"
+  if [[ -z "$containers" ]]; then
+    print "No stopped containers."
+    return 0
+  fi
+
+  print "Removing stopped containers:"
+  docker ps -a --filter status=exited --format '  {{.Names}}  {{.Image}}'
+  read "reply?Continue? [y/N] "
+  [[ "$reply" == [Yy] ]] || return 1
+
+  docker rm ${=containers}
+}
+
+docker-prune-safe() {
+  docker system prune
+}
+
+# ---------------------------------------------------------------------
+# Networking and Debug
+# ---------------------------------------------------------------------
+
 alias pingg='ping google.com'
 alias trace='traceroute'
-alias ns='netstat -tulpn 2>/dev/null || ss -tulpn'
+alias listeners='ss -tulpn'
 alias digg='dig +short'
-alias flushdns='sudo systemd-resolve --flush-caches'
+alias dnsflush='sudo resolvectl flush-caches'
+alias dnsstatus='resolvectl status'
+alias curlh='curl -I'
+alias curlv='curl -v'
+alias wgetc='wget -c'
 
-# -------------------------- Processes --------------------------------
-alias psg='ps aux | grep -i'
-alias topu='top -u $USER'
+# ---------------------------------------------------------------------
+# Processes
+# ---------------------------------------------------------------------
+
+alias psg='ps aux | grep -i --color=auto'
+alias topu='top -u "$USER"'
 alias kill9='kill -9'
+alias pgrepfull='pgrep -af'
 
-# -------------------------- Python -----------------------------------
+# ---------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------
+
 alias py='python3'
-alias pipu='pip install --user'
+alias pipu='python3 -m pip install --user'
 alias venv='python3 -m venv .venv'
+alias activate='source .venv/bin/activate'
+alias pytestq='pytest -q'
 
-# -------------------------- Node / NPM --------------------------------
+# ---------------------------------------------------------------------
+# Node / NPM / Yarn / PNPM
+# ---------------------------------------------------------------------
+
 alias ni='npm install'
 alias nr='npm run'
-alias ns='npm start'
+alias nstart='npm start'
 alias nrb='npm run build'
-alias yt='yarn test'
-alias yb='yarn build'
+alias nrt='npm run test'
+alias nrd='npm run dev'
+alias nci='npm ci'
 
-# -------------------------- Misc DevOps Tools -------------------------
-alias k9='kill -9'
-alias rmds='find . -name ".DS_Store" -delete'
-alias watch='watch -n 1'
+if command -v pnpm >/dev/null 2>&1; then
+  alias pi='pnpm install'
+  alias pr='pnpm run'
+  alias pd='pnpm dev'
+  alias pb='pnpm build'
+  alias pt='pnpm test'
+fi
+
+if command -v yarn >/dev/null 2>&1; then
+  alias yi='yarn install'
+  alias yr='yarn run'
+  alias yd='yarn dev'
+  alias yb='yarn build'
+  alias yt='yarn test'
+fi
+
+# ---------------------------------------------------------------------
+# DevOps / Repo Tools
+# ---------------------------------------------------------------------
+
 alias t='task'
 alias mk='make'
-alias kc='kubecolor 2>/dev/null || kubectl'
+alias watch1='watch -n 1'
+alias rmds='find . -name ".DS_Store" -delete'
+alias chmodx='chmod +x'
 
-# =====================================================================
+# ---------------------------------------------------------------------
+# Infrastructure Repo Shortcuts
+# ---------------------------------------------------------------------
+
+infra-root() {
+  local root
+  root="$(git rev-parse --show-toplevel 2>/dev/null)"
+  if [[ -n "$root" ]]; then
+    cd "$root" || return
+  elif [[ -d "$HOME/Projects/Infrastructure" ]]; then
+    cd "$HOME/Projects/Infrastructure" || return
+  else
+    print "Infrastructure repo not found."
+    return 1
+  fi
+}
+
+alias infra='infra-root'
+alias kprod='export KUBECONFIG="$HOME/Projects/Infrastructure/.generated/kubernetes/prod/kubeconfig.yaml"'
+alias kprod-nodes='kubectl get nodes -o wide'
+alias kprod-pods='kubectl get pods -A -o wide'
+
+# ---------------------------------------------------------------------
+# Safer Helpers
+# ---------------------------------------------------------------------
+
+mkcd() {
+  mkdir -p "$1" && cd "$1"
+}
+
+extract() {
+  if [[ ! -f "$1" ]]; then
+    print "extract: file not found: $1" >&2
+    return 1
+  fi
+
+  case "$1" in
+    *.tar.bz2) tar xjf "$1" ;;
+    *.tar.gz)  tar xzf "$1" ;;
+    *.tar.xz)  tar xJf "$1" ;;
+    *.bz2)     bunzip2 "$1" ;;
+    *.rar)     unrar x "$1" ;;
+    *.gz)      gunzip "$1" ;;
+    *.tar)     tar xf "$1" ;;
+    *.tbz2)    tar xjf "$1" ;;
+    *.tgz)     tar xzf "$1" ;;
+    *.zip)     unzip "$1" ;;
+    *.Z)       uncompress "$1" ;;
+    *.7z)      7z x "$1" ;;
+    *)         print "extract: unsupported archive: $1" >&2; return 1 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------
 # End of aliases.zsh
 # =====================================================================

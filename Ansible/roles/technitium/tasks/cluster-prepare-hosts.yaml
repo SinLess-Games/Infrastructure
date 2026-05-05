@@ -21,7 +21,7 @@
     path: /etc/hosts
     line: "{{ hostvars[item].ansible_host }} {{ item }} {{ item }}.{{ technitium_cluster_domain }}"
     state: present
-  loop: "{{ groups.get('dns', []) }}"
+  loop: "{{ groups.get('dns', []) | difference(technitium_cluster_excluded_nodes | default([])) }}"
   when:
     - technitium_cluster_enabled | default(false) | bool
     - hostvars[item].ansible_host is defined

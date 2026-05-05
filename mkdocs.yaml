@@ -3,91 +3,63 @@
 # SinLess Games Infrastructure Docs
 # ==============================================================================
 #
-# This MkDocs configuration is designed for a production documentation site served
-# from the Docker/Nginx setup in Docs/Dockerfile.
+# Production MkDocs configuration for the Infrastructure repository.
 #
-# Goals:
-#   - Full-text search
-#   - Mermaid diagrams
-#   - Markdown tables
-#   - Embedded images, SVGs, and PDFs
-#   - Copyable code blocks
-#   - Admonitions/callouts
-#   - Tabs
-#   - Task lists
-#   - GitHub edit/view links
-#   - Last-updated metadata
-#   - Build minification
-#   - Safe handling of internal docs build files
-#
-# Build command used by Docs/Dockerfile:
+# Build:
 #   mkdocs build --clean --strict
 #
+# Serve locally:
+#   mkdocs serve -a 127.0.0.1:8000
+#
+# Docs root:
+#   Docs/
+#
+# Output:
+#   site/
 # ==============================================================================
-
 
 # ------------------------------------------------------------------------------
 # Core site metadata
 # ------------------------------------------------------------------------------
-site_name: SinLess Games Infrastructure Docs
-site_description: Architecture, operations, and platform documentation for the Infrastructure repository.
-site_author: SinLess Games LLC
 
-# Public canonical URL for the documentation site.
-# This is used for generated sitemap.xml, canonical links, and social metadata.
+site_name: SinLess Games Infrastructure Docs
+site_description: Architecture, operations, platform, network, Kubernetes, GitOps, and infrastructure documentation for the Infrastructure repository.
+site_author: SinLess Games LLC
 site_url: https://docs.sinlessgames.com
 
-# Repository metadata.
-# Material uses these values for the repository link, edit links, and view links.
 repo_url: https://github.com/Sinless777/Infrastructure
 repo_name: Sinless777/Infrastructure
+edit_uri: edit/main/Docs/
 
-# The docs live in the Docs/ directory instead of MkDocs' default docs/.
 docs_dir: Docs
-
-# The static output directory created by mkdocs build.
-# Docs/Dockerfile copies this folder into the Nginx runtime image.
 site_dir: site
-
-# Use clean URLs like /Architecture/ instead of /Architecture/index.html.
-# Your Nginx config must support directory-style URLs with try_files $uri $uri/.
 use_directory_urls: true
-
-# Treat MkDocs warnings as build failures.
-# This mirrors the Dockerfile's mkdocs build --strict flag and helps catch broken
-# links, bad nav paths, missing files, and invalid config during local builds too.
 strict: true
 
-# Files inside Docs/ that should NOT be published into the generated site.
-#
-# Because docs_dir is Docs/, MkDocs would otherwise copy unknown/static files into
-# the public site. These files are build/runtime implementation details, not docs.
+# Files under Docs/ that should not be published as static site assets.
 exclude_docs: |
   Dockerfile
   nginx.conf
   requirements.txt
 
-
 # ------------------------------------------------------------------------------
 # Theme
 # ------------------------------------------------------------------------------
+
 theme:
   name: material
   language: en
 
-  # Uses your existing rack diagram SVG as both logo and favicon.
-  # These paths are relative to Docs/.
   favicon: Network/Rack-Diagram.svg
   logo: Network/Rack-Diagram.svg
 
-  # Avoid external font loading. This keeps the site more self-contained and
-  # friendlier for private/internal infrastructure documentation.
+  # Keep the docs site self-contained and avoid external font calls.
   font: false
 
   icon:
     repo: fontawesome/brands/github
+    logo: material/server-network
 
-  # Light/dark mode palettes.
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -105,9 +77,8 @@ theme:
         icon: material/weather-sunny
         name: Switch to light mode
 
-  # Material feature flags.
   features:
-    # Navigation / layout
+    # Navigation
     - navigation.instant
     - navigation.instant.progress
     - navigation.tracking
@@ -117,49 +88,35 @@ theme:
     - navigation.top
     - navigation.footer
 
-    # Table of contents behavior
+    # Table of contents
     - toc.follow
 
-    # Search UX
+    # Search
     - search.highlight
     - search.share
     - search.suggest
 
-    # Code block UX
+    # Code blocks
     - content.code.copy
     - content.code.select
     - content.code.annotate
 
-    # Page action buttons
+    # Page actions
     - content.action.edit
     - content.action.view
 
-    # Keeps tab selections synchronized across pages.
+    # Content tabs
     - content.tabs.link
-
-# GitHub edit/view links should point at the Docs/ folder on main.
-edit_uri: edit/main/Docs/
-
 
 # ------------------------------------------------------------------------------
 # Plugins
 # ------------------------------------------------------------------------------
+
 plugins:
-  # Full-text search.
-  #
-  # Important:
-  #   If a plugins: list exists, search must be explicitly included.
   - search:
       lang: en
       separator: '[\s\-\.]+'
 
-  # Click-to-zoom image lightbox for embedded PNG/SVG screenshots and diagrams.
-  #
-  # Usage in Markdown:
-  #   ![Rack diagram](Network/Rack-Diagram.svg)
-  #
-  # Add the "skip-lightbox" class when you do not want lightbox behavior:
-  #   ![Logo](Network/Rack-Diagram.svg){ .skip-lightbox }
   - glightbox:
       touchNavigation: true
       loop: false
@@ -174,12 +131,6 @@ plugins:
       skip_classes:
         - skip-lightbox
 
-  # Shows page last-updated information using Git history when available.
-  #
-  # Docker note:
-  #   Your current Docs/Dockerfile does not copy .git into the build image.
-  #   fallback_to_build_date keeps the Docker build from failing when Git metadata
-  #   is unavailable.
   - git-revision-date-localized:
       type: timeago
       timezone: America/Boise
@@ -187,48 +138,33 @@ plugins:
       enable_creation_date: true
       fallback_to_build_date: true
 
-  # Lets you move/rename pages without breaking old links.
-  #
-  # Add redirects like this when needed:
-  #
-  # redirect_maps:
-  #   old-page.md: new-page.md
-  #   old-folder/old-name.md: new-folder/new-name.md
   - redirects:
       redirect_maps: {}
 
-  # Allows reusable variables/macros in Markdown.
-  #
-  # Example:
-  #   {{ config.extra.project.name }}
-  #
-  # Variables are defined under extra: below.
   - macros:
       on_error_fail: true
       on_undefined: strict
 
-  # Allows including reusable Markdown fragments.
-  #
-  # Example:
-  #   {% include-markdown "Resources/chaos-engineering.md" %}
-  - include-markdown
+  - include-markdown:
+      preserve_includer_indent: true
+      dedent: false
+      comments: false
 
-  # Minifies generated HTML/CSS/JS during production builds.
-  #
-  # This reduces final image/site size without changing the source Markdown.
   - minify:
       minify_html: true
       minify_js: true
       minify_css: true
       htmlmin_opts:
         remove_comments: true
-
+        reduce_boolean_attributes: true
+        remove_empty_space: true
 
 # ------------------------------------------------------------------------------
 # Markdown extensions
 # ------------------------------------------------------------------------------
+
 markdown_extensions:
-  # Built-in Python Markdown extensions.
+  # Python Markdown built-ins
   - abbr
   - admonition
   - attr_list
@@ -238,93 +174,46 @@ markdown_extensions:
   - sane_lists
   - tables
 
-  # Table of contents.
-  #
-  # permalink: true adds anchor links to headings.
-  # toc_depth controls how deep the right-side page TOC goes.
   - toc:
       permalink: true
       toc_depth: 2-4
       title: On this page
 
-  # Better emphasis handling.
+  # PyMdown extensions
   - pymdownx.betterem:
       smart_enable: all
 
-  # Adds insert/delete/superscript/subscript style helpers.
   - pymdownx.caret
   - pymdownx.mark
   - pymdownx.tilde
 
-  # Collapsible sections.
-  #
-  # Example:
-  #   ??? note "Expandable note"
-  #       Hidden content here.
   - pymdownx.details
 
-  # Emoji and Material icons.
-  #
-  # Example:
-  #   :material-kubernetes:
-  #   :fontawesome-brands-github:
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
-  # Syntax highlighting for code blocks.
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
       auto_title: true
 
-  # Inline code highlighting.
-  #
-  # Example:
-  #   The command is `#!bash kubectl get pods`.
   - pymdownx.inlinehilite
-
-  # Keyboard key styling.
-  #
-  # Example:
-  #   Press ++ctrl+c++ to stop the process.
   - pymdownx.keys
 
-  # Auto-links GitHub issues, PRs, commits, and raw URLs.
-  #
-  # Example:
-  #   #123
-  #   GH-123
-  #   https://github.com/Sinless777/Infrastructure
   - pymdownx.magiclink:
       repo_url_shorthand: true
       user: Sinless777
       repo: Infrastructure
 
-  # Useful symbols like arrows, fractions, copyright, etc.
   - pymdownx.smartsymbols
 
-  # Reusable snippets.
-  #
-  # Example:
-  #   --8<-- "Resources/chaos-engineering.md"
-  #
-  # Paths are relative to the repository root here.
   - pymdownx.snippets:
       base_path:
         - Docs
       check_paths: true
 
-  # Advanced fenced code blocks.
-  #
-  # This is required for Mermaid diagrams.
-  #
-  # Example:
-  #   ```mermaid
-  #   graph TD
-  #     A[User] --> B[Docs Site]
-  #   ```
   - pymdownx.superfences:
       preserve_tabs: true
       custom_fences:
@@ -332,33 +221,16 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
 
-  # Content tabs.
-  #
-  # Example:
-  #   === "kubectl"
-  #       ```bash
-  #       kubectl get nodes
-  #       ```
-  #
-  #   === "helm"
-  #       ```bash
-  #       helm list -A
-  #       ```
   - pymdownx.tabbed:
       alternate_style: true
 
-  # GitHub-style task lists.
-  #
-  # Example:
-  #   - [x] Build docs image
-  #   - [ ] Deploy docs site
   - pymdownx.tasklist:
       custom_checkbox: true
 
+# ------------------------------------------------------------------------------
+# Extra metadata / template variables
+# ------------------------------------------------------------------------------
 
-# ------------------------------------------------------------------------------
-# Extra site metadata and template variables
-# ------------------------------------------------------------------------------
 extra:
   generator: false
 
@@ -367,40 +239,45 @@ extra:
     owner: SinLess Games LLC
     repository: Sinless777/Infrastructure
     production_domain: docs.sinlessgames.com
-    local_domain: local.sinlessgamesllc.com
+    public_domain: sinlessgames.com
+    local_domain: local.sinlessgames.com
+
+  infrastructure:
+    primary_local_domain: local.sinlessgames.com
+    public_domains:
+      - sinlessgames.com
+      - helixaibot.com
+    environments:
+      - dev
+      - staging
+      - prod
 
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/Sinless777/Infrastructure
       name: Infrastructure repository on GitHub
 
+# ------------------------------------------------------------------------------
+# Assets
+# ------------------------------------------------------------------------------
 
-# ------------------------------------------------------------------------------
-# Extra CSS
-# ------------------------------------------------------------------------------
 extra_css:
   - assets/stylesheets/extra.css
 
+# ------------------------------------------------------------------------------
+# Copyright
+# ------------------------------------------------------------------------------
 
-# ------------------------------------------------------------------------------
-# Copyright footer
-# ------------------------------------------------------------------------------
 copyright: Copyright &copy; SinLess Games LLC
-
 
 # ------------------------------------------------------------------------------
 # Navigation
 # ------------------------------------------------------------------------------
 #
-# Keep this list explicit.
-#
-# Why:
-#   - mkdocs build --strict fails when pages are missing or paths are wrong.
-#   - Explicit nav keeps the docs predictable.
-#   - It prevents random Markdown files from appearing in unexpected places.
-#
-# Paths are relative to Docs/.
+# Strict mode fails when a nav path does not exist. If a future ADR or page has
+# not been committed yet, remove or comment that nav entry before building.
 # ------------------------------------------------------------------------------
+
 nav:
   - Home: index.md
 
@@ -434,11 +311,31 @@ nav:
           - ADR-0017: Architecture/ADRs/ADR-0017.md
           - ADR-0018: Architecture/ADRs/ADR-0018.md
           - ADR-0019: Architecture/ADRs/ADR-0019.md
+          - ADR-0020: Architecture/ADRs/ADR-0020.md
+          - ADR-0021: Architecture/ADRs/ADR-0021.md
+          - ADR-0022: Architecture/ADRs/ADR-0022.md
+          - ADR-0023: Architecture/ADRs/ADR-0023.md
+          - ADR-0024: Architecture/ADRs/ADR-0024.md
+          - ADR-0025: Architecture/ADRs/ADR-0025.md
+          - ADR-0026: Architecture/ADRs/ADR-0026.md
+          - ADR-0027: Architecture/ADRs/ADR-0027.md
+          - ADR-0028: Architecture/ADRs/ADR-0028.md
+          - ADR-0029: Architecture/ADRs/ADR-0029.md
+          - ADR-0030: Architecture/ADRs/ADR-0030.md
+          - ADR-0031: Architecture/ADRs/ADR-0031.md
+          - ADR-0032: Architecture/ADRs/ADR-0032.md
+          - ADR-0033: Architecture/ADRs/ADR-0033.md
+          - ADR-0034: Architecture/ADRs/ADR-0034.md
+          - ADR-0035: Architecture/ADRs/ADR-0035.md
+          - ADR-0036: Architecture/ADRs/ADR-0036.md
 
   - Network:
+      - Overview: Network/index.md
       - Layer 2/3 Diagram: Network/Layer_2-3_diagram.md
       - Port Map: Network/Port-Map.md
       - Rack Diagram: Network/Rack-Diagram.md
+      - Rack Plan: Network/Rack-Plan.md
+      - Items and Prices: Network/Items-prices.md
 
   - Resources:
       - Chaos Engineering: Resources/chaos-engineering.md

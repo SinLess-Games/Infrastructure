@@ -9,3 +9,5 @@ resources:
   - servicemonitor-cloudflared-sinlessgames.yaml
   - service-cloudflared-helix.yaml
   - servicemonitor-cloudflared-helix.yaml
+  - podmonitor-cloudflared-sinlessgames.yaml
+  - podmonitor-cloudflared-helix.yaml

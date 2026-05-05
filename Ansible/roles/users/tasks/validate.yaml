@@ -1,21 +1,450 @@
 ---
 # =============================================================================
-# Validate users role inputs
+# Users Role - Input Validation
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Validates user definitions before account, group membership, sudoers, and SSH
+#   principal tasks run.
+#
+# Expected inputs:
+#   - users_role_entries
+#
+# Compatible fallback:
+#   - users
+#
+# Optional policy inputs:
+#   - users_defaults
+#   - users_policy
 # =============================================================================
 
-- name: Ensure users_role_entries is defined and is a list
+# -----------------------------------------------------------------------------
+# Normalize inputs
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Normalize user role inputs
+  ansible.builtin.set_fact:
+    _users_role_entries: "{{ users_role_entries | default(users | default([])) }}"
+    _users_role_defaults: "{{ users_role_defaults | default(users_defaults | default({})) }}"
+    _users_role_policy: "{{ users_policy | default({}) }}"
+
+- name: Users | Validate | Assert user entries are defined as a list
   ansible.builtin.assert:
     that:
-      - users_role_entries is defined
-      - users_role_entries is iterable
-    fail_msg: >
-      "users_role_entries must be defined as a list of user definitions"
+      - _users_role_entries is defined
+      - _users_role_entries is sequence
+      - _users_role_entries is not string
+      - _users_role_entries is not mapping
+    fail_msg: >-
+      users_role_entries must be defined as a list of user definitions. You may
+      also provide users as a fallback source.
+    success_msg: "User entry list is valid."
 
-- name: Validate required user fields
+- name: Users | Validate | Assert user defaults are a mapping
+  ansible.builtin.assert:
+    that:
+      - _users_role_defaults is mapping
+    fail_msg: "users_defaults/users_role_defaults must be a mapping."
+    success_msg: "User defaults are valid."
+
+- name: Users | Validate | Assert user policy is a mapping
+  ansible.builtin.assert:
+    that:
+      - _users_role_policy is mapping
+    fail_msg: "users_policy must be a mapping when defined."
+    success_msg: "User policy metadata is valid."
+
+# -----------------------------------------------------------------------------
+# Base structure validation
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Assert each user entry is a mapping
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+    fail_msg: "Each user entry must be a mapping/dictionary."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
+
+- name: Users | Validate | Assert required user fields
   ansible.builtin.assert:
     that:
       - item.name is defined
-    fail_msg: "Each user must define at least a 'name'"
-  loop: "{{ users_role_entries }}"
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+    fail_msg: >-
+      Each user must define a valid Linux username in the name field. Invalid
+      entry: {{ item }}
+  loop: "{{ _users_role_entries }}"
   loop_control:
     label: "{{ item.name | default('undefined-user') }}"
+
+- name: Users | Validate | Build user name list
+  ansible.builtin.set_fact:
+    _users_role_names: "{{ _users_role_entries | map(attribute='name') | list }}"
+
+- name: Users | Validate | Assert user names are unique
+  ansible.builtin.assert:
+    that:
+      - _users_role_names | length == _users_role_names | unique | length
+    fail_msg: >-
+      Duplicate user names detected in users_role_entries/users. User names must
+      be unique.
+    success_msg: "User names are unique."
+
+# -----------------------------------------------------------------------------
+# Key naming / plaintext secret validation
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Assert user keys use snake_case when required
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (_users_role_policy.require_snake_case_keys | default(false) | bool)
+        or ((item.keys() | list | select('search', '-') | list | length) == 0)
+    fail_msg: >-
+      User {{ item.name }} contains keys with hyphens. Use snake_case keys
+      instead. Example: shared_certs, not shared-certs.
+    success_msg: "User {{ item.name }} uses valid key naming."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert plaintext password fields are not used
+  ansible.builtin.assert:
+    that:
+      - item.password is not defined
+      - item.pass is not defined
+      - item.plaintext_password is not defined
+      - item.cleartext_password is not defined
+    fail_msg: >-
+      User {{ item.name }} defines a plaintext password field. Store password
+      hashes in Vault/SOPS and expose them as password_hash only.
+    success_msg: "User {{ item.name }} does not define plaintext password fields."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _users_role_policy.require_no_plaintext_passwords | default(true) | bool
+
+# -----------------------------------------------------------------------------
+# Account state / type validation
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Assert account state values are valid
+  ansible.builtin.assert:
+    that:
+      - item.state is not defined or item.state in ['present', 'absent']
+    fail_msg: >-
+      User {{ item.name }} has invalid state={{ item.state |
+      default('undefined') }}. Valid states are present or absent.
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert boolean user fields are valid
+  ansible.builtin.assert:
+    that:
+      - item.create_home is not defined or item.create_home in [true, false]
+      - item.system is not defined or item.system in [true, false]
+      - item.password_lock is not defined or item.password_lock in [true, false]
+      - item.append_groups is not defined or item.append_groups in [true, false]
+      - item.sudo is not defined or item.sudo in [true, false]
+      - item.sudo_nopasswd is not defined or item.sudo_nopasswd in [true, false]
+      - item.manage_ssh is not defined or item.manage_ssh in [true, false]
+      - item.manage_sudoers is not defined or item.manage_sudoers in [true,
+        false]
+    fail_msg: >-
+      User {{ item.name }} has one or more invalid boolean fields. Expected
+      true/false YAML booleans, not strings.
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert explicit password_lock when policy requires it
+  ansible.builtin.assert:
+    that:
+      - item.password_lock is defined
+    fail_msg: "User {{ item.name }} must explicitly define password_lock."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _users_role_policy.require_explicit_password_lock | default(false) | bool
+
+- name: Users | Validate | Assert explicit sudo policy when required
+  ansible.builtin.assert:
+    that:
+      - item.sudo is defined
+      - item.sudo_nopasswd is defined
+    fail_msg: "User {{ item.name }} must explicitly define sudo and sudo_nopasswd."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _users_role_policy.require_explicit_sudo_policy | default(false) | bool
+
+# -----------------------------------------------------------------------------
+# Shell / home validation
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Assert shell values are valid absolute paths
+  ansible.builtin.assert:
+    that:
+      - item.shell is not defined or item.shell is string
+      - item.shell is not defined or item.shell is match('^/')
+    fail_msg: >-
+      User {{ item.name }} has invalid shell={{ item.shell |
+      default('undefined') }}. Shell must be an absolute path.
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert shell is explicit when policy requires it
+  ansible.builtin.assert:
+    that:
+      - item.shell is defined
+      - item.shell | length > 0
+    fail_msg: "User {{ item.name }} must explicitly define shell."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _users_role_policy.require_explicit_shell | default(false) | bool
+
+- name: Users | Validate | Assert shell is allowed by policy
+  ansible.builtin.assert:
+    that:
+      - >-
+        item.shell is not defined or item.shell in (
+          (_users_role_policy.allowed_interactive_shells | default([]))
+          + (_users_role_policy.allowed_noninteractive_shells | default([]))
+        ) or (
+          (_users_role_policy.allowed_interactive_shells | default([]) | length == 0)
+          and (_users_role_policy.allowed_noninteractive_shells | default([]) | length == 0)
+        )
+    fail_msg: >-
+      User {{ item.name }} uses shell={{ item.shell }} which is not allowed by
+      users_policy allowed shell lists.
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert non-interactive users are password locked
+  ansible.builtin.assert:
+    that:
+      - >-
+        item.shell is not defined or item.shell not in
+        (_users_role_policy.allowed_noninteractive_shells | default([])) or
+        item.password_lock | default(true) | bool
+    fail_msg: >-
+      User {{ item.name }} uses a non-interactive shell and must be password
+      locked.
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _users_role_policy.allowed_noninteractive_shells | default([]) | length > 0
+
+- name: Users | Validate | Assert home directory values are valid
+  ansible.builtin.assert:
+    that:
+      - item.home_directory is not defined or item.home_directory is string
+      - item.home_directory is not defined or item.home_directory is match('^/')
+    fail_msg: >-
+      User {{ item.name }} has invalid home_directory={{ item.home_directory |
+      default('undefined') }}. Home directory must be an absolute path.
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# -----------------------------------------------------------------------------
+# Group validation
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Assert primary group values are valid
+  ansible.builtin.assert:
+    that:
+      - item.primary_group is not defined or item.primary_group is string
+      - item.primary_group is not defined or item.primary_group | length > 0
+    fail_msg: "User {{ item.name }} has an invalid primary_group value."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert groups are valid lists
+  ansible.builtin.assert:
+    that:
+      - item.groups is not defined or item.groups is sequence
+      - item.groups is not defined or item.groups is not string
+      - item.groups is not defined or item.groups is not mapping
+    fail_msg: "User {{ item.name }} groups must be a list."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert group names are valid strings
+  ansible.builtin.assert:
+    that:
+      - group_name is string
+      - group_name | length > 0
+      - group_name is match('^[a-z_][a-z0-9_-]*[$]?$')
+    fail_msg: "User {{ item.0.name }} has invalid group entry: {{ group_name }}"
+  loop: "{{ _users_role_entries | subelements('groups', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }} -> {{ item.1 }}"
+  vars:
+    group_name: "{{ item.1 }}"
+
+# -----------------------------------------------------------------------------
+# Sudo validation
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Assert sudo_nopasswd requires sudo
+  ansible.builtin.assert:
+    that:
+      - not (item.sudo_nopasswd | default(false) | bool) or item.sudo |
+        default(false) | bool
+    fail_msg: "User {{ item.name }} has sudo_nopasswd=true but sudo is not true."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert sudoers file names are safe
+  ansible.builtin.assert:
+    that:
+      - item.sudoers_file is not defined or item.sudoers_file is string
+      - item.sudoers_file is not defined or item.sudoers_file is
+        match('^[A-Za-z0-9_.-]+$')
+      - item.sudoers_file is not defined or '/' not in item.sudoers_file
+    fail_msg: >-
+      User {{ item.name }} has invalid sudoers_file={{ item.sudoers_file |
+      default('undefined') }}. Use a filename only, not a path.
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert sudo commands are valid
+  ansible.builtin.assert:
+    that:
+      - item.sudo_commands is not defined or item.sudo_commands is sequence
+      - item.sudo_commands is not defined or item.sudo_commands is not string
+      - item.sudo_commands is not defined or item.sudo_commands is not mapping
+    fail_msg: "User {{ item.name }} sudo_commands must be a list when defined."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert sudo users define sudo commands
+  ansible.builtin.assert:
+    that:
+      - not (item.sudo | default(false) | bool) or item.sudo_commands |
+        default([]) | length > 0
+    fail_msg: "User {{ item.name }} has sudo=true but no sudo_commands were defined."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _users_role_policy.require_explicit_sudo_policy | default(false) | bool
+
+# -----------------------------------------------------------------------------
+# SSH principal / certificate validation
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Assert SSH principals are valid lists
+  ansible.builtin.assert:
+    that:
+      - item.ssh_principals is not defined or item.ssh_principals is sequence
+      - item.ssh_principals is not defined or item.ssh_principals is not string
+      - item.ssh_principals is not defined or item.ssh_principals is not mapping
+    fail_msg: "User {{ item.name }} ssh_principals must be a list when defined."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Users | Validate | Assert SSH principal values are valid
+  ansible.builtin.assert:
+    that:
+      - principal is string
+      - principal | length > 0
+      - principal is not search('\\s')
+    fail_msg: "User {{ item.0.name }} has invalid SSH principal: {{ principal }}"
+  loop: "{{ _users_role_entries | subelements('ssh_principals', skip_missing=True)
+    }}"
+  loop_control:
+    label: "{{ item.0.name }} -> {{ item.1 }}"
+  vars:
+    principal: "{{ item.1 }}"
+
+- name: Users | Validate | Assert shared certificate users are valid
+  ansible.builtin.assert:
+    that:
+      - item.shared_certs is not defined or item.shared_certs is sequence
+      - item.shared_certs is not defined or item.shared_certs is not string
+      - item.shared_certs is not defined or item.shared_certs is not mapping
+    fail_msg: "User {{ item.name }} shared_certs must be a list when defined."
+  loop: "{{ _users_role_entries }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# -----------------------------------------------------------------------------
+# Policy cross-checks
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Assert protected users exist
+  ansible.builtin.assert:
+    that:
+      - protected_user in _users_role_names
+    fail_msg: "Protected user {{ protected_user }} is listed in policy but not defined."
+  loop: "{{ _users_role_policy.protected_users | default([]) }}"
+  loop_control:
+    loop_var: protected_user
+    label: "{{ protected_user }}"
+
+- name: Users | Validate | Assert locked-by-default users are locked
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          _users_role_entries
+          | selectattr('name', 'equalto', locked_user)
+          | map(attribute='password_lock')
+          | first
+          | default(true)
+        ) | bool
+    fail_msg: "User {{ locked_user }} is listed as locked_by_default but is not
+      password locked."
+  loop: "{{ _users_role_policy.locked_by_default | default([]) }}"
+  loop_control:
+    loop_var: locked_user
+    label: "{{ locked_user }}"
+  when: locked_user in _users_role_names
+
+- name: Users | Validate | Assert passwordless sudo policy matches users
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          _users_role_entries
+          | selectattr('name', 'equalto', passwordless_user)
+          | map(attribute='sudo_nopasswd')
+          | first
+          | default(false)
+        ) | bool
+    fail_msg: >-
+      User {{ passwordless_user }} is listed in
+      users_policy.passwordless_sudo_users but does not have sudo_nopasswd=true.
+  loop: "{{ _users_role_policy.passwordless_sudo_users | default([]) }}"
+  loop_control:
+    loop_var: passwordless_user
+    label: "{{ passwordless_user }}"
+  when: passwordless_user in _users_role_names
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Users | Validate | Show validation summary
+  ansible.builtin.debug:
+    msg:
+      - "Users role input validation complete."
+      - "Users declared: {{ _users_role_entries | length }}"
+      - "User names: {{ _users_role_names | join(', ') }}"
+      - "Policy validation enabled: {{ _users_role_policy | length > 0 }}"
+  when: users_role_show_validation_summary | default(true)

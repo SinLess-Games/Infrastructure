@@ -2,20 +2,116 @@
 # =============================================================================
 # packages — defaults
 # -----------------------------------------------------------------------------
-# Control which package groups are installed
+# Default controls for installing system packages and optional Homebrew packages.
+#
+# Package catalog source:
+#   group_vars/all/packages.yaml
+#
+# Expected catalog shape:
+#   apt_packages:
+#     production:
+#       - ca-certificates
+#       - curl
+#     development:
+#       - python3
+#     shell:
+#       - git
+#
+# Optional Homebrew package source:
+#   shell_brew_packages:
+#     - k9s
+#     - istioctl
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# Package group selection
+# -----------------------------------------------------------------------------
 
 packages_enabled_groups:
   - production
   - development
   - shell
 
-packages_role_catalog: "{{ apt_packages | default({}, true) }}"
+# Backward-compatible aliases used by the role tasks.
 packages_role_groups: "{{ packages_enabled_groups | default([], true) }}"
+packages_role_catalog: "{{ apt_packages | default({}, true) }}"
+
+# -----------------------------------------------------------------------------
+# APT behavior
+# -----------------------------------------------------------------------------
+
+packages_manage_apt: true
+packages_apt_state: present
+
+packages_update_cache: true
+packages_cache_valid_time: 3600
+
+packages_install_recommends: false
+packages_autoremove: false
+packages_autoclean: false
+
+packages_apt_retries: 3
+packages_apt_delay: 5
+
+# Fail when an enabled package group does not exist in packages_role_catalog.
+packages_fail_on_missing_groups: true
+
+# Skip package names that are empty/null after rendering.
+packages_filter_empty_items: true
+
+# Extra APT packages to install in addition to enabled catalog groups.
+packages_extra_apt_packages: []
+
+# APT packages to remove explicitly.
+packages_remove_apt_packages: []
+packages_remove_apt_state: absent
+packages_remove_apt_purge: false
+
+# -----------------------------------------------------------------------------
+# Homebrew behavior
+# -----------------------------------------------------------------------------
 
 packages_install_homebrew: false
-packages_role_brew_packages: "{{ brew_packages | default([], true) }}"
+
+# Backward-compatible default. Playbooks can override this with shell_brew_packages.
+packages_role_brew_packages: "{{ brew_packages | default(shell_brew_packages | default([], true), true) }}"
 
 packages_homebrew_user: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
+packages_homebrew_group: "{{ packages_homebrew_user }}"
+
 packages_homebrew_prefix: /home/linuxbrew/.linuxbrew
 packages_homebrew_bin: "{{ packages_homebrew_prefix }}/bin/brew"
+
+packages_homebrew_update: true
+packages_homebrew_upgrade: false
+packages_homebrew_cleanup: false
+
+# Install Homebrew if packages_install_homebrew=true and brew is missing.
+packages_homebrew_bootstrap: true
+packages_homebrew_install_url: "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+
+# Homebrew environment used when running brew as the target local user.
+packages_homebrew_environment:
+  PATH: "{{ packages_homebrew_prefix }}/bin:{{ packages_homebrew_prefix }}/sbin:{{
+    ansible_env.PATH |
+    default('/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin') }}"
+  HOMEBREW_NO_ANALYTICS: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+
+# -----------------------------------------------------------------------------
+# Validation / reporting
+# -----------------------------------------------------------------------------
+
+packages_validate_inputs: true
+packages_show_summary: true
+
+# -----------------------------------------------------------------------------
+# Compatibility aliases
+# -----------------------------------------------------------------------------
+# These are kept so older task files can keep working while newer task files use
+# the clearer names above.
+# -----------------------------------------------------------------------------
+
+packages_brew_packages: "{{ packages_role_brew_packages }}"
+packages_brew_bin: "{{ packages_homebrew_bin }}"
+packages_brew_user: "{{ packages_homebrew_user }}"

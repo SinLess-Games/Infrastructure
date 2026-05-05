@@ -1,0 +1,85 @@
+# Ansible/templates/packer/template.pkrvars.hcl.j2
+#
+# Generated Packer var-file for {{ distro }} on {{ node }}.
+# Rendered by Ansible. Do not edit generated files directly.
+#
+# Output path:
+#   Ansible/generated/packer/{{ distro }}-template-{{ node }}.pkrvars.hcl
+#
+# SECURITY:
+#   API token ID and secret are intentionally not written to this file.
+#   They are loaded by Ansible from:
+#     .outputs/api-tokens/packer-prov-api-token.txt
+#   and passed to Packer at runtime through:
+#     PKR_VAR_proxmox_api_token_id
+#     PKR_VAR_proxmox_api_token_secret
+
+# ---------------------------------------------------------------------------
+# Proxmox connection
+# ---------------------------------------------------------------------------
+
+proxmox_endpoint = "{{ packer_proxmox_endpoint | default('https://pve-01.local.sinlessgamesllc.com:8006/api2/json') }}"
+
+proxmox_node = "{{ node }}"
+
+proxmox_insecure_skip_tls_verify = {{ packer_proxmox_insecure_skip_tls_verify | default(true) | bool | lower }}
+
+# ---------------------------------------------------------------------------
+# Proxmox storage
+# ---------------------------------------------------------------------------
+
+proxmox_iso_storage = "{{ packer_proxmox_iso_storage | default('local') }}"
+
+proxmox_vm_storage = "{{ distro_item.vm_storage | default((packer_proxmox_vm_storage_by_node | default({})).get(node, packer_proxmox_vm_storage | default('local-lvm'))) }}"
+
+# ---------------------------------------------------------------------------
+# VM template identity
+# ---------------------------------------------------------------------------
+
+vm_name = "{{ vm_name }}"
+
+vm_id = {{ vm_id }}
+
+template_description = "{{ distro_display_name | default(distro) }} template built by Packer for {{ node }}"
+
+# ---------------------------------------------------------------------------
+# VM hardware
+# ---------------------------------------------------------------------------
+
+vm_memory = {{ distro_item.vm_memory | default(packer_vm_memory | default(2048)) }}
+
+vm_cores = {{ distro_item.vm_cores | default(packer_vm_cores | default(2)) }}
+
+vm_sockets = {{ distro_item.vm_sockets | default(packer_vm_sockets | default(1)) }}
+
+vm_disk_size = "{{ distro_item.vm_disk_size | default(packer_vm_disk_size | default('20G')) }}"
+
+vm_bridge = "{{ distro_item.vm_bridge | default(packer_vm_bridge | default('vmbr0')) }}"
+
+# ---------------------------------------------------------------------------
+# ISO / distro metadata
+# ---------------------------------------------------------------------------
+
+iso_filename = "{{ iso_filename }}"
+
+iso_url = "{{ iso_url }}"
+
+distro = "{{ distro }}"
+
+distro_family = "{{ distro_family | default('debian') }}"
+
+installer_type = "{{ installer_type | default('preseed') }}"
+
+debian_version = "{{ debian_version | default('') }}"
+
+# ---------------------------------------------------------------------------
+# SSH used by Packer after install
+# ---------------------------------------------------------------------------
+
+{% if installer_type | default('preseed') == 'autoinstall' or distro_family | default('debian') == 'ubuntu' %}
+ssh_username = "{{ packer_ssh_username | default('packer') }}"
+{% else %}
+ssh_username = "{{ packer_ssh_username | default('root') }}"
+{% endif %}
+
+ssh_password = "{{ packer_ssh_password | default(packer_preseed_root_password | default('packer')) }}"

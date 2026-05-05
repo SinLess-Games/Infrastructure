@@ -1,44 +1,264 @@
 ---
 # =============================================================================
-# Resolve user home directories safely (NO ansible.getent / NO python pwd calls)
+# SSH Role - Resolve User Home Directories
 # -----------------------------------------------------------------------------
+# Purpose:
+#   Resolves managed user home directories from the remote host passwd database.
+#
+# Design:
+#   - Uses `getent passwd <user>`.
+#   - Does not use ansible.builtin.getent.
+#   - Does not use Python pwd lookups.
+#   - Runs on each managed host because local passwd state may differ by host.
+#
 # Builds:
 #   ssh__user_homes:
-#     <username>: /home/<username>
+#     <username>: <home_directory>
+#
+#   ssh__user_shells:
+#     <username>: <shell>
+#
+#   ssh__user_uids:
+#     <username>: <uid>
+#
+#   ssh__user_gids:
+#     <username>: <gid>
 # =============================================================================
 
-- name: Resolve passwd entries via getent (safe)
-  ansible.builtin.command: "getent passwd {{ item.name }}"
-  loop: "{{ ssh_role_users }}"
+# -----------------------------------------------------------------------------
+# Normalize inputs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Homes | Normalize user inputs
+  ansible.builtin.set_fact:
+    ssh__resolve_home_users: "{{ ssh_role_users | default(users | default([])) }}"
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-homes
+
+- name: SSH | Homes | Validate user list
+  ansible.builtin.assert:
+    that:
+      - ssh__resolve_home_users is sequence
+      - ssh__resolve_home_users is not string
+      - ssh__resolve_home_users is not mapping
+    fail_msg: "ssh_role_users/users must be a list before resolving home directories."
+    success_msg: "SSH home directory user list is valid."
+  tags:
+    - ssh
+    - ssh-homes
+
+- name: SSH | Homes | Validate user entries
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.name is defined
+      - item.name is string
+      - item.name | length > 0
+      - item.name is match('^[a-z_][a-z0-9_-]*[$]?$')
+    fail_msg: "Each SSH user entry must be a mapping with a valid Linux username."
+  loop: "{{ ssh__resolve_home_users }}"
+  loop_control:
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
+  tags:
+    - ssh
+    - ssh-homes
+
+# -----------------------------------------------------------------------------
+# Build lookup jobs
+# -----------------------------------------------------------------------------
+
+- name: SSH | Homes | Build passwd lookup jobs
+  ansible.builtin.set_fact:
+    ssh__resolve_home_jobs: >-
+      {%- set jobs = [] -%} {%- for user in ssh__resolve_home_users -%}
+        {%- set state = user.state | default('present') -%}
+        {%- set manage_ssh = user.manage_ssh | default(users_default_manage_ssh | default(true)) -%}
+        {%- if state == 'present' and manage_ssh | bool -%}
+          {%- set _ = jobs.append({
+            'name': user.name,
+            'expected_home': user.home_directory | default(''),
+            'expected_shell': user.shell | default('')
+          }) -%}
+        {%- endif -%}
+      {%- endfor -%} {{ jobs }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-homes
+
+- name: SSH | Homes | Initialize resolved user maps
+  ansible.builtin.set_fact:
+    ssh__user_homes: {}
+    ssh__user_shells: {}
+    ssh__user_uids: {}
+    ssh__user_gids: {}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-homes
+
+# -----------------------------------------------------------------------------
+# Resolve passwd entries
+# -----------------------------------------------------------------------------
+
+- name: SSH | Homes | Resolve passwd entries with getent
+  ansible.builtin.command:
+    argv:
+      - getent
+      - passwd
+      - "{{ item.name }}"
+  loop: "{{ ssh__resolve_home_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
   register: ssh__getent_passwd
   changed_when: false
   failed_when: false
+  tags:
+    - ssh
+    - ssh-homes
 
-- name: Ensure getent succeeded for all users
-  ansible.builtin.assert:
-    that:
-      - (ssh__getent_passwd.results | selectattr('rc', 'ne', 0) | list | length) == 0
-    fail_msg: >-
-      Failed to resolve passwd entries for:
+- name: SSH | Homes | Build failed passwd lookup list
+  ansible.builtin.set_fact:
+    ssh__getent_failed_users: >-
       {{
         ssh__getent_passwd.results
+        | default([])
         | selectattr('rc', 'ne', 0)
         | map(attribute='item.name')
         | list
       }}
+  changed_when: false
+  tags:
+    - ssh
+    - ssh-homes
 
-- name: Build ssh__user_homes map
+- name: SSH | Homes | Ensure passwd entries exist for managed SSH users
+  ansible.builtin.assert:
+    that:
+      - ssh__getent_failed_users | length == 0
+    fail_msg: >-
+      Failed to resolve passwd entries for managed SSH users: {{
+      ssh__getent_failed_users | join(', ') }}. Ensure the users role runs
+      before the ssh role.
+    success_msg: "All managed SSH user passwd entries were resolved."
+  tags:
+    - ssh
+    - ssh-homes
+
+- name: SSH | Homes | Validate passwd entry format
+  ansible.builtin.assert:
+    that:
+      - item.stdout is defined
+      - item.stdout | length > 0
+      - item.stdout.split(':') | length >= 7
+      - item.stdout.split(':')[0] == item.item.name
+      - item.stdout.split(':')[5] is match('^/')
+      - item.stdout.split(':')[6] is match('^/')
+    fail_msg: >-
+      Invalid passwd entry returned for {{ item.item.name }}: {{ item.stdout |
+      default('') }}
+  loop: "{{ ssh__getent_passwd.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc == 0
+  tags:
+    - ssh
+    - ssh-homes
+
+# -----------------------------------------------------------------------------
+# Build maps
+# -----------------------------------------------------------------------------
+
+- name: SSH | Homes | Build resolved home, shell, UID, and GID maps
   ansible.builtin.set_fact:
     ssh__user_homes: >-
       {{
-        dict(
-          (ssh__getent_passwd.results | map(attribute='item.name') | list)
-          | zip(
-              (ssh__getent_passwd.results
-                | map(attribute='stdout')
-                | map('regex_replace', '^(?:[^:]*:){5}([^:]*):.*$', '\\1')
-                | list)
-            )
-        )
+        ssh__user_homes
+        | combine({ item.item.name: item.stdout.split(':')[5] })
       }}
+    ssh__user_shells: >-
+      {{
+        ssh__user_shells
+        | combine({ item.item.name: item.stdout.split(':')[6] })
+      }}
+    ssh__user_uids: >-
+      {{
+        ssh__user_uids
+        | combine({ item.item.name: item.stdout.split(':')[2] })
+      }}
+    ssh__user_gids: >-
+      {{
+        ssh__user_gids
+        | combine({ item.item.name: item.stdout.split(':')[3] })
+      }}
+  loop: "{{ ssh__getent_passwd.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc == 0
   changed_when: false
+  tags:
+    - ssh
+    - ssh-homes
+
+# -----------------------------------------------------------------------------
+# Optional consistency checks
+# -----------------------------------------------------------------------------
+
+- name: SSH | Homes | Validate expected home directories when provided
+  ansible.builtin.assert:
+    that:
+      - item.expected_home | length == 0 or ssh__user_homes[item.name] ==
+        item.expected_home
+    fail_msg: >-
+      Resolved home directory for {{ item.name }} does not match inventory.
+      Expected={{ item.expected_home }}, resolved={{ ssh__user_homes[item.name]
+      | default('missing') }}.
+    success_msg: "Resolved home directory matches inventory for {{ item.name }}."
+  loop: "{{ ssh__resolve_home_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - ssh_validate_resolved_home_matches_inventory | default(false) | bool
+    - item.name in ssh__user_homes
+  tags:
+    - ssh
+    - ssh-homes
+
+- name: SSH | Homes | Validate expected shells when provided
+  ansible.builtin.assert:
+    that:
+      - item.expected_shell | length == 0 or ssh__user_shells[item.name] ==
+        item.expected_shell
+    fail_msg: >-
+      Resolved shell for {{ item.name }} does not match inventory. Expected={{
+      item.expected_shell }}, resolved={{ ssh__user_shells[item.name] |
+      default('missing') }}.
+    success_msg: "Resolved shell matches inventory for {{ item.name }}."
+  loop: "{{ ssh__resolve_home_jobs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - ssh_validate_resolved_shell_matches_inventory | default(false) | bool
+    - item.name in ssh__user_shells
+  tags:
+    - ssh
+    - ssh-homes
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Homes | Show resolved user home summary
+  ansible.builtin.debug:
+    msg:
+      - "SSH user home resolution complete."
+      - "Users resolved: {{ ssh__user_homes | length }}"
+      - "Homes: {{ ssh__user_homes | to_nice_yaml }}"
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-homes
+    - ssh-summary

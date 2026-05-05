@@ -1,5 +1,7 @@
 {
   "scanSettings": {
+    "configMode": "AUTO",
+    "enableLicenseViolations": true,
     "baseBranches": []
   },
   "checkRunSettings": {
@@ -10,5 +12,10 @@
   "issueSettings": {
     "minSeverityLevel": "LOW",
     "issueType": "DEPENDENCY"
+  },
+  "remediateSettings": {
+    "workflowRules": {
+      "enabled": true
+    }
   }
 }

@@ -1,220 +1,469 @@
 ---
 # =============================================================================
-# Technitium DNS — Server Settings Configuration (FIXED)
+# Technitium DNS - Server Settings Configuration
+# -----------------------------------------------------------------------------
+# Purpose:
+#   - Configure production-ready Technitium DNS server settings
+#   - Apply recursion policy
+#   - Apply forwarders
+#   - Apply cache behavior
+#   - Apply DNSSEC / QNAME minimization / serve-stale behavior
+#   - Apply blocking settings
+#   - Apply logging retention
+#   - Apply web/API listener settings
+#
+# Design:
+#   - Authentication is expected to be initialized by init_admin.yaml.
+#   - Uses Authorization: Bearer for modern Technitium API behavior.
+#   - Also sends token in the body for backward compatibility.
+#   - Never logs API tokens, passwords, or full API responses.
+#
+# Companion vars:
+#   - Ansible/group_vars/technitium/main.yaml
+#   - Ansible/group_vars/technitium/block-lists.yaml
+#   - Ansible/group_vars/technitium/cluster.yaml
 # =============================================================================
 
 # -----------------------------------------------------------------------------
 # Preconditions
 # -----------------------------------------------------------------------------
-- name: Technitium | Assert admin password is defined
+
+- name: Technitium Settings | Assert authentication facts are available
   ansible.builtin.assert:
     that:
-      - technitium_admin_password is defined
-      - technitium_admin_password | length > 0
+      - technitium_api_url is defined
+      - technitium_api_url | length > 0
+      - technitium_api_token is defined or technitium_session_token is defined
+      - technitium_actual_password is defined
+      - technitium_actual_password | length > 0
+    fail_msg: >-
+      Technitium server settings require authentication facts from
+      tasks/init_admin.yaml. Expected technitium_api_token or
+      technitium_session_token to be available.
+    success_msg: "Technitium settings authentication facts are available."
+  no_log: true
 
-# -----------------------------------------------------------------------------
-# API base
-# -----------------------------------------------------------------------------
-- name: Technitium | Set API base URL
+- name: Technitium Settings | Normalize API and token facts
   ansible.builtin.set_fact:
-    _technitium_api_base: "{{ technitium_api_url }}"
+    technitium_settings_api_base: "{{ technitium_api_url | regex_replace('/+$', '') }}"
+    technitium_settings_token: "{{ technitium_api_token | default(technitium_session_token) }}"
+    technitium_settings_admin_user: "{{ technitium_admin_username | default(technitium_admin_user | default('admin')) }}"
+  no_log: true
+
+- name: Technitium Settings | Assert settings token is usable
+  ansible.builtin.assert:
+    that:
+      - technitium_settings_token is defined
+      - technitium_settings_token | length > 0
+    fail_msg: "Technitium settings token is missing or empty."
+    success_msg: "Technitium settings token is available."
+  no_log: true
 
 # -----------------------------------------------------------------------------
-# Output directory (controller-side)
+# Controller-side token persistence
 # -----------------------------------------------------------------------------
-- name: Technitium | Set output paths (controller-side)
-  ansible.builtin.set_fact:
-    _technitium_output_dir: "{{ technitium_output_dir }}"
-    _technitium_token_file: "{{ technitium_token_file }}"
 
-- name: Technitium | Ensure output directory exists
+- name: Technitium Settings | Ensure output directory exists
   ansible.builtin.file:
-    path: "{{ _technitium_output_dir }}"
+    path: "{{ technitium_output_dir }}"
     state: directory
     mode: "0700"
   delegate_to: localhost
   become: false
-  run_once: true
+  when:
+    - technitium_output_dir is defined
+    - technitium_output_dir | length > 0
 
-# -----------------------------------------------------------------------------
-# Create NON-EXPIRING API token (preferred). Fallback to login session token.
-# -----------------------------------------------------------------------------
-- name: Technitium | Create API token (non-expiring)
-  ansible.builtin.uri:
-    url: "{{ _technitium_api_base }}/api/user/createToken"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      user: "{{ technitium_admin_user | default('admin') }}"
-      pass: "{{ technitium_actual_password }}"
-      tokenName: "{{ technitium_api_token_name | default('ansible') }}"
-    status_code: [200, 400]
-    return_content: true
-  register: _technitium_create_token
-  no_log: true
-
-- name: Technitium | Login to obtain session token (fallback)
-  ansible.builtin.uri:
-    url: "{{ _technitium_api_base }}/api/user/login"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      user: "{{ technitium_admin_user | default('admin') }}"
-      pass: "{{ technitium_actual_password }}"
-    status_code: [200, 400]
-    return_content: true
-  register: _technitium_login
-  no_log: true
-  when: >-
-    _technitium_create_token.json is not defined
-    or _technitium_create_token.json.status is not defined
-    or _technitium_create_token.json.status != "ok"
-
-- name: Technitium | Set API token from createToken or login
-  ansible.builtin.set_fact:
-    technitium_api_token: >-
-      {{
-        (_technitium_create_token.json.token
-         if (_technitium_create_token.json is defined
-             and _technitium_create_token.json.status == "ok")
-         else _technitium_login.json.token)
-      }}
-
-- name: Technitium | Assert API token is available
-  ansible.builtin.assert:
-    that:
-      - technitium_api_token is defined
-      - (technitium_api_token | string | length) > 0
-    fail_msg: >-
-      Failed to acquire Technitium API token. createToken error:
-      {{ _technitium_create_token.json.errorMessage
-         | default(_technitium_create_token.content | default('unknown error')) }}
-
-- name: Debug technitium Extract
-  ansible.builtin.debug:
-    msg: "Technitium API Token: {{ technitium_api_token }}
-      _technitium_create_token: {{ _technitium_create_token }}"
-  
-
-
-# -----------------------------------------------------------------------------
-# Persist token (controller-side)
-# -----------------------------------------------------------------------------
-- name: Technitium | Write API token to file
+- name: Technitium Settings | Persist API token to controller file
   ansible.builtin.copy:
-    dest: "{{ _technitium_token_file }}"
-    content: "{{ technitium_api_token | trim }}\n"
+    dest: "{{ technitium_token_file }}"
+    content: "{{ technitium_settings_token | trim }}\n"
     mode: "0600"
     force: true
   delegate_to: localhost
   become: false
-  run_once: true
   no_log: true
-
+  when:
+    - technitium_token_file is defined
+    - technitium_token_file | length > 0
+    - technitium_persist_api_token | default(true)
 
 # -----------------------------------------------------------------------------
+# Build desired settings
+# -----------------------------------------------------------------------------
 
-# Acquire a fresh token right before using it (token session may expire)
-- name: Technitium | Acquire fresh token for settings configuration
-  ansible.builtin.uri:
-    url: "{{ _technitium_api_base }}/api/user/createToken"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      user: "{{ technitium_admin_user | default('admin') }}"
-      pass: "{{ technitium_actual_password }}"
-      tokenName: "{{ technitium_api_token_name | default('ansible-settings') }}"
-    status_code: [200, 400]
-    return_content: true
-  register: _technitium_fresh_token
-  no_log: true
-
-- name: Technitium | Login for fresh session token (fallback for settings)
-  ansible.builtin.uri:
-    url: "{{ _technitium_api_base }}/api/user/login"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      user: "{{ technitium_admin_user | default('admin') }}"
-      pass: "{{ technitium_actual_password }}"
-    status_code: [200, 400]
-    return_content: true
-  register: _technitium_fresh_login
-  no_log: true
-  when: >
-    _technitium_fresh_token.json is not defined
-    or _technitium_fresh_token.json.status is not defined
-    or _technitium_fresh_token.json.status != "ok"
-
-- name: Technitium | Set fresh API token for settings
+- name: Technitium Settings | Build forwarder string
   ansible.builtin.set_fact:
-    _technitium_settings_token: >
+    technitium_settings_forwarders: >-
       {{
-        (_technitium_fresh_token.json.token
-         if (_technitium_fresh_token.json is defined
-             and _technitium_fresh_token.json.status == "ok"
-             and _technitium_fresh_token.json.token is defined)
-         else (_technitium_fresh_login.json.token
-              if (_technitium_fresh_login.json is defined
-                  and _technitium_fresh_login.json.status == "ok"
-                  and _technitium_fresh_login.json.token is defined)
-              else technitium_api_token | default("") ))
+        technitium_forwarders
+        | default([])
+        | unique
+        | join(',')
       }}
+
+- name: Technitium Settings | Build blocklist URL string
+  ansible.builtin.set_fact:
+    technitium_settings_block_list_urls: >-
+      {{
+        technitium_block_list_urls
+        | default([])
+        | unique
+        | join(',')
+      }}
+
+- name: Technitium Settings | Build DNS server local endpoints
+  ansible.builtin.set_fact:
+    technitium_settings_dns_server_local_endpoints: >-
+      {{
+        technitium_dns_server_local_endpoints
+        | default(['0.0.0.0:' ~ (technitium_dns_port | default(53) | string)])
+        | join(',')
+      }}
+
+- name: Technitium Settings | Build web service local addresses
+  ansible.builtin.set_fact:
+    technitium_settings_web_service_local_addresses: >-
+      {{
+        technitium_web_service_local_addresses
+        | default(['0.0.0.0'])
+        | join(',')
+      }}
+
+- name: Technitium Settings | Build recursion ACL string
+  ansible.builtin.set_fact:
+    technitium_settings_recursion_network_acl: >-
+      {{
+        technitium_allow_recursion_cidrs
+        | default([])
+        | unique
+        | join(',')
+      }}
+
+- name: Technitium Settings | Build blocking bypass ACL string
+  ansible.builtin.set_fact:
+    technitium_settings_blocking_bypass_list: >-
+      {{
+        technitium_blocking_bypass_list
+        | default([])
+        | unique
+        | join(',')
+      }}
+
+- name: Technitium Settings | Build QPM bypass ACL string
+  ansible.builtin.set_fact:
+    technitium_settings_qpm_bypass_list: >-
+      {{
+        technitium_qpm_limit_bypass_list
+        | default(technitium_allow_recursion_cidrs | default([]))
+        | unique
+        | join(',')
+      }}
+
+- name: Technitium Settings | Build desired settings body
+  ansible.builtin.set_fact:
+    technitium_settings_body:
+      token: "{{ technitium_settings_token }}"
+
+      # -----------------------------------------------------------------------
+      # Server identity / listeners
+      # -----------------------------------------------------------------------
+      dnsServerDomain: "{{ technitium_server_domain | default(technitium_node_name | default(inventory_hostname)) }}"
+      dnsServerLocalEndPoints: "{{ technitium_settings_dns_server_local_endpoints }}"
+      webServiceLocalAddresses: "{{ technitium_settings_web_service_local_addresses }}"
+      webServiceHttpPort: "{{ technitium_http_port | default(5380) | string }}"
+      webServiceEnableTls: "{{ technitium_web_service_enable_tls | default(true) | bool | ternary('true', 'false') }}"
+      webServiceUseSelfSignedTlsCertificate: "{{ technitium_web_service_use_self_signed_tls_certificate | default(true) | bool | ternary('true', 'false') }}"
+      webServiceHttpToTlsRedirect: "{{ technitium_web_service_http_to_tls_redirect | default(false) | bool | ternary('true', 'false') }}"
+      webServiceTlsPort: "{{ technitium_https_port | default(53443) | string }}"
+      webServiceRealIpHeader: "{{ technitium_web_service_real_ip_header | default('X-Real-IP') }}"
+
+      # -----------------------------------------------------------------------
+      # DNS transport listeners
+      # -----------------------------------------------------------------------
+      enableDnsOverHttp: "{{ technitium_enable_dns_over_http | default(false) | bool | ternary('true', 'false') }}"
+      enableDnsOverTls: "{{ technitium_firewall_allow_dot | default(false) | bool | ternary('true', 'false') }}"
+      enableDnsOverHttps: "{{ technitium_firewall_allow_doh | default(false) | bool | ternary('true', 'false') }}"
+      enableDnsOverHttp3: "{{ technitium_enable_dns_over_http3 | default(false) | bool | ternary('true', 'false') }}"
+      enableDnsOverQuic: "{{ technitium_firewall_allow_doq | default(false) | bool | ternary('true', 'false') }}"
+      dnsOverTlsPort: "{{ technitium_firewall_ports.dns_over_tls | default(853) | string }}"
+      dnsOverHttpsPort: "{{ technitium_firewall_ports.dns_over_https | default(443) | string }}"
+      dnsOverQuicPort: "{{ technitium_firewall_ports.dns_over_quic | default(853) | string }}"
+
+      # -----------------------------------------------------------------------
+      # Resolver behavior
+      # -----------------------------------------------------------------------
+      preferIPv6: "{{ technitium_prefer_ipv6 | default(false) | bool | ternary('true', 'false') }}"
+      dnssecValidation: "{{ technitium_enable_dnssec_validation | default(true) | bool | ternary('true', 'false') }}"
+      qnameMinimization: "{{ technitium_enable_qname_minimization | default(true) | bool | ternary('true', 'false') }}"
+      recursion: "{{ technitium_recursion_policy | default('AllowOnlyForPrivateNetworks') }}"
+      recursionNetworkACL: "{{ technitium_settings_recursion_network_acl }}"
+      randomizeName: "{{ technitium_randomize_name | default(false) | bool | ternary('true', 'false') }}"
+      resolverRetries: "{{ technitium_resolver_retries | default(2) | string }}"
+      resolverTimeout: "{{ technitium_resolver_timeout | default(1500) | string }}"
+      resolverConcurrency: "{{ technitium_resolver_concurrency | default(2) | string }}"
+      resolverMaxStackCount: "{{ technitium_resolver_max_stack_count | default(16) | string }}"
+
+      # -----------------------------------------------------------------------
+      # Cache / resilience
+      # -----------------------------------------------------------------------
+      saveCache: "{{ technitium_cache_enabled | default(true) | bool | ternary('true', 'false') }}"
+      serveStale: "{{ technitium_enable_serve_stale | default(true) | bool | ternary('true', 'false') }}"
+      serveStaleTtl: "{{ technitium_serve_stale_ttl | default(259200) | string }}"
+      serveStaleAnswerTtl: "{{ technitium_serve_stale_answer_ttl | default(30) | string }}"
+      serveStaleResetTtl: "{{ technitium_serve_stale_reset_ttl | default(30) | string }}"
+      serveStaleMaxWaitTime: "{{ technitium_serve_stale_max_wait_time | default(1800) | string }}"
+      cacheMaximumEntries: "{{ technitium_cache_maximum_entries | default(10000) | string }}"
+      cacheMinimumRecordTtl: "{{ technitium_cache_min_ttl | default(30) | string }}"
+      cacheMaximumRecordTtl: "{{ technitium_cache_max_ttl | default(86400) | string }}"
+      cacheNegativeRecordTtl: "{{ technitium_cache_negative_ttl | default(300) | string }}"
+      cacheFailureRecordTtl: "{{ technitium_cache_failure_ttl | default(10) | string }}"
+      cachePrefetchEligibility: "{{ technitium_cache_prefetch_eligibility | default(2) | string }}"
+      cachePrefetchTrigger: "{{ technitium_cache_prefetch_trigger | default(9) | string }}"
+      cachePrefetchSampleIntervalInMinutes: "{{ technitium_cache_prefetch_sample_interval_minutes | default(5) | string }}"
+      cachePrefetchSampleEligibilityHitsPerHour: "{{ technitium_cache_prefetch_sample_eligibility_hits_per_hour | default(30) | string }}"
+
+      # -----------------------------------------------------------------------
+      # Blocking
+      # -----------------------------------------------------------------------
+      enableBlocking: "{{ technitium_enable_blocking | default(true) | bool | ternary('true', 'false') }}"
+      allowTxtBlockingReport: "{{ technitium_allow_txt_blocking_report | default(true) | bool | ternary('true', 'false') }}"
+      blockingBypassList: "{{ technitium_settings_blocking_bypass_list }}"
+      blockingType: "{{ technitium_blocking_type | default('AnyAddress') }}"
+      blockingAnswerTtl: "{{ technitium_blocking_ttl | default(300) | string }}"
+      customBlockingAddresses: "{{ technitium_custom_blocking_addresses | default(['0.0.0.0']) | join(',') }}"
+      blockListUrls: "{{ technitium_settings_block_list_urls }}"
+      blockListUpdateIntervalHours: "{{ technitium_blocking_update_interval_hours | default(24) | string }}"
+
+      # -----------------------------------------------------------------------
+      # Forwarders
+      # -----------------------------------------------------------------------
+      forwarders: "{{ technitium_settings_forwarders if (technitium_settings_forwarders | length > 0) else 'false' }}"
+      forwarderProtocol: "{{ technitium_forwarder_protocol | default('Udp') | regex_replace('^udp$', 'Udp') | regex_replace('^tcp$', 'Tcp') | regex_replace('^tls$', 'Tls') | regex_replace('^https$', 'Https') | regex_replace('^quic$', 'Quic') }}"
+      concurrentForwarding: "{{ technitium_concurrent_forwarding | default(true) | bool | ternary('true', 'false') }}"
+      forwarderRetries: "{{ technitium_forwarder_retries | default(3) | string }}"
+      forwarderTimeout: "{{ technitium_forwarder_timeout | default(2000) | string }}"
+      forwarderConcurrency: "{{ technitium_forwarder_concurrency | default(2) | string }}"
+
+      # -----------------------------------------------------------------------
+      # Rate limits / client behavior
+      # -----------------------------------------------------------------------
+      udpPayloadSize: "{{ technitium_udp_payload_size | default(1232) | string }}"
+      clientTimeout: "{{ technitium_client_timeout | default(4000) | string }}"
+      tcpSendTimeout: "{{ technitium_tcp_send_timeout | default(10000) | string }}"
+      tcpReceiveTimeout: "{{ technitium_tcp_receive_timeout | default(10000) | string }}"
+      quicIdleTimeout: "{{ technitium_quic_idle_timeout | default(60000) | string }}"
+      quicMaxInboundStreams: "{{ technitium_quic_max_inbound_streams | default(100) | string }}"
+      listenBacklog: "{{ technitium_listen_backlog | default(100) | string }}"
+      maxConcurrentResolutionsPerCore: "{{ technitium_max_concurrent_resolutions_per_core | default(100) | string }}"
+      qpmLimitBypassList: "{{ technitium_settings_qpm_bypass_list }}"
+
+      # -----------------------------------------------------------------------
+      # Logs / stats
+      # -----------------------------------------------------------------------
+      loggingType: "{{ technitium_logging_type | default((technitium_logging_enabled | default(true) | bool) | ternary('File', 'None')) }}"
+      ignoreResolverLogs: "{{ technitium_ignore_resolver_logs | default(false) | bool | ternary('true', 'false') }}"
+      logQueries: "{{ technitium_query_logging_enabled | default(false) | bool | ternary('true', 'false') }}"
+      useLocalTime: "{{ technitium_use_local_time | default(false) | bool | ternary('true', 'false') }}"
+      logFolder: "{{ technitium_log_folder | default('logs') }}"
+      maxLogFileDays: "{{ technitium_log_retention_days | default(14) | string }}"
+      enableInMemoryStats: "{{ technitium_enable_in_memory_stats | default(false) | bool | ternary('true', 'false') }}"
+      maxStatFileDays: "{{ technitium_stat_retention_days | default(365) | string }}"
+
+      # -----------------------------------------------------------------------
+      # Automatic DNS app updates
+      # -----------------------------------------------------------------------
+      dnsAppsEnableAutomaticUpdate: "{{ technitium_dns_apps_enable_automatic_update | default(true) | bool | ternary('true', 'false') }}"
   no_log: true
 
-- name: Technitium | Assert fresh token obtained for settings
-  ansible.builtin.assert:
-    that:
-      - _technitium_settings_token is defined
-      - _technitium_settings_token | length > 0
-    fail_msg: >-
-      Failed to obtain valid API token for settings configuration.
-      Fresh token: {{ _technitium_fresh_token.json | default('undefined') }}
-      Fresh login: {{ _technitium_fresh_login.json | default('undefined') }}
-
-# Server/DNS settings (FORM-URLENCODED; token as a normal parameter)
-# Add a delay before using the token to ensure API has processed it
 # -----------------------------------------------------------------------------
-- name: Technitium | Wait before applying settings (token initialization)
-  ansible.builtin.pause:
-    seconds: 3
+# Read current settings
+# -----------------------------------------------------------------------------
 
-- name: Technitium | Configure server settings
+- name: Technitium Settings | Get current server settings
   ansible.builtin.uri:
-    url: "{{ _technitium_api_base }}/api/settings/set"
-    method: POST
-    body_format: form-urlencoded
-    body:
-      token: "{{ technitium_api_token }}"
-
-      # Disable encrypted DNS listeners/proxies
-      enableDnsOverHttp: "false"
-      enableDnsOverTls: "false"
-      enableDnsOverQuic: "false"
-      enableDnsOverHttps: "false"
-      enableDnsOverHttpsProxy: "false"
-      enableDnsOverTlsProxy: "false"
-
-      # Recursion enabled (safer default for LAN)
-      recursion: "AllowOnlyForPrivateNetworks"
-
-      # Logging off (queries)
-      enableLogging: "false"
-      logQueries: "false"
-
-      # Cache persistence (optional; adjust if you don't want disk cache)
-      saveCache: "true"
-    status_code: 200
+    url: "{{ technitium_settings_api_base }}/api/settings/get"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ technitium_settings_token }}"
+    status_code:
+      - 200
+      - 400
+      - 401
+      - 403
     return_content: true
-  register: _technitium_settings_set
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_current_settings_get
+  failed_when: false
   no_log: true
 
-- name: Technitium | Assert settings applied successfully
+- name: Technitium Settings | Fail when current settings cannot be read
+  ansible.builtin.fail:
+    msg: >-
+      Failed to read current Technitium DNS settings before applying changes.
+      API status={{ technitium_current_settings_get.status | default('unknown') }}.
+      Response={{ technitium_current_settings_get.json.errorMessage | default(technitium_current_settings_get.content | default('unknown error')) }}.
+  when: technitium_current_settings_get.json.status | default('') != 'ok'
+
+# -----------------------------------------------------------------------------
+# Determine whether selected settings differ
+# -----------------------------------------------------------------------------
+
+- name: Technitium Settings | Determine if settings should be applied
+  ansible.builtin.set_fact:
+    technitium_settings_should_apply: >-
+      {{
+        technitium_force_server_settings | default(false) | bool
+        or (
+          technitium_current_settings_get.json.response.dnsServerDomain | default('')
+          != technitium_settings_body.dnsServerDomain
+        )
+        or (
+          technitium_current_settings_get.json.response.recursion | default('')
+          != technitium_settings_body.recursion
+        )
+        or (
+          technitium_current_settings_get.json.response.forwarderProtocol | default('')
+          != technitium_settings_body.forwarderProtocol
+        )
+        or (
+          technitium_current_settings_get.json.response.enableBlocking | default(false) | bool
+          != technitium_enable_blocking | default(true) | bool
+        )
+        or (
+          technitium_current_settings_get.json.response.blockingType | default('')
+          != technitium_settings_body.blockingType
+        )
+        or (
+          technitium_current_settings_get.json.response.blockListUpdateIntervalHours | default(0) | int
+          != technitium_blocking_update_interval_hours | default(24) | int
+        )
+        or (
+          technitium_current_settings_get.json.response.logQueries | default(false) | bool
+          != technitium_query_logging_enabled | default(false) | bool
+        )
+        or (
+          technitium_current_settings_get.json.response.dnssecValidation | default(false) | bool
+          != technitium_enable_dnssec_validation | default(true) | bool
+        )
+        or (
+          technitium_current_settings_get.json.response.qnameMinimization | default(false) | bool
+          != technitium_enable_qname_minimization | default(true) | bool
+        )
+        or (
+          technitium_current_settings_get.json.response.serveStale | default(false) | bool
+          != technitium_enable_serve_stale | default(true) | bool
+        )
+      }}
+
+# -----------------------------------------------------------------------------
+# Apply settings
+# -----------------------------------------------------------------------------
+
+- name: Technitium Settings | Apply server settings
+  ansible.builtin.uri:
+    url: "{{ technitium_settings_api_base }}/api/settings/set"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ technitium_settings_token }}"
+    body_format: form-urlencoded
+    body: "{{ technitium_settings_body }}"
+    status_code:
+      - 200
+      - 400
+      - 401
+      - 403
+    return_content: true
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_settings_set
+  failed_when: false
+  changed_when: technitium_settings_should_apply | bool
+  no_log: true
+  when: technitium_settings_should_apply | bool
+
+- name: Technitium Settings | Assert settings applied successfully
   ansible.builtin.assert:
     that:
-      - _technitium_settings_set.json is defined
-      - _technitium_settings_set.json.status == "ok"
+      - technitium_settings_set.json is defined
+      - technitium_settings_set.json.status == "ok"
     fail_msg: >-
       Technitium settings/set failed:
-      {{ _technitium_settings_set.json.errorMessage
-         | default(_technitium_settings_set.content | default('unknown error')) }}
+      {{ technitium_settings_set.json.errorMessage | default(technitium_settings_set.content | default('unknown error')) }}
+    success_msg: "Technitium server settings applied successfully."
+  when: technitium_settings_should_apply | bool
+
+- name: Technitium Settings | Mark settings unchanged when already compliant
+  ansible.builtin.debug:
+    msg: "Technitium server settings already match the desired baseline."
+  when:
+    - not (technitium_settings_should_apply | bool)
+    - technitium_settings_show_no_change | default(true)
+
+# -----------------------------------------------------------------------------
+# Verify settings after apply
+# -----------------------------------------------------------------------------
+
+- name: Technitium Settings | Read server settings after configuration
+  ansible.builtin.uri:
+    url: "{{ technitium_settings_api_base }}/api/settings/get"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ technitium_settings_token }}"
+    status_code:
+      - 200
+    return_content: true
+    validate_certs: "{{ technitium_validate_certs | default(false) }}"
+    timeout: "{{ technitium_api_timeout | default(90) | int }}"
+  register: technitium_settings_verify
+  failed_when: false
+  no_log: true
+
+- name: Technitium Settings | Assert server settings can be verified
+  ansible.builtin.assert:
+    that:
+      - technitium_settings_verify.json is defined
+      - technitium_settings_verify.json.status == "ok"
+    fail_msg: >-
+      Failed to verify Technitium server settings after configuration.
+      Response={{ technitium_settings_verify.json.errorMessage | default(technitium_settings_verify.content | default('unknown error')) }}.
+    success_msg: "Technitium server settings verification succeeded."
+
+- name: Technitium Settings | Assert recursion policy is restricted
+  ansible.builtin.assert:
+    that:
+      - technitium_settings_verify.json.response.recursion == technitium_settings_body.recursion
+      - technitium_settings_verify.json.response.recursion != "Allow"
+    fail_msg: >-
+      Technitium recursion policy is not restricted as expected.
+      Current recursion policy={{ technitium_settings_verify.json.response.recursion | default('unknown') }}.
+    success_msg: "Technitium recursion policy is restricted."
+
+- name: Technitium Settings | Assert public recursion is not configured
+  ansible.builtin.assert:
+    that:
+      - "'0.0.0.0/0' not in (technitium_settings_verify.json.response.recursionNetworkACL | default([]) | join(','))"
+      - "'::/0' not in (technitium_settings_verify.json.response.recursionNetworkACL | default([]) | join(','))"
+    fail_msg: "Technitium recursion ACL contains a public network."
+    success_msg: "Technitium recursion ACL does not contain public networks."
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: Technitium Settings | Show server settings summary
+  ansible.builtin.debug:
+    msg:
+      - "Technitium server settings complete."
+      - "Host: {{ inventory_hostname }}"
+      - "API: {{ technitium_settings_api_base }}"
+      - "DNS server domain: {{ technitium_settings_verify.json.response.dnsServerDomain | default('unknown') }}"
+      - "Recursion: {{ technitium_settings_verify.json.response.recursion | default('unknown') }}"
+      - "DNSSEC validation: {{ technitium_settings_verify.json.response.dnssecValidation | default('unknown') }}"
+      - "QNAME minimization: {{ technitium_settings_verify.json.response.qnameMinimization | default('unknown') }}"
+      - "Serve stale: {{ technitium_settings_verify.json.response.serveStale | default('unknown') }}"
+      - "Blocking enabled: {{ technitium_settings_verify.json.response.enableBlocking | default('unknown') }}"
+      - "Forwarder protocol: {{ technitium_settings_verify.json.response.forwarderProtocol | default('unknown') }}"
+      - "Log queries: {{ technitium_settings_verify.json.response.logQueries | default('unknown') }}"
+      - "Settings changed: {{ technitium_settings_should_apply | bool }}"

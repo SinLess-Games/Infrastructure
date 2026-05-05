@@ -1,142 +1,495 @@
 ---
 # =============================================================================
-# Role: ssh
-# Task: proxmox/copy-ca.yaml
-#
+# SSH Role - Proxmox Copy SSH CA Trust Material
+# -----------------------------------------------------------------------------
 # Purpose:
-# - Copy SSH Certificate Authority files from the controller to the target node
-#   into /etc/ssh/ca/
+#   Installs SSH Certificate Authority trust material on Proxmox nodes.
 #
-# Notes:
-# - ansible.builtin.copy reads `src` from the CONTROLLER by default.
-# - If `remote_src: true` is set, Ansible will look for `src` on the REMOTE node.
-# - Facts set with delegate_to are host-scoped unless `delegate_facts: true` is used.
-#   We *want* these facts on localhost so remote tasks can reference:
-#     hostvars['localhost'][...]
+# Security model:
+#   - Public CA key is copied to managed nodes for TrustedUserCAKeys.
+#   - Private CA key is NOT copied by default.
+#   - Private CA key copying requires:
+#       ssh_copy_ca_private: true
+#     and, if configured:
+#       ssh_ca_private_allowed_hosts:
+#         - pve-01
 #
-# Controller files expected:
-#   {{ ssh_controller_outputs_dir }}/ssh-ca/ssh_ca
-#   {{ ssh_controller_outputs_dir }}/ssh-ca/ssh_ca.pub
+# Important:
+#   - ansible.builtin.copy reads src from the controller by default.
+#   - Do not use remote_src=true for controller-generated CA files.
+#   - Avoid symlinks for TrustedUserCAKeys. Copy the actual public key to the
+#     exact path sshd is configured to read.
+#
+# Controller expected files:
+#   {{ ssh_ca_private_key_path | default(ssh_ca_output_dir ~ '/ssh_ca') }}
+#   {{ ssh_ca_public_key_path  | default(ssh_ca_output_dir ~ '/ssh_ca.pub') }}
+#
+# Managed-node default files:
+#   /etc/ssh/ca/ssh_ca.pub
+#   /etc/ssh/ca/ssh_ca          # optional, private, disabled by default
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Resolve controller CA paths (controller-side)
+# Normalize variables
 # -----------------------------------------------------------------------------
-- name: Resolve controller outputs dir (controller)
+
+- name: SSH | Proxmox CA | Normalize CA paths and policy
   ansible.builtin.set_fact:
-    ssh_controller_outputs_dir_effective: >-
+    proxmox_ssh_ca_controller_dir: "{{ ssh_ca_output_dir |
+      default(ssh_controller_outputs_dir | default(playbook_dir ~ '/../..' ~
+      '/.outputs') ~ '/ssh_ca') }}"
+    proxmox_ssh_ca_controller_private_key: "{{ ssh_ca_private_key_path |
+      default((ssh_ca_output_dir | default(ssh_controller_outputs_dir |
+      default(playbook_dir ~ '/../..' ~ '/.outputs') ~ '/ssh_ca')) ~ '/ssh_ca')
+      }}"
+    proxmox_ssh_ca_controller_public_key: "{{ ssh_ca_public_key_path |
+      default((ssh_ca_output_dir | default(ssh_controller_outputs_dir |
+      default(playbook_dir ~ '/../..' ~ '/.outputs') ~ '/ssh_ca')) ~
+      '/ssh_ca.pub') }}"
+    proxmox_ssh_ca_remote_dir: "{{ ssh_ca_remote_dir | default('/etc/ssh/ca') }}"
+    proxmox_ssh_ca_remote_public_key: >-
       {{
-        ssh_controller_outputs_dir
-          | default(playbook_dir ~ '/../..' ~ '/.outputs')
+        ssh_trusted_user_ca_keys_path
+        | default(
+            ssh_server_trusted_user_ca_keys
+            | default(
+                ssh.server.trusted_user_ca_keys
+                | default('/etc/ssh/ca/ssh_ca.pub')
+                if ssh is defined and ssh.server is defined
+                else '/etc/ssh/ca/ssh_ca.pub'
+              )
+          )
       }}
-  delegate_to: localhost
-  delegate_facts: true
-  run_once: true
+    proxmox_ssh_ca_remote_private_key: "{{ ssh_ca_remote_private_key_path | default('/etc/ssh/ca/ssh_ca') }}"
+    proxmox_ssh_copy_ca_private: "{{ ssh_copy_ca_private | default(false) | bool }}"
+    proxmox_ssh_ca_private_allowed_hosts_effective: "{{ ssh_ca_private_allowed_hosts | default([]) }}"
   changed_when: false
-
-- name: Resolve controller SSH CA directory (controller)
-  ansible.builtin.set_fact:
-    ssh_controller_ca_dir_effective: "{{ hostvars['localhost']['ssh_controller_outputs_dir_effective'] ~ '/ssh_ca' }}"
-  delegate_to: localhost
-  delegate_facts: true
-  run_once: true
-  changed_when: false
-
-- name: Stat SSH CA public key on controller
-  ansible.builtin.stat:
-    path: "{{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca.pub"
-  delegate_to: localhost
-  run_once: true
-  register: ssh_ca_pub_stat
-  changed_when: false
-
-- name: Fail if SSH CA public key is missing on controller
-  ansible.builtin.fail:
-    msg: >-
-      Missing SSH CA public key on controller:
-      {{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca.pub
-  delegate_to: localhost
-  run_once: true
-  when: not ssh_ca_pub_stat.stat.exists
-
-- name: Stat SSH CA private key on controller (only if copying private)
-  ansible.builtin.stat:
-    path: "{{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca"
-  delegate_to: localhost
-  run_once: true
-  register: ssh_ca_priv_stat
-  changed_when: false
-  when: ssh_copy_ca_private | default(false) | bool
-
-- name: Fail if SSH CA private key is missing on controller (only if copying private)
-  ansible.builtin.fail:
-    msg: >-
-      Missing SSH CA private key on controller:
-      {{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca
-  delegate_to: localhost
-  run_once: true
-  when:
-    - ssh_copy_ca_private | default(false) | bool
-    - not ssh_ca_priv_stat.stat.exists
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
 
 # -----------------------------------------------------------------------------
-# Ensure CA directory exists on node
+# Validate variables
 # -----------------------------------------------------------------------------
-- name: Ensure SSH CA directory exists on node
+
+- name: SSH | Proxmox CA | Validate CA path inputs
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_ca_controller_dir is string
+      - proxmox_ssh_ca_controller_dir is match('^/')
+      - proxmox_ssh_ca_controller_private_key is string
+      - proxmox_ssh_ca_controller_private_key is match('^/')
+      - proxmox_ssh_ca_controller_public_key is string
+      - proxmox_ssh_ca_controller_public_key is match('^/')
+      - proxmox_ssh_ca_remote_dir is string
+      - proxmox_ssh_ca_remote_dir is match('^/')
+      - proxmox_ssh_ca_remote_public_key is string
+      - proxmox_ssh_ca_remote_public_key is match('^/')
+      - proxmox_ssh_ca_remote_private_key is string
+      - proxmox_ssh_ca_remote_private_key is match('^/')
+      - proxmox_ssh_ca_remote_public_key.startswith(proxmox_ssh_ca_remote_dir ~
+        '/')
+      - proxmox_ssh_ca_remote_private_key.startswith(proxmox_ssh_ca_remote_dir ~
+        '/')
+    fail_msg: "Proxmox SSH CA controller or remote paths are invalid."
+    success_msg: "Proxmox SSH CA path inputs are valid."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-validate
+
+- name: SSH | Proxmox CA | Validate private CA copy policy
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_ca_private_allowed_hosts_effective is sequence
+      - proxmox_ssh_ca_private_allowed_hosts_effective is not string
+      - proxmox_ssh_ca_private_allowed_hosts_effective is not mapping
+      - >-
+        not (proxmox_ssh_copy_ca_private | bool) or
+        proxmox_ssh_ca_private_allowed_hosts_effective | length == 0 or
+        inventory_hostname in proxmox_ssh_ca_private_allowed_hosts_effective
+    fail_msg: >-
+      Refusing to copy the SSH CA private key to {{ inventory_hostname }}.
+      Either remove ssh_copy_ca_private=true or explicitly include this host in
+      ssh_ca_private_allowed_hosts.
+    success_msg: "Private CA copy policy is valid for this host."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-validate
+
+# -----------------------------------------------------------------------------
+# Validate controller-side CA material
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox CA | Stat SSH CA public key on controller
+  ansible.builtin.stat:
+    path: "{{ proxmox_ssh_ca_controller_public_key }}"
+    follow: false
+  delegate_to: localhost
+  register: proxmox_ssh_ca_public_key_controller_stat
+  changed_when: false
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-controller
+
+- name: SSH | Proxmox CA | Assert SSH CA public key exists on controller
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_ca_public_key_controller_stat.stat.exists | default(false) |
+        bool
+      - proxmox_ssh_ca_public_key_controller_stat.stat.isreg | default(false) |
+        bool
+      - not (proxmox_ssh_ca_public_key_controller_stat.stat.islnk |
+        default(false) | bool)
+    fail_msg: >-
+      Missing, invalid, or symlinked SSH CA public key on controller: {{
+      proxmox_ssh_ca_controller_public_key }}. Run the SSH CA generation task
+      first.
+    success_msg: "SSH CA public key exists on controller and is not symlinked."
+  delegate_to: localhost
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-controller
+
+- name: SSH | Proxmox CA | Read SSH CA public key fingerprint on controller
+  ansible.builtin.command:
+    cmd: "ssh-keygen -l -f {{ proxmox_ssh_ca_controller_public_key }}"
+  register: proxmox_ssh_ca_public_key_fingerprint
+  changed_when: false
+  delegate_to: localhost
+  become: false
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-controller
+
+- name: SSH | Proxmox CA | Stat SSH CA private key on controller
+  ansible.builtin.stat:
+    path: "{{ proxmox_ssh_ca_controller_private_key }}"
+    follow: false
+  delegate_to: localhost
+  register: proxmox_ssh_ca_private_key_controller_stat
+  changed_when: false
+  become: false
+  when: proxmox_ssh_copy_ca_private | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-controller
+    - ssh-copy-ca-private
+
+- name: SSH | Proxmox CA | Assert SSH CA private key exists when copying private CA
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_ca_private_key_controller_stat.stat.exists | default(false)
+        | bool
+      - proxmox_ssh_ca_private_key_controller_stat.stat.isreg | default(false) |
+        bool
+      - not (proxmox_ssh_ca_private_key_controller_stat.stat.islnk |
+        default(false) | bool)
+    fail_msg: >-
+      Missing, invalid, or symlinked SSH CA private key on controller: {{
+      proxmox_ssh_ca_controller_private_key }}. Private CA copying was requested
+      but the private key is not available.
+    success_msg: "SSH CA private key exists on controller and is not symlinked."
+  delegate_to: localhost
+  become: false
+  when: proxmox_ssh_copy_ca_private | bool
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-controller
+    - ssh-copy-ca-private
+
+# -----------------------------------------------------------------------------
+# Prepare managed node
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox CA | Ensure SSH CA directory exists on node
   ansible.builtin.file:
-    path: /etc/ssh/ca
+    path: "{{ proxmox_ssh_ca_remote_dir }}"
     state: directory
     owner: root
     group: root
-    mode: "0755"
+    mode: "{{ ssh_trusted_user_ca_keys_dir_mode | default('0755') }}"
   become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
 
-# -----------------------------------------------------------------------------
-# Copy SSH CA private key (optional)
-# -----------------------------------------------------------------------------
-# NOTE: Only copy the private CA key onto hosts that are allowed to sign certs.
-- name: Copy SSH CA private key to node (only on signing hosts)
-  ansible.builtin.copy:
-    src: "{{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca"
-    dest: /etc/ssh/ca/ssh_ca
-    owner: root
-    group: root
-    mode: "0600"
-  become: true
-  when: ssh_copy_ca_private | default(false) | bool
-
-# -----------------------------------------------------------------------------
-# Copy SSH CA public key
-# -----------------------------------------------------------------------------
-- name: Copy SSH CA public key to node (canonical filename for sshd)
-  ansible.builtin.copy:
-    src: "{{ hostvars['localhost']['ssh_controller_ca_dir_effective'] }}/ssh_ca.pub"
-    dest: /etc/ssh/ca/user_ca.pub
-    owner: root
-    group: root
-    mode: "0644"
-  become: true
-
-# Optional compatibility link (if anything expects /etc/ssh/ca/ssh_ca.pub)
-- name: Ensure compatibility symlink for SSH CA public key
-  ansible.builtin.file:
-    src: /etc/ssh/ca/user_ca.pub
-    dest: /etc/ssh/ca/ssh_ca.pub
-    state: link
-    force: true
-  become: true
-
-# -----------------------------------------------------------------------------
-# Verify on-node result
-# -----------------------------------------------------------------------------
-- name: Assert SSH CA public key exists on node
+- name: SSH | Proxmox CA | Stat remote SSH CA public key path
   ansible.builtin.stat:
-    path: /etc/ssh/ca/user_ca.pub
-  register: ssh_ca_pub_on_node
-  become: true
+    path: "{{ proxmox_ssh_ca_remote_public_key }}"
+    follow: false
+  register: proxmox_ssh_ca_remote_public_key_stat
   changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
 
-- name: Fail if SSH CA public key is missing on node
+- name: SSH | Proxmox CA | Refuse symlinked remote SSH CA public key
   ansible.builtin.fail:
-    msg: "SSH CA public key failed to copy to /etc/ssh/ca/user_ca.pub"
-  when: not ssh_ca_pub_on_node.stat.exists
+    msg: >-
+      Remote SSH CA public key path is a symlink: {{
+      proxmox_ssh_ca_remote_public_key }}. Refusing to overwrite symlinked
+      TrustedUserCAKeys material.
+  when: proxmox_ssh_ca_remote_public_key_stat.stat.islnk | default(false) | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+
+- name: SSH | Proxmox CA | Stat remote SSH CA private key path
+  ansible.builtin.stat:
+    path: "{{ proxmox_ssh_ca_remote_private_key }}"
+    follow: false
+  register: proxmox_ssh_ca_remote_private_key_stat
+  changed_when: false
+  become: true
+  when: proxmox_ssh_copy_ca_private | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-private
+
+- name: SSH | Proxmox CA | Refuse symlinked remote SSH CA private key
+  ansible.builtin.fail:
+    msg: >-
+      Remote SSH CA private key path is a symlink: {{
+      proxmox_ssh_ca_remote_private_key }}. Refusing to overwrite symlinked
+      private CA material.
+  when:
+    - proxmox_ssh_copy_ca_private | bool
+    - proxmox_ssh_ca_remote_private_key_stat.stat.islnk | default(false) | bool
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-private
+
+# -----------------------------------------------------------------------------
+# Copy CA material
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox CA | Copy SSH CA public key to node
+  ansible.builtin.copy:
+    src: "{{ proxmox_ssh_ca_controller_public_key }}"
+    dest: "{{ proxmox_ssh_ca_remote_public_key }}"
+    owner: root
+    group: root
+    mode: "{{ ssh_trusted_user_ca_keys_mode | default('0644') }}"
+    backup: "{{ ssh_ca_public_key_backup | default(false) }}"
+  register: proxmox_ssh_ca_public_copy_result
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+
+- name: SSH | Proxmox CA | Copy SSH CA private key to authorized signing node
+  ansible.builtin.copy:
+    src: "{{ proxmox_ssh_ca_controller_private_key }}"
+    dest: "{{ proxmox_ssh_ca_remote_private_key }}"
+    owner: root
+    group: root
+    mode: "{{ ssh_ca_key_mode_private | default('0600') }}"
+    backup: "{{ ssh_ca_private_key_backup | default(true) }}"
+  register: proxmox_ssh_ca_private_copy_result
+  become: true
+  when: proxmox_ssh_copy_ca_private | bool
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-private
+
+- name: SSH | Proxmox CA | Remove SSH CA private key when private copy is disabled
+  ansible.builtin.file:
+    path: "{{ proxmox_ssh_ca_remote_private_key }}"
+    state: absent
+  register: proxmox_ssh_ca_private_remove_result
+  become: true
+  when:
+    - not (proxmox_ssh_copy_ca_private | bool)
+    - ssh_remove_remote_ca_private_when_disabled | default(false) | bool
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-private
+
+# -----------------------------------------------------------------------------
+# Verify managed-node result
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox CA | Stat SSH CA public key on node
+  ansible.builtin.stat:
+    path: "{{ proxmox_ssh_ca_remote_public_key }}"
+    follow: false
+  register: proxmox_ssh_ca_public_key_node_stat
+  changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-verify
+
+- name: SSH | Proxmox CA | Assert SSH CA public key exists on node
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_ca_public_key_node_stat.stat.exists | default(false) | bool
+      - proxmox_ssh_ca_public_key_node_stat.stat.isreg | default(false) | bool
+      - not (proxmox_ssh_ca_public_key_node_stat.stat.islnk | default(false) |
+        bool)
+      - proxmox_ssh_ca_public_key_node_stat.stat.pw_name == 'root'
+      - proxmox_ssh_ca_public_key_node_stat.stat.gr_name == 'root'
+    fail_msg: >-
+      SSH CA public key failed validation on node: {{
+      proxmox_ssh_ca_remote_public_key }}
+    success_msg: "SSH CA public key exists on node and is valid."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-verify
+
+- name: SSH | Proxmox CA | Read SSH CA public key fingerprint on node
+  ansible.builtin.command:
+    cmd: "ssh-keygen -l -f {{ proxmox_ssh_ca_remote_public_key }}"
+  register: proxmox_ssh_ca_public_key_node_fingerprint
+  changed_when: false
+  become: true
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-verify
+
+- name: SSH | Proxmox CA | Assert controller and node CA fingerprints match
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_ca_public_key_node_fingerprint.stdout ==
+        proxmox_ssh_ca_public_key_fingerprint.stdout
+    fail_msg: |
+      SSH CA public key fingerprint mismatch.
+
+      Controller:
+        {{ proxmox_ssh_ca_public_key_fingerprint.stdout }}
+
+      Node:
+        {{ proxmox_ssh_ca_public_key_node_fingerprint.stdout }}
+    success_msg: "Controller and node SSH CA public key fingerprints match."
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-verify
+
+- name: SSH | Proxmox CA | Stat SSH CA private key on node
+  ansible.builtin.stat:
+    path: "{{ proxmox_ssh_ca_remote_private_key }}"
+    follow: false
+  register: proxmox_ssh_ca_private_key_node_stat
+  changed_when: false
+  become: true
+  when: proxmox_ssh_copy_ca_private | bool
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-private
+    - ssh-copy-ca-verify
+
+- name: SSH | Proxmox CA | Assert SSH CA private key exists only when explicitly
+    copied
+  ansible.builtin.assert:
+    that:
+      - proxmox_ssh_ca_private_key_node_stat.stat.exists | default(false) | bool
+      - proxmox_ssh_ca_private_key_node_stat.stat.isreg | default(false) | bool
+      - not (proxmox_ssh_ca_private_key_node_stat.stat.islnk | default(false) |
+        bool)
+      - proxmox_ssh_ca_private_key_node_stat.stat.pw_name == 'root'
+      - proxmox_ssh_ca_private_key_node_stat.stat.gr_name == 'root'
+      - proxmox_ssh_ca_private_key_node_stat.stat.mode ==
+        (ssh_ca_key_mode_private | default('0600'))
+    fail_msg: >-
+      SSH CA private key failed validation on node: {{
+      proxmox_ssh_ca_remote_private_key }}
+    success_msg: "SSH CA private key exists on node and is valid."
+  when: proxmox_ssh_copy_ca_private | bool
+  no_log: "{{ ssh_role_no_log | default(true) }}"
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-copy-ca-private
+    - ssh-copy-ca-verify
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Proxmox CA | Show CA copy summary
+  ansible.builtin.debug:
+    msg:
+      - "Proxmox SSH CA trust material copied."
+      - "Host: {{ inventory_hostname }}"
+      - "Controller public key: {{ proxmox_ssh_ca_controller_public_key }}"
+      - "Remote public key: {{ proxmox_ssh_ca_remote_public_key }}"
+      - "Public key changed: {{ proxmox_ssh_ca_public_copy_result is changed }}"
+      - "Private CA copied: {{ proxmox_ssh_copy_ca_private | bool }}"
+      - "Controller fingerprint: {{ proxmox_ssh_ca_public_key_fingerprint.stdout
+        }}"
+      - "Node fingerprint: {{ proxmox_ssh_ca_public_key_node_fingerprint.stdout
+        }}"
+  when: ssh_role_show_summary | default(true)
+  tags:
+    - ssh
+    - ssh-proxmox
+    - ssh-ca
+    - ssh-copy-ca
+    - ssh-summary

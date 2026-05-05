@@ -1,9 +1,17 @@
 # =====================================================================
 # prompt.zsh — native Zsh prompt inspired by the previous Starship layout
 # =====================================================================
+# Goals:
+#   - Fast enough for daily interactive use
+#   - Clear language/tool names instead of icon-only segments
+#   - Safe for production terminals
+#   - No external prompt framework required
+# =====================================================================
 
 autoload -Uz add-zsh-hook vcs_info colors
 colors
+
+zmodload zsh/datetime 2>/dev/null || true
 
 zstyle ':vcs_info:*' enable git
 zstyle ':vcs_info:git:*' formats '%F{green}🌿 %b%f'
@@ -11,6 +19,10 @@ zstyle ':vcs_info:git:*' actionformats '%F{yellow}🌿 %b|%a%f'
 
 typeset -g _prompt_cmd_start=0
 typeset -g _prompt_cmd_duration=""
+
+# ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
 
 _prompt_repo_root() {
   command git rev-parse --show-toplevel 2>/dev/null
@@ -31,19 +43,57 @@ _prompt_local_ip() {
 }
 
 _prompt_repo_has_any() {
-  local repo_root="$1"
-  shift
+  local repo_root="${1:-$PWD}"
+  local pattern="$2"
+
+  [[ -n "$repo_root" && -d "$repo_root" ]] || return 1
+  [[ -n "$pattern" ]] || return 1
 
   if command -v rg >/dev/null 2>&1; then
-    rg --files "$repo_root" 2>/dev/null | rg -q "$1"
+    command rg --files "$repo_root" \
+      -g '!node_modules' \
+      -g '!vendor' \
+      -g '!.git' \
+      -g '!.terraform' \
+      -g '!dist' \
+      -g '!build' \
+      2>/dev/null | command rg -q -- "$pattern"
   else
-    find "$repo_root" -type f 2>/dev/null | grep -Eq "$1"
+    command find "$repo_root" \
+      -path '*/.git' -prune -o \
+      -path '*/node_modules' -prune -o \
+      -path '*/vendor' -prune -o \
+      -path '*/.terraform' -prune -o \
+      -type f -print 2>/dev/null | command grep -Eq "$pattern"
   fi
+}
+
+_prompt_current_path_has_tf() {
+  local tf_files=(*.tf(N) *.tfvars(N))
+  (( ${#tf_files[@]} > 0 ))
+}
+
+_prompt_current_path_has_docker() {
+  [[ -f Dockerfile || -f compose.yaml || -f compose.yml || -f docker-compose.yaml || -f docker-compose.yml ]]
+}
+
+_prompt_current_path_has_helm() {
+  [[ -f Chart.yaml || -f helmfile.yaml || -f helmfile.yml ]]
+}
+
+_prompt_clean_version() {
+  local value="$1"
+  value="${value#v}"
+  printf '%s' "$value"
 }
 
 _prompt_preexec() {
   _prompt_cmd_start=$EPOCHSECONDS
 }
+
+# ---------------------------------------------------------------------
+# Main Prompt
+# ---------------------------------------------------------------------
 
 _prompt_precmd() {
   local last_status=$?
@@ -52,8 +102,9 @@ _prompt_precmd() {
   local local_ip=""
   local repo_root=""
   local git_line=""
-  local conditionals_line=""
+  local context_line=""
   local languages_line=""
+  local tooling_line=""
   local duration_segment=""
   local status_segment=""
   local character_segment=""
@@ -63,17 +114,21 @@ _prompt_precmd() {
   repo_root="$(_prompt_repo_root)"
   local_ip="$(_prompt_local_ip)"
 
+  # -------------------------------------------------------------------
+  # Git status
+  # -------------------------------------------------------------------
+
   if [[ -n "${vcs_info_msg_0_}" ]]; then
     local git_dirty=""
     local modified_count=0
     local deleted_count=0
     local added_count=0
     local ahead_count=0
-    local line_stats=""
     local staged_shortstat=""
     local unstaged_shortstat=""
     local total_added=0
     local total_deleted=0
+    local line_stats=""
 
     if command git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       modified_count=$(
@@ -83,12 +138,14 @@ _prompt_precmd() {
           command git ls-files --others --exclude-standard 2>/dev/null | sed 's/^/A\t/'
         } | awk '$1 == "M" || $1 == "R" {count++} END {print count + 0}'
       )
+
       deleted_count=$(
         {
           command git diff --name-status 2>/dev/null
           command git diff --cached --name-status 2>/dev/null
         } | awk '$1 == "D" {count++} END {print count + 0}'
       )
+
       added_count=$(
         {
           command git diff --name-status 2>/dev/null
@@ -96,10 +153,12 @@ _prompt_precmd() {
           command git ls-files --others --exclude-standard 2>/dev/null | sed 's/^/A\t/'
         } | awk '$1 == "A" {count++} END {print count + 0}'
       )
+
       ahead_count="$(command git rev-list --count @{upstream}..HEAD 2>/dev/null || printf '0')"
 
       staged_shortstat="$(command git diff --cached --shortstat 2>/dev/null)"
       unstaged_shortstat="$(command git diff --shortstat 2>/dev/null)"
+
       total_added=$(
         printf '%s\n%s\n' "$staged_shortstat" "$unstaged_shortstat" \
           | awk -F',' '
@@ -109,15 +168,12 @@ _prompt_precmd() {
                     gsub(/[^0-9]/, "", $i)
                     add += $i
                   }
-                  if ($i ~ /deletion/) {
-                    gsub(/[^0-9]/, "", $i)
-                    del += $i
-                  }
                 }
               }
               END { print add + 0 }
             '
       )
+
       total_deleted=$(
         printf '%s\n%s\n' "$staged_shortstat" "$unstaged_shortstat" \
           | awk -F',' '
@@ -134,15 +190,20 @@ _prompt_precmd() {
       )
 
       [[ -n "$(command git status --porcelain 2>/dev/null)" ]] && git_dirty=" %F{yellow}• dirty%f"
-      line_stats=" %F{red}🗑 ${deleted_count}%f %F{yellow}📝 ${modified_count}%f %F{green}✨ ${added_count}%f"
-      (( ahead_count > 0 )) && line_stats+=" %F{blue}⬆ ${ahead_count}%f"
+
+      line_stats=" %F{red}deleted:${deleted_count}%f %F{yellow}modified:${modified_count}%f %F{green}added:${added_count}%f"
+      (( ahead_count > 0 )) && line_stats+=" %F{blue}ahead:${ahead_count}%f"
       (( total_added > 0 || total_deleted > 0 )) && line_stats+=" %F{green}+${total_added}%f %F{red}-${total_deleted}%f"
     fi
 
     git_line="${vcs_info_msg_0_}${git_dirty}${line_stats}"
   else
-    git_line="%F{8}clean%f"
+    git_line="%F{8}not a git repo%f"
   fi
+
+  # -------------------------------------------------------------------
+  # Command duration / status
+  # -------------------------------------------------------------------
 
   if (( _prompt_cmd_start > 0 )); then
     local elapsed=$(( now - _prompt_cmd_start ))
@@ -152,32 +213,53 @@ _prompt_precmd() {
   fi
 
   if (( last_status == 0 )); then
-    status_segment="%F{green}ok%f "
+    status_segment="%F{green}ok%f"
     character_segment="%F{green}➜%f"
   else
-    status_segment="%F{red}exit:${last_status}%f "
+    status_segment="%F{red}exit:${last_status}%f"
     character_segment="%F{red}✗%f"
   fi
 
-  if zmodload zsh/datetime 2>/dev/null; then
-    clock="$(strftime '%I:%M:%S %p' "$now")"
-  else
-    clock="$(date '+%I:%M:%S %p' 2>/dev/null)"
+  if (( $+EPOCHSECONDS )); then
+    clock="$(strftime '%I:%M:%S %p' "$now" 2>/dev/null)"
   fi
+
+  [[ -z "$clock" ]] && clock="$(date '+%I:%M:%S %p' 2>/dev/null)"
+
+  # -------------------------------------------------------------------
+  # Contexts
+  # -------------------------------------------------------------------
 
   if command -v kubectl >/dev/null 2>&1 && [[ -d "$HOME/.kube" || -n "${KUBECONFIG:-}" ]]; then
     kube_context="$(kubectl config current-context 2>/dev/null)"
-    [[ -n "$kube_context" ]] && conditionals_line+=" %F{cyan}☸ ${kube_context}%f"
+    [[ -n "$kube_context" ]] && context_line+=" %F{cyan}Kubernetes:${kube_context}%f"
   fi
-  [[ -f "Chart.yaml" || -f "helmfile.yaml" ]] && conditionals_line+=" %F{cyan}⎈ helm%f"
-  ([[ -d ".terraform" ]] || compgen -G "*.tf" >/dev/null) && conditionals_line+=" %F{magenta}🧱 terraform%f"
-  ([[ -f "Dockerfile" || -f "compose.yaml" || -f "compose.yml" || -f "docker-compose.yaml" || -f "docker-compose.yml" ]]) && conditionals_line+=" %F{cyan}🐳 docker%f"
-  [[ -f "package.json" ]] && conditionals_line+=" %F{8}📦 package%f"
-  [[ -z "$conditionals_line" ]] && conditionals_line=" %F{8}none%f"
+
+  _prompt_current_path_has_helm && context_line+=" %F{cyan}Helm%f"
+  ([[ -d ".terraform" ]] || _prompt_current_path_has_tf) && context_line+=" %F{magenta}Terraform%f"
+  _prompt_current_path_has_docker && context_line+=" %F{cyan}Docker%f"
+  [[ -f "package.json" ]] && context_line+=" %F{8}Package.json%f"
+
+  [[ -z "$context_line" ]] && context_line=" %F{8}none%f"
+
+  # -------------------------------------------------------------------
+  # Languages
+  # -------------------------------------------------------------------
+  # These are intentionally clear:
+  #   Node.js 18.19.1
+  #   Python 3.14.2 (.venv)
+  #   Bash 5.3.9
+  #   Go 1.22.2
+  #   Rust 1.80.0
+  #
+  # Tooling such as Terraform and Ansible is shown on the Tooling line.
 
   if [[ -n "$repo_root" ]] && command -v node >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/)(package\.json|\.nvmrc)$'; then
-    languages_line+=" %F{green}⬢ $(node --version 2>/dev/null)%f"
+    local node_version=""
+    node_version="$(_prompt_clean_version "$(node --version 2>/dev/null)")"
+    [[ -n "$node_version" ]] && languages_line+=" %F{green}Node.js ${node_version}%f"
   fi
+
   if [[ -n "$repo_root" ]] && command -v python3 >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/)(pyproject\.toml|requirements(\.[^/]*)?\.txt|requirements\.txt|\.python-version|.*\.py)$'; then
     local python_path=""
     local python_version=""
@@ -185,6 +267,7 @@ _prompt_precmd() {
 
     python_path="$(command -v python3 2>/dev/null)"
     python_version="$(python3 --version 2>/dev/null | awk '{print $2}')"
+
     if [[ -n "${VIRTUAL_ENV:-}" ]]; then
       venv_name="${VIRTUAL_ENV:t}"
     elif [[ -n "$python_path" && "$python_path" == */bin/python(|[0-9.]#) ]]; then
@@ -192,40 +275,86 @@ _prompt_precmd() {
       [[ "$venv_name" == "usr" || "$venv_name" == "opt" || "$venv_name" == "bin" ]] && venv_name=""
     fi
 
-    if [[ -n "$venv_name" ]]; then
-      languages_line+=" %F{yellow}🐍 ${venv_name}:${python_version}%f"
-    else
-      languages_line+=" %F{yellow}🐍 ${python_version}%f"
+    if [[ -n "$python_version" && -n "$venv_name" ]]; then
+      languages_line+=" %F{yellow}Python ${python_version} (${venv_name})%f"
+    elif [[ -n "$python_version" ]]; then
+      languages_line+=" %F{yellow}Python ${python_version}%f"
     fi
   fi
+
   if [[ -n "$repo_root" ]] && command -v bash >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/).*\.(sh|bash)$'; then
-    languages_line+=" %F{cyan}⌘ $(bash --version 2>/dev/null | awk 'NR==1 {print $4}')%f"
+    local bash_version=""
+    bash_version="$(bash --version 2>/dev/null | awk 'NR==1 {print $4}')"
+    [[ -n "$bash_version" ]] && languages_line+=" %F{cyan}Bash ${bash_version}%f"
   fi
+
   if [[ -n "$repo_root" ]] && command -v go >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/)(go\.mod|go\.work|.*\.go)$'; then
-    languages_line+=" %F{green}◉ $(go version 2>/dev/null | awk '{print $3}' | sed 's/^go//')%f"
+    local go_version=""
+    go_version="$(go version 2>/dev/null | awk '{print $3}' | sed 's/^go//')"
+    [[ -n "$go_version" ]] && languages_line+=" %F{green}Go ${go_version}%f"
   fi
+
   if [[ -n "$repo_root" ]] && command -v rustc >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/)(Cargo\.toml|.*\.rs)$'; then
-    languages_line+=" %F{red}🦀 $(rustc --version 2>/dev/null | awk '{print $2}')%f"
+    local rust_version=""
+    rust_version="$(rustc --version 2>/dev/null | awk '{print $2}')"
+    [[ -n "$rust_version" ]] && languages_line+=" %F{red}Rust ${rust_version}%f"
   fi
+
+  if [[ -n "$repo_root" ]] && _prompt_repo_has_any "$repo_root" '(^|/).*\.(j2|jinja|jinja2)$'; then
+    languages_line+=" %F{cyan}Jinja templates%f"
+  fi
+
+  [[ -z "$languages_line" ]] && languages_line=" %F{8}none detected%f"
+
+  # -------------------------------------------------------------------
+  # Tooling
+  # -------------------------------------------------------------------
+
   if [[ -n "$repo_root" ]] && command -v terraform >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/).*\.tf(vars)?$'; then
-    languages_line+=" %F{magenta}⬡ $(terraform version 2>/dev/null | sed -n '1s/^Terraform v//p')%f"
+    local terraform_version=""
+    terraform_version="$(terraform version 2>/dev/null | sed -n '1s/^Terraform v//p')"
+    [[ -n "$terraform_version" ]] && tooling_line+=" %F{magenta}Terraform ${terraform_version}%f"
   fi
+
+  if [[ -n "$repo_root" ]] && command -v tofu >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/).*\.tf(vars)?$'; then
+    local tofu_version=""
+    tofu_version="$(tofu version 2>/dev/null | sed -n '1s/^OpenTofu v//p')"
+    [[ -n "$tofu_version" ]] && tooling_line+=" %F{magenta}OpenTofu ${tofu_version}%f"
+  fi
+
   if [[ -n "$repo_root" ]] && command -v ansible >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/)(Ansible/|.*ansible.*\.ya?ml$|requirements\.ya?ml$)'; then
-    languages_line+=" %F{blue}⚙ $(ansible --version 2>/dev/null | sed -n '1s/.*core \\([^]]*\\)].*/\\1/p')%f"
+    local ansible_version=""
+    ansible_version="$(ansible --version 2>/dev/null | sed -n '1s/.*core \([^]]*\)].*/\1/p')"
+    [[ -n "$ansible_version" ]] && tooling_line+=" %F{blue}Ansible core ${ansible_version}%f"
   fi
-  if _prompt_repo_has_any "${repo_root:-$PWD}" '(^|/).*\.(j2|jinja|jinja2)$'; then
-    languages_line+=" %F{cyan}◌%f"
+
+  if [[ -n "$repo_root" ]] && command -v helm >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/)(Chart\.yaml|helmfile\.ya?ml)$'; then
+    local helm_version=""
+    helm_version="$(helm version --short 2>/dev/null | sed 's/^v//' | cut -d+ -f1)"
+    [[ -n "$helm_version" ]] && tooling_line+=" %F{cyan}Helm ${helm_version}%f"
   fi
-  [[ -z "$languages_line" ]] && languages_line=" %F{8}none%f"
+
+  if [[ -n "$repo_root" ]] && command -v kubectl >/dev/null 2>&1 && _prompt_repo_has_any "$repo_root" '(^|/)(Kubernetes/|kustomization\.ya?ml|.*\.k8s\.ya?ml)$'; then
+    local kubectl_version=""
+    kubectl_version="$(kubectl version --client=true --output=yaml 2>/dev/null | awk -F': ' '/gitVersion:/ {print $2; exit}' | sed 's/^v//')"
+    [[ -n "$kubectl_version" ]] && tooling_line+=" %F{cyan}kubectl ${kubectl_version}%f"
+  fi
+
+  [[ -z "$tooling_line" ]] && tooling_line=" %F{8}none detected%f"
+
+  # -------------------------------------------------------------------
+  # Render
+  # -------------------------------------------------------------------
 
   PROMPT=$'%F{cyan}╔══════════════════════════%f %F{cyan}%n%f%F{green} | %f%F{blue}%m%f'
   [[ -n "$local_ip" ]] && PROMPT+=$' %F{green}|%f %F{cyan}'"${local_ip}"$'%f'
   PROMPT+=$' %F{8}'"${clock}"$'%f %F{cyan}═════════════════════════════╗%f\n'
-  PROMPT+=$'%F{cyan}║%f %F{green} Git%f '"${git_line}"$'\n'
-  PROMPT+=$'%F{cyan}║%f %F{green} Conditionals%f'"${conditionals_line}"$'\n'
-  PROMPT+=$'%F{cyan}║%f %F{green} Languages%f'"${languages_line}"$'\n'
-  PROMPT+=$'%F{cyan}║%f %F{green} Dir%f %B%~%b\n'
-  PROMPT+=$'%F{cyan}╚══>%f '"${duration_segment} ${status_segment} ${character_segment} "
+  PROMPT+=$'%F{cyan}║%f %F{green}Git%f       '"${git_line}"$'\n'
+  PROMPT+=$'%F{cyan}║%f %F{green}Context%f  '"${context_line}"$'\n'
+  PROMPT+=$'%F{cyan}║%f %F{green}Languages%f'"${languages_line}"$'\n'
+  PROMPT+=$'%F{cyan}║%f %F{green}Tooling%f  '"${tooling_line}"$'\n'
+  PROMPT+=$'%F{cyan}║%f %F{green}Dir%f       %B%~%b\n'
+  PROMPT+=$'%F{cyan}╚══>%f '"${duration_segment}${status_segment} ${character_segment} "
 }
 
 add-zsh-hook preexec _prompt_preexec

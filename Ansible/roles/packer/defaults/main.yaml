@@ -1,0 +1,50 @@
+---
+# Ansible/roles/packer/defaults/main.yaml
+#
+# Defaults for Ansible role `packer`.
+#
+# These values are intentionally safe defaults. Override them in:
+#   Ansible/group_vars/packer/main.yaml
+
+# Root Packer output directory.
+# Generated Packer projects should live at the repository root:
+#   Packer/<distro>/
+packer_root_dir: "{{ playbook_dir }}/../../Packer"
+
+# Generated Packer var-files.
+# These are Ansible-generated inputs used during packer validate/build.
+packer_generated_vars_dir: "{{ playbook_dir }}/../generated/packer"
+
+# Base VM ID for generated templates.
+# Template VM IDs are assigned deterministically from this base:
+#   9000, 9001, 9002, ...
+packer_vm_id_base: 9000
+
+# Nodes to deploy templates to.
+# Override in Ansible/group_vars/packer/main.yaml.
+packer_target_nodes: []
+
+# Distro list.
+# Override in Ansible/group_vars/packer/main.yaml.
+packer_distros: []
+
+# Template name pattern.
+# Keep this as literal braces, not Jinja braces.
+# Correct:
+#   {distro}-template-{node}
+#
+# Wrong:
+#   {{distro}}-template-{{node}}
+#
+# The role currently builds vm_name directly from distro/node to avoid nested
+# Jinja rendering problems, but this variable is kept for compatibility.
+packer_template_name_pattern: "{distro}-template-{node}"
+
+# Shared installer defaults.
+packer_preseed_disk: "/dev/vda"
+packer_preseed_bootdev: "/dev/vda"
+packer_preseed_domain: "local.sinlessgamesllc.com"
+
+# Temporary default for template automation.
+# Override with Ansible Vault or a protected var in real use.
+packer_preseed_root_password: "packer"

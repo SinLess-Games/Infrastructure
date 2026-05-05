@@ -1,0 +1,31 @@
+# Kubernetes/apps/prod/cattle-system/namespace/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cattle-system
+  labels:
+    kubernetes.io/metadata.name: cattle-system
+
+    app.kubernetes.io/name: cattle-system
+    app.kubernetes.io/component: rancher
+    app.kubernetes.io/part-of: platform-management
+    app.kubernetes.io/managed-by: argocd
+
+    topology.kubernetes.io/environment: prod
+    security.sinlessgames.io/zone: platform-management
+
+    # Rancher/cattle-system should not receive Istio sidecars.
+    istio-injection: disabled
+
+    # Allow hardened Prometheus selectors to discover monitors/rules here.
+    monitoring.sinlessgames.io/scrape: "true"
+    monitoring.sinlessgames.io/rules: "true"
+
+    # cattle-system may run Rancher/system-management components that can break
+    # under enforce=restricted. Enforce baseline, but audit/warn restricted.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

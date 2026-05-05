@@ -1,13 +1,244 @@
 ---
 # =============================================================================
-# Fix SSH Output Ownership (Repo Local)
+# SSH Role - Fix Controller Output Permissions
+# -----------------------------------------------------------------------------
+# Purpose:
+#   Ensures repo-local SSH output material remains owned by the local controller
+#   user after tasks that may have run with become/root.
+#
+# Scope:
+#   - Runs on localhost only.
+#   - Does not run on managed hosts.
+#   - Repairs ownership and permissions under .outputs SSH paths.
+#
+# Managed paths:
+#   - ssh_output_root
+#   - ssh_output_base
+#   - ssh_ca_output_dir
+#
+# Notes:
+#   - Private key files stay mode 0600.
+#   - Public keys and certificates stay mode 0644.
+#   - Output directories stay mode 0700 by default.
 # =============================================================================
 
-- name: Fix ownership of SSH outputs for repo user
+# -----------------------------------------------------------------------------
+# Normalize controller ownership
+# -----------------------------------------------------------------------------
+
+- name: SSH | Permissions | Resolve controller user and group
+  ansible.builtin.set_fact:
+    ssh_permissions_owner_effective: >-
+      {{
+        ssh_outputs_owner
+        | default(
+            ssh_controller_local_user
+            | default(lookup('ansible.builtin.pipe', 'id -un') | trim)
+          )
+      }}
+    ssh_permissions_group_effective: >-
+      {{
+        ssh_outputs_group
+        | default(
+            ssh_controller_local_group
+            | default(lookup('ansible.builtin.pipe', 'id -gn') | trim)
+          )
+      }}
+    ssh_permissions_output_root_effective: "{{ ssh_output_root | default(ssh_repo_root ~ '/.outputs') }}"
+    ssh_permissions_output_dirs_effective:
+      - "{{ ssh_output_root | default(ssh_repo_root ~ '/.outputs') }}"
+      - "{{ ssh_output_base | default((ssh_output_root | default(ssh_repo_root ~
+        '/.outputs')) ~ '/ssh') }}"
+      - "{{ ssh_ca_output_dir | default((ssh_output_root | default(ssh_repo_root
+        ~ '/.outputs')) ~ '/ssh_ca') }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-permissions
+
+# -----------------------------------------------------------------------------
+# Safety checks
+# -----------------------------------------------------------------------------
+
+- name: SSH | Permissions | Assert output root is safe
+  ansible.builtin.assert:
+    that:
+      - ssh_permissions_output_root_effective is defined
+      - ssh_permissions_output_root_effective is string
+      - ssh_permissions_output_root_effective | length > 1
+      - ssh_permissions_output_root_effective is match('^/')
+      - ssh_permissions_output_root_effective not in ['/', '/etc', '/usr',
+        '/var', '/tmp', '/root', '/home']
+    fail_msg: >-
+      Refusing to fix permissions because ssh_output_root is unsafe: {{
+      ssh_permissions_output_root_effective }}
+    success_msg: "SSH output root path is safe."
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-permissions
+
+- name: SSH | Permissions | Check SSH output paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: "{{ ssh_permissions_output_dirs_effective | unique }}"
+  loop_control:
+    label: "{{ item }}"
+  register: ssh_permissions_output_path_stats
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-permissions
+
+# -----------------------------------------------------------------------------
+# Directory ownership / permissions
+# -----------------------------------------------------------------------------
+
+- name: SSH | Permissions | Ensure SSH output directories exist
   ansible.builtin.file:
-    path: "{{ ssh_output_root }}"
-    owner: "{{ lookup('env', 'USER') }}"
-    group: "{{ lookup('env', 'USER') }}"
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ssh_permissions_owner_effective }}"
+    group: "{{ ssh_permissions_group_effective }}"
+    mode: "{{ ssh_outputs_dir_mode | default('0700') }}"
+  loop: "{{ ssh_permissions_output_dirs_effective | unique }}"
+  loop_control:
+    label: "{{ item }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-permissions
+
+- name: SSH | Permissions | Fix ownership recursively for SSH output root
+  ansible.builtin.file:
+    path: "{{ ssh_permissions_output_root_effective }}"
+    owner: "{{ ssh_permissions_owner_effective }}"
+    group: "{{ ssh_permissions_group_effective }}"
     recurse: true
   delegate_to: localhost
   run_once: true
+  become: false
+  when: ssh_outputs_persist | default(true) | bool
+  tags:
+    - ssh
+    - ssh-permissions
+
+# -----------------------------------------------------------------------------
+# File mode repair
+# -----------------------------------------------------------------------------
+
+- name: SSH | Permissions | Find SSH output files
+  ansible.builtin.find:
+    paths: "{{ ssh_permissions_output_dirs_effective | unique }}"
+    file_type: file
+    recurse: true
+    hidden: true
+  register: ssh_permissions_output_files
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-permissions
+
+- name: SSH | Permissions | Fix private key permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ ssh_permissions_owner_effective }}"
+    group: "{{ ssh_permissions_group_effective }}"
+    mode: "{{ ssh_key_mode_private | default('0600') }}"
+  loop: >-
+    {{
+      ssh_permissions_output_files.files
+      | default([])
+      | rejectattr('path', 'search', '\\.pub$')
+      | rejectattr('path', 'search', '-cert\\.pub$')
+      | rejectattr('path', 'search', '/serial$')
+      | list
+    }}
+  loop_control:
+    label: "{{ item.path }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  no_log: "{{ ssh_role_no_log | default(false) }}"
+  tags:
+    - ssh
+    - ssh-permissions
+
+- name: SSH | Permissions | Fix public key and certificate permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ ssh_permissions_owner_effective }}"
+    group: "{{ ssh_permissions_group_effective }}"
+    mode: "{{ ssh_key_mode_public | default('0644') }}"
+  loop: >-
+    {{
+      ssh_permissions_output_files.files
+      | default([])
+      | selectattr('path', 'search', '(\\.pub|-cert\\.pub)$')
+      | list
+    }}
+  loop_control:
+    label: "{{ item.path }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-permissions
+
+- name: SSH | Permissions | Fix SSH CA serial file permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ ssh_permissions_owner_effective }}"
+    group: "{{ ssh_permissions_group_effective }}"
+    mode: "0600"
+  loop: >-
+    {{
+      ssh_permissions_output_files.files
+      | default([])
+      | selectattr('path', 'search', '/serial$')
+      | list
+    }}
+  loop_control:
+    label: "{{ item.path }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-permissions
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+
+- name: SSH | Permissions | Show permission repair summary
+  ansible.builtin.debug:
+    msg:
+      - "SSH output permissions repaired."
+      - "Owner: {{ ssh_permissions_owner_effective }}"
+      - "Group: {{ ssh_permissions_group_effective }}"
+      - "Output root: {{ ssh_permissions_output_root_effective }}"
+      - "Directories checked: {{ ssh_permissions_output_dirs_effective | unique
+        | length }}"
+      - "Files checked: {{ ssh_permissions_output_files.files | default([]) |
+        length }}"
+  when: ssh_role_show_summary | default(true)
+  delegate_to: localhost
+  run_once: true
+  become: false
+  tags:
+    - ssh
+    - ssh-permissions
+    - ssh-summary

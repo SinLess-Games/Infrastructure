@@ -1,117 +1,304 @@
 {
   // JSON schema for editor validation and autocomplete.
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-
   // Start from Renovate's safe defaults, then layer in repo-specific behavior.
   extends: [
     "config:recommended",
+    ":dependencyDashboard",
     ":rebaseStalePrs",
     ":semanticCommits",
     ":semanticCommitTypeAll(chore)",
+    ":semanticCommitScope(deps)",
   ],
-
-  // Keep the dashboard explicitly enabled.
-  dependencyDashboard: true,
-
-  // Keep Renovate timestamps aligned with the repo owner's local timezone.
+  // ---------------------------------------------------------------------------
+  // Repository behavior
+  // ---------------------------------------------------------------------------
   timezone: "America/Boise",
-
-  // Standard labels make dependency PRs easy to filter and triage.
-  labels: ["dependencies", "renovate"],
-
-  // This repo is primarily infrastructure code, so we explicitly enable the
-  // managers that match the files we keep under version control.
+  dependencyDashboard: true,
+  dependencyDashboardTitle: "Renovate Dependency Dashboard",
+  labels: [
+    "dependencies",
+    "renovate",
+  ],
+  commitMessageLowerCase: "never",
+  commitMessageAction: "update",
+  commitMessageTopic: "{{depName}}",
+  commitMessageExtra: "to {{newVersion}}",
+  rebaseWhen: "behind-base-branch",
+  rangeStrategy: "bump",
+  prConcurrentLimit: 8,
+  prHourlyLimit: 2,
+  branchConcurrentLimit: 12,
+  dependencyDashboardApproval: false,
+  configMigration: true,
+  // ---------------------------------------------------------------------------
+  // Managers
+  // ---------------------------------------------------------------------------
   enabledManagers: [
+    "ansible",
     "ansible-galaxy",
+    "docker-compose",
+    "dockerfile",
     "flux",
     "github-actions",
     "helm-values",
+    "homebrew",
     "kubernetes",
     "kustomize",
+    "pip_requirements",
+    "renovate-config",
     "terraform",
   ],
-
-  // The repo keeps Ansible Galaxy dependencies in a single canonical file.
+  ansible: {
+    managerFilePatterns: [
+      "/(^|/)Ansible/roles/.+/tasks/.+\\.ya?ml$/",
+      "/(^|/)Ansible/roles/.+/handlers/.+\\.ya?ml$/",
+      "/(^|/)Ansible/playbooks/.+\\.ya?ml$/",
+    ],
+  },
   "ansible-galaxy": {
-    managerFilePatterns: ["(^|/)Ansible/requirements\\.ya?ml$"],
+    managerFilePatterns: [
+      "/(^|/)Ansible/requirements\\.ya?ml$/",
+    ],
   },
-
-  // Flux, Kustomize, Helm values, and plain Kubernetes manifests all live
-  // under the Kubernetes/ tree.
+  pip_requirements: {
+    managerFilePatterns: [
+      "/(^|/)Ansible/requirements\\.txt$/",
+      "/(^|/)Docs/requirements\\.txt$/",
+    ],
+  },
+  dockerfile: {
+    managerFilePatterns: [
+      "/(^|/)Docs/Dockerfile$/",
+      "/(^|/)Kubernetes/.+/Dockerfile$/",
+      "/(^|/)Packer/.+/Dockerfile$/",
+    ],
+  },
+  "docker-compose": {
+    managerFilePatterns: [
+      "/(^|/)PXE/docker-compose\\.ya?ml$/",
+      "/(^|/).+/docker-compose\\.ya?ml$/",
+      "/(^|/).+/compose\\.ya?ml$/",
+    ],
+  },
   flux: {
-    managerFilePatterns: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+    managerFilePatterns: [
+      "/(^|/)Kubernetes/.+\\.ya?ml$/",
+    ],
   },
-
   "helm-values": {
-    managerFilePatterns: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+    managerFilePatterns: [
+      "/(^|/)Kubernetes/.+/values\\.ya?ml$/",
+      "/(^|/)Kubernetes/.+\\.values\\.ya?ml$/",
+    ],
   },
-
+  homebrew: {
+    managerFilePatterns: [
+      "/(^|/)scripts/configs/Brewfile$/",
+    ],
+  },
   kubernetes: {
-    managerFilePatterns: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+    managerFilePatterns: [
+      "/(^|/)Kubernetes/.+\\.ya?ml$/",
+    ],
   },
-
   kustomize: {
-    managerFilePatterns: ["(^|/)Kubernetes/.+\\.ya?ml$"],
+    managerFilePatterns: [
+      "/(^|/)Kubernetes/.+/kustomization\\.ya?ml$/",
+    ],
   },
-
-  // Only scan Terraform configuration checked into the repo.
   terraform: {
-    managerFilePatterns: ["(^|/)Terraform/.+\\.tf$"],
+    managerFilePatterns: [
+      "/(^|/)Terraform/.+\\.(tf|tofu)$/",
+    ],
   },
-
-  // Ignore generated, vendored, and secret-bearing paths so Renovate focuses
-  // on source files that we actually review and maintain.
+  // ---------------------------------------------------------------------------
+  // Ignore generated, vendored, runtime, and secret-bearing paths
+  // ---------------------------------------------------------------------------
   ignorePaths: [
     "**/.ansible/**",
     "**/.collections/**",
     "**/.terraform/**",
     "**/.venv/**",
+    "**/node_modules/**",
     "**/build.log",
     "**/*.auto.tfvars",
-    "**/*.pkvars.hcl",
+    "**/*.auto.tfvars.json",
+    "**/*.pkrvars.hcl",
     "**/*.tfstate",
     "**/*.tfstate.*",
     "**/terraform.tfstate",
     "**/terraform.tfstate.*",
+    ".outputs/**",
     ".secrets/**",
+    "Packer/.iso-cache/**",
+    "site/**",
   ],
-
-  // Keep lock file maintenance on so Terraform lock files can be refreshed.
+  // Keep Terraform provider lock files maintained.
   lockFileMaintenance: {
     enabled: true,
+    schedule: [
+      "before 6am on monday",
+    ],
+    commitMessageTopic: "lock files",
   },
-
+  // ---------------------------------------------------------------------------
+  // Package rules
+  // ---------------------------------------------------------------------------
   packageRules: [
     {
-      // Ansible collection and role bumps are easiest to validate together.
-      matchManagers: ["ansible-galaxy"],
+      description: "Group Ansible Galaxy collections and roles",
+      matchManagers: [
+        "ansible-galaxy",
+      ],
       groupName: "ansible galaxy dependencies",
       commitMessageTopic: "Ansible Galaxy dependencies",
+      addLabels: [
+        "ansible",
+      ],
     },
     {
-      // Group Flux and Kubernetes repo changes so GitOps updates arrive in a
-      // smaller number of reviewable PRs.
-      matchManagers: ["flux", "helm-values", "kubernetes", "kustomize"],
-      matchFileNames: ["Kubernetes/**"],
-      groupName: "flux kubernetes manifests",
-      commitMessageTopic: "Flux Kubernetes manifests",
+      description: "Group Python tooling dependencies",
+      matchManagers: [
+        "pip_requirements",
+      ],
+      matchFileNames: [
+        "Ansible/requirements.txt",
+        "Docs/requirements.txt",
+      ],
+      groupName: "python tooling dependencies",
+      commitMessageTopic: "Python tooling dependencies",
+      addLabels: [
+        "python",
+      ],
     },
     {
-      // Provider bumps can interact, so grouping them reduces noisy PR churn.
-      matchManagers: ["terraform"],
-      groupName: "terraform providers",
-      commitMessageTopic: "Terraform providers",
+      description: "Group MkDocs documentation dependencies",
+      matchManagers: [
+        "pip_requirements",
+      ],
+      matchFileNames: [
+        "Docs/requirements.txt",
+      ],
+      matchPackageNames: [
+        "mkdocs",
+        "mkdocs-material",
+        "mkdocs-mermaid2-plugin",
+        "pymdown-extensions",
+      ],
+      groupName: "mkdocs documentation dependencies",
+      commitMessageTopic: "MkDocs documentation dependencies",
+      addLabels: [
+        "docs",
+      ],
     },
     {
-      // GitHub Actions updates are grouped for simpler workflow maintenance.
-      matchManagers: ["github-actions"],
+      description: "Group Kubernetes and GitOps manifest updates",
+      matchManagers: [
+        "flux",
+        "helm-values",
+        "kubernetes",
+        "kustomize",
+      ],
+      matchFileNames: [
+        "Kubernetes/**",
+      ],
+      groupName: "kubernetes gitops manifests",
+      commitMessageTopic: "Kubernetes GitOps manifests",
+      addLabels: [
+        "kubernetes",
+        "gitops",
+      ],
+    },
+    {
+      description: "Group Docker image updates",
+      matchManagers: [
+        "ansible",
+        "docker-compose",
+        "dockerfile",
+      ],
+      groupName: "docker images",
+      commitMessageTopic: "Docker images",
+      addLabels: [
+        "docker",
+      ],
+    },
+    {
+      description: "Group Terraform provider and module updates",
+      matchManagers: [
+        "terraform",
+      ],
+      groupName: "terraform dependencies",
+      commitMessageTopic: "Terraform dependencies",
+      addLabels: [
+        "terraform",
+      ],
+    },
+    {
+      description: "Group GitHub Actions updates",
+      matchManagers: [
+        "github-actions",
+      ],
       groupName: "github actions",
       commitMessageTopic: "GitHub Actions",
+      addLabels: [
+        "github-actions",
+      ],
     },
     {
-      // Surface breaking changes clearly so they stand out during review.
-      matchUpdateTypes: ["major"],
-      labels: ["dependencies", "major-update", "renovate"],
+      description: "Group Homebrew Brewfile updates",
+      matchManagers: [
+        "homebrew",
+      ],
+      groupName: "homebrew dependencies",
+      commitMessageTopic: "Homebrew dependencies",
+      addLabels: [
+        "homebrew",
+      ],
+    },
+    {
+      description: "Keep GitHub Actions digest pinning separate when present",
+      matchManagers: [
+        "github-actions",
+      ],
+      matchUpdateTypes: [
+        "digest",
+      ],
+      groupName: "github actions digests",
+      commitMessageTopic: "GitHub Actions digests",
+    },
+    {
+      description: "Keep container digest updates grouped",
+      matchManagers: [
+        "docker-compose",
+        "dockerfile",
+        "helm-values",
+        "kubernetes",
+      ],
+      matchUpdateTypes: [
+        "digest",
+      ],
+      groupName: "container image digests",
+      commitMessageTopic: "container image digests",
+    },
+    {
+      description: "Mark major updates clearly and require dashboard approval",
+      matchUpdateTypes: [
+        "major",
+      ],
+      dependencyDashboardApproval: true,
+      addLabels: [
+        "major-update",
+      ],
+    },
+    {
+      description: "Label patch updates without overriding specific groups",
+      matchUpdateTypes: [
+        "patch",
+      ],
+      addLabels: [
+        "patch-update",
+      ],
     },
   ],
 }

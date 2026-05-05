@@ -1,99 +1,133 @@
-# -------------------------------------------------------------------
-# SSH client config (Ansible managed)
-# -------------------------------------------------------------------
-# DO NOT EDIT BY HAND
-# Rendered from: {{ ansible_template_src | default('templates/ssh/config.j2') }}
-# -------------------------------------------------------------------
+# =============================================================================
+# Managed by Ansible - ssh role
+# -----------------------------------------------------------------------------
+# File:
+#   ~/.ssh/config
+#
+# Purpose:
+#   Per-user OpenSSH client configuration for managed infrastructure users.
+#
+# Notes:
+#   - Do not edit manually; changes will be overwritten by Ansible.
+#   - CA-backed host trust should be handled by known_hosts @cert-authority.
+#   - User authentication should prefer SSH certificates and public keys.
+# =============================================================================
 
-# -------------------------------------------------------------------
+{% set ssh_client = ssh_client | default({}) %}
+{% set ssh_client_global = ssh_client.global | default({}) %}
+{% set ssh_client_hosts = ssh_client.hosts | default([]) %}
+
+# -----------------------------------------------------------------------------
 # Global defaults
-# -------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 Host *
-  {% if ssh_client.global.strict_host_key_checking is defined %}
-  StrictHostKeyChecking {{ ssh_client.global.strict_host_key_checking }}
-  {% else %}
-  StrictHostKeyChecking accept-new
-  {% endif %}
+{% if ssh_client_global.identity_file is defined and ssh_client_global.identity_file | length > 0 %}
+  IdentityFile {{ ssh_client_global.identity_file }}
+{% endif %}
+{% if ssh_client_global.certificate_file is defined and ssh_client_global.certificate_file | length > 0 %}
+  CertificateFile {{ ssh_client_global.certificate_file }}
+{% endif %}
+{% if ssh_client_global.user_known_hosts_file is defined and ssh_client_global.user_known_hosts_file | length > 0 %}
+  UserKnownHostsFile {{ ssh_client_global.user_known_hosts_file }}
+{% endif %}
+  IdentitiesOnly {{ 'yes' if ssh_client_global.identities_only | default(true) else 'no' }}
+  PubkeyAuthentication {{ 'yes' if ssh_client_global.pubkey_authentication | default(true) else 'no' }}
+  PasswordAuthentication {{ 'yes' if ssh_client_global.password_authentication | default(false) else 'no' }}
+  KbdInteractiveAuthentication {{ 'yes' if ssh_client_global.kbd_interactive_authentication | default(false) else 'no' }}
+  StrictHostKeyChecking {{ ssh_client_global.strict_host_key_checking | default('accept-new') }}
+  ServerAliveInterval {{ ssh_client_global.server_alive_interval | default(30) }}
+  ServerAliveCountMax {{ ssh_client_global.server_alive_count_max | default(3) }}
+  ConnectTimeout {{ ssh_client_global.connect_timeout | default(10) }}
+  ForwardAgent {{ ssh_client_global.forward_agent | default('no') }}
+  ForwardX11 {{ ssh_client_global.forward_x11 | default('no') }}
 
-  {% if ssh_client.global.forward_agent is defined %}
-  ForwardAgent {{ ssh_client.global.forward_agent }}
-  {% else %}
-  ForwardAgent no
-  {% endif %}
+{% if ssh_client_global.compression is defined %}
+  Compression {{ ssh_client_global.compression }}
+{% endif %}
+{% if ssh_client_global.log_level is defined %}
+  LogLevel {{ ssh_client_global.log_level }}
+{% endif %}
+{% if ssh_client_global.preferred_authentications is defined %}
+  PreferredAuthentications {{ ssh_client_global.preferred_authentications }}
+{% else %}
+  PreferredAuthentications publickey
+{% endif %}
 
-  {% if ssh_client.global.forward_x11 is defined %}
-  ForwardX11 {{ ssh_client.global.forward_x11 }}
-  {% endif %}
+# -----------------------------------------------------------------------------
+# Managed host entries
+# -----------------------------------------------------------------------------
 
-  {% if ssh_client.global.server_alive_interval is defined %}
-  ServerAliveInterval {{ ssh_client.global.server_alive_interval }}
-  {% endif %}
+{% if ssh_client_hosts | length > 0 %}
+{% for host in ssh_client_hosts %}
 
-  {% if ssh_client.global.server_alive_count_max is defined %}
-  ServerAliveCountMax {{ ssh_client.global.server_alive_count_max }}
-  {% endif %}
-
-  {% if ssh_client.global.use_keychain is defined %}
-  UseKeychain {{ ssh_client.global.use_keychain }}
-  {% endif %}
-
-  {% if ssh_client.global.identity_file is defined %}
-  IdentityFile {{ ssh_client.global.identity_file }}
-  {% endif %}
-
-  {% if ssh_client.global.certificate_file is defined %}
-  CertificateFile {{ ssh_client.global.certificate_file }}
-  {% endif %}
-
-  IdentitiesOnly {{ 'yes' if ssh_client.global.identities_only | default(true) else 'no' }}
-
-# -------------------------------------------------------------------
-# Per-host overrides
-# -------------------------------------------------------------------
-{% for host_cfg in ssh_client.hosts | default([]) %}
-Host {{ host_cfg.pattern | default('*') }}
-  {% if host_cfg.user is defined %}
-  User {{ host_cfg.user }}
-  {% endif %}
-
-  {% if host_cfg.hostname is defined %}
-  HostName {{ host_cfg.hostname }}
-  {% endif %}
-
-  {% if host_cfg.port is defined %}
-  Port {{ host_cfg.port }}
-  {% endif %}
-
-  {% if host_cfg.identity_file is defined %}
-  IdentityFile {{ host_cfg.identity_file }}
-  {% endif %}
-
-  {% if host_cfg.certificate_file is defined %}
-  CertificateFile {{ host_cfg.certificate_file }}
-  {% endif %}
-
-  {% if host_cfg.identities_only is defined %}
-  IdentitiesOnly {{ 'yes' if host_cfg.identities_only else 'no' }}
-  {% endif %}
-
-  {% if host_cfg.strict_host_key_checking is defined %}
-  StrictHostKeyChecking {{ host_cfg.strict_host_key_checking }}
-  {% endif %}
-
-  {% if host_cfg.forward_agent is defined %}
-  ForwardAgent {{ host_cfg.forward_agent }}
-  {% endif %}
-
-  {% if host_cfg.forward_x11 is defined %}
-  ForwardX11 {{ host_cfg.forward_x11 }}
-  {% endif %}
-
-  {% if host_cfg.server_alive_interval is defined %}
-  ServerAliveInterval {{ host_cfg.server_alive_interval }}
-  {% endif %}
-
-  {% if host_cfg.server_alive_count_max is defined %}
-  ServerAliveCountMax {{ host_cfg.server_alive_count_max }}
-  {% endif %}
+Host {{ host.pattern }}
+{% if host.host_name is defined and host.host_name | length > 0 %}
+  HostName {{ host.host_name }}
+{% endif %}
+{% if host.user is defined and host.user | length > 0 %}
+  User {{ host.user }}
+{% endif %}
+{% if host.port is defined %}
+  Port {{ host.port }}
+{% endif %}
+{% if host.identity_file is defined and host.identity_file | length > 0 %}
+  IdentityFile {{ host.identity_file }}
+{% elif ssh_client_global.identity_file is defined and ssh_client_global.identity_file | length > 0 %}
+  IdentityFile {{ ssh_client_global.identity_file }}
+{% endif %}
+{% if host.certificate_file is defined and host.certificate_file | length > 0 %}
+  CertificateFile {{ host.certificate_file }}
+{% elif ssh_client_global.certificate_file is defined and ssh_client_global.certificate_file | length > 0 %}
+  CertificateFile {{ ssh_client_global.certificate_file }}
+{% endif %}
+{% if host.user_known_hosts_file is defined and host.user_known_hosts_file | length > 0 %}
+  UserKnownHostsFile {{ host.user_known_hosts_file }}
+{% elif ssh_client_global.user_known_hosts_file is defined and ssh_client_global.user_known_hosts_file | length > 0 %}
+  UserKnownHostsFile {{ ssh_client_global.user_known_hosts_file }}
+{% endif %}
+  IdentitiesOnly {{ 'yes' if host.identities_only | default(ssh_client_global.identities_only | default(true)) else 'no' }}
+  PubkeyAuthentication {{ 'yes' if host.pubkey_authentication | default(ssh_client_global.pubkey_authentication | default(true)) else 'no' }}
+  PasswordAuthentication {{ 'yes' if host.password_authentication | default(ssh_client_global.password_authentication | default(false)) else 'no' }}
+  KbdInteractiveAuthentication {{ 'yes' if host.kbd_interactive_authentication | default(ssh_client_global.kbd_interactive_authentication | default(false)) else 'no' }}
+  StrictHostKeyChecking {{ host.strict_host_key_checking | default(ssh_client_global.strict_host_key_checking | default('accept-new')) }}
+  ServerAliveInterval {{ host.server_alive_interval | default(ssh_client_global.server_alive_interval | default(30)) }}
+  ServerAliveCountMax {{ host.server_alive_count_max | default(ssh_client_global.server_alive_count_max | default(3)) }}
+  ConnectTimeout {{ host.connect_timeout | default(ssh_client_global.connect_timeout | default(10)) }}
+  ForwardAgent {{ host.forward_agent | default(ssh_client_global.forward_agent | default('no')) }}
+  ForwardX11 {{ host.forward_x11 | default(ssh_client_global.forward_x11 | default('no')) }}
+{% if host.proxy_jump is defined and host.proxy_jump | length > 0 %}
+  ProxyJump {{ host.proxy_jump }}
+{% endif %}
+{% if host.proxy_command is defined and host.proxy_command | length > 0 %}
+  ProxyCommand {{ host.proxy_command }}
+{% endif %}
+{% if host.local_forward is defined and host.local_forward | length > 0 %}
+{% for forward in host.local_forward %}
+  LocalForward {{ forward }}
 {% endfor %}
+{% endif %}
+{% if host.remote_forward is defined and host.remote_forward | length > 0 %}
+{% for forward in host.remote_forward %}
+  RemoteForward {{ forward }}
+{% endfor %}
+{% endif %}
+{% if host.dynamic_forward is defined and host.dynamic_forward | length > 0 %}
+{% for forward in host.dynamic_forward %}
+  DynamicForward {{ forward }}
+{% endfor %}
+{% endif %}
+{% if host.extra_options is defined and host.extra_options | length > 0 %}
+{% for option in host.extra_options %}
+  {{ option }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% else %}
+
+# No managed host entries defined.
+{% endif %}
+
+# =============================================================================
+# End managed SSH client config
+# =============================================================================

@@ -1,44 +1,112 @@
 ---
 # =============================================================================
-# Technitium DNS — Wait for API Availability
+# Technitium DNS - Wait for API Availability
 # -----------------------------------------------------------------------------
-# Ensures the Technitium DNS HTTP API is reachable before continuing
-# with zone, record, and blocklist configuration.
+# Purpose:
+#   Ensures the Technitium DNS HTTP API is reachable before continuing with:
+#     - authentication
+#     - zone configuration
+#     - record configuration
+#     - reverse-zone configuration
+#     - blocklist configuration
+#     - cluster configuration
 #
-# Uses:
-#   - technitium_http_port (default: 5380)
-#   - technitium_bind_ip  (default: 0.0.0.0 → localhost inside host context)
+# Design:
+#   - Uses the node-local API path by default.
+#   - Treats 200, 401, and 403 as "API is alive" responses.
+#   - Retries long enough for first container bootstrap.
+#   - Does not require authentication.
+#
+# Companion vars:
+#   - technitium_api_url
+#   - technitium_http_port
+#   - technitium_api_timeout
+#   - technitium_api_delay
+#   - technitium_api_retries
 # =============================================================================
 
-- name: Technitium | Set API connection defaults
-  ansible.builtin.set_fact:
-    _technitium_api_host: >-
-      {{ '127.0.0.1'
-         if technitium_bind_ip in ['0.0.0.0', '::']
-         else technitium_bind_ip }}
-    _technitium_api_port: "{{ technitium_http_port }}"
+- name: Technitium API | Wait for API availability
+  become: true
+  block:
+    # -------------------------------------------------------------------------
+    # Connection defaults
+    # -------------------------------------------------------------------------
 
-- name: Technitium | Wait for API to become available
-  ansible.builtin.wait_for:
-    host: "{{ _technitium_api_host }}"
-    port: "{{ _technitium_api_port }}"
-    delay: 2
-    timeout: 180
-    state: started
+    - name: Technitium API | Set API connection defaults
+      ansible.builtin.set_fact:
+        technitium_api_wait_scheme: "{{ technitium_api_wait_scheme | default(technitium_api_scheme | default('http')) }}"
+        technitium_api_wait_host: >-
+          {{
+            technitium_api_wait_host
+            | default(
+                '127.0.0.1'
+                if (technitium_bind_ip | default('0.0.0.0')) in ['0.0.0.0', '::']
+                else technitium_bind_ip | default(ansible_host | default(inventory_hostname))
+              )
+          }}
+        technitium_api_wait_port: "{{ technitium_api_wait_port | default(technitium_http_port | default(5380)) }}"
+        technitium_api_wait_path: "{{ technitium_api_wait_path | default('/') }}"
+        technitium_api_wait_delay: "{{ technitium_api_wait_delay | default(2) }}"
+        technitium_api_wait_timeout: "{{ technitium_api_wait_timeout | default(technitium_api_timeout | default(180)) }}"
+        technitium_api_wait_retries: "{{ technitium_api_wait_retries | default(technitium_api_retries | default(24)) }}"
+        technitium_api_wait_retry_delay: "{{ technitium_api_wait_retry_delay | default(technitium_api_delay | default(5)) }}"
 
-- name: Technitium | Confirm API endpoint reachable
-  ansible.builtin.uri:
-    url: "http://{{ _technitium_api_host }}:{{ _technitium_api_port }}/"
-    method: GET
-    status_code:
-      - 200
-      - 401
-  register: _technitium_api_check
-  retries: 10
-  delay: 5
-  until: _technitium_api_check.status in [200, 401]
+    - name: Technitium API | Build API wait URL
+      ansible.builtin.set_fact:
+        technitium_api_wait_url: >-
+          {{ technitium_api_wait_scheme }}://{{ technitium_api_wait_host }}:{{ technitium_api_wait_port }}{{ technitium_api_wait_path }}
 
-- name: Technitium | Wait 5 seconds for container full initialization
-  ansible.builtin.pause:
-    seconds: 5
+    # -------------------------------------------------------------------------
+    # Port readiness
+    # -------------------------------------------------------------------------
 
+    - name: Technitium API | Wait for API TCP port to become available
+      ansible.builtin.wait_for:
+        host: "{{ technitium_api_wait_host }}"
+        port: "{{ technitium_api_wait_port }}"
+        delay: "{{ technitium_api_wait_delay | int }}"
+        timeout: "{{ technitium_api_wait_timeout | int }}"
+        state: started
+        msg: >-
+          Timed out waiting for Technitium API TCP port
+          {{ technitium_api_wait_host }}:{{ technitium_api_wait_port }}.
+
+    # -------------------------------------------------------------------------
+    # HTTP readiness
+    # -------------------------------------------------------------------------
+
+    - name: Technitium API | Confirm API endpoint is reachable
+      ansible.builtin.uri:
+        url: "{{ technitium_api_wait_url }}"
+        method: GET
+        status_code:
+          - 200
+          - 301
+          - 302
+          - 401
+          - 403
+        return_content: false
+        validate_certs: "{{ technitium_validate_certs | default(false) }}"
+        timeout: "{{ technitium_api_wait_retry_delay | int }}"
+      register: technitium_api_wait_check
+      retries: "{{ technitium_api_wait_retries | int }}"
+      delay: "{{ technitium_api_wait_retry_delay | int }}"
+      until: technitium_api_wait_check.status in [200, 301, 302, 401, 403]
+
+    - name: Technitium API | Wait briefly for full application initialization
+      ansible.builtin.pause:
+        seconds: "{{ technitium_api_post_ready_delay | default(5) | int }}"
+      when: technitium_api_post_ready_delay | default(5) | int > 0
+
+    # -------------------------------------------------------------------------
+    # Optional diagnostics
+    # -------------------------------------------------------------------------
+
+    - name: Technitium API | Show API readiness summary
+      ansible.builtin.debug:
+        msg:
+          - "Technitium API is reachable."
+          - "Host: {{ inventory_hostname }}"
+          - "URL: {{ technitium_api_wait_url }}"
+          - "HTTP status: {{ technitium_api_wait_check.status }}"
+      when: technitium_api_show_wait_summary | default(true)

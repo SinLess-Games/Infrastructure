@@ -1,4 +1,31 @@
 ---
+# =============================================================================
+# Kubernetes Production Cluster Validation
+# =============================================================================
+
+- name: Build expected Kubernetes production validation values
+  ansible.builtin.set_fact:
+    kubernetes_validate_expected_control_plane_names: "{{ kubernetes_nodes.control_plane | map(attribute='name') | list }}"
+    kubernetes_validate_expected_worker_names: "{{ kubernetes_nodes.workers | map(attribute='name') | list }}"
+    kubernetes_validate_expected_node_names: "{{ (kubernetes_nodes.control_plane + kubernetes_nodes.workers) | map(attribute='name') | list }}"
+    kubernetes_validate_expected_node_count: "{{ (kubernetes_nodes.control_plane | length) + (kubernetes_nodes.workers | length) }}"
+    kubernetes_validate_expected_gpu_worker_names: >-
+      {{
+        (
+          kubernetes_nodes.workers
+          | selectattr('gpu_passthrough_devices', 'defined')
+          | map(attribute='name')
+          | list
+        )
+        +
+        (kubernetes_rke2_gpu_worker_names | default([]))
+      | unique | list }}
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+# =============================================================================
+# Cluster Node Status
+# =============================================================================
+
 - name: Gather cluster node status
   ansible.builtin.command:
     argv:
@@ -18,3 +45,316 @@
   when:
     - inventory_hostname == kubernetes_control_plane_first_host
     - kubernetes_validate_nodes is defined
+
+- name: Gather cluster node names
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - get
+      - nodes
+      - -o
+      - jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}
+  changed_when: false
+  register: kubernetes_validate_node_names_raw
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Store actual cluster node names
+  ansible.builtin.set_fact:
+    kubernetes_validate_actual_node_names: "{{ kubernetes_validate_node_names_raw.stdout_lines | default([]) }}"
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Validate expected production node count and names
+  ansible.builtin.assert:
+    that:
+      - kubernetes_validate_actual_node_names | length == kubernetes_validate_expected_node_count | int
+      - kubernetes_validate_expected_node_names | difference(kubernetes_validate_actual_node_names) | length == 0
+      - kubernetes_validate_actual_node_names | difference(kubernetes_validate_expected_node_names) | length == 0
+      - kubernetes_validate_expected_control_plane_names | length == 3
+      - kubernetes_validate_expected_worker_names | length == 8
+    fail_msg: >-
+      Kubernetes production node inventory does not match the live cluster.
+      expected={{ kubernetes_validate_expected_node_names }},
+      actual={{ kubernetes_validate_actual_node_names }},
+      missing={{ kubernetes_validate_expected_node_names | difference(kubernetes_validate_actual_node_names) }},
+      unexpected={{ kubernetes_validate_actual_node_names | difference(kubernetes_validate_expected_node_names) }}
+    success_msg: >-
+      Kubernetes production node inventory matches the live cluster:
+      3 control-plane nodes and 8 workers.
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Gather non-ready Kubernetes nodes
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    /var/lib/rancher/rke2/bin/kubectl \
+      --kubeconfig=/etc/rancher/rke2/rke2.yaml \
+      get nodes --no-headers \
+      | awk '$2 !~ /^Ready/ { print $0 }'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: kubernetes_validate_non_ready_nodes
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Validate all Kubernetes nodes are Ready
+  ansible.builtin.assert:
+    that:
+      - kubernetes_validate_non_ready_nodes.stdout_lines | default([]) | length == 0
+    fail_msg: >-
+      One or more Kubernetes nodes are not Ready:
+      {{ kubernetes_validate_non_ready_nodes.stdout_lines | default([]) }}
+    success_msg: "All Kubernetes production nodes are Ready."
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+# =============================================================================
+# Control Plane Validation
+# =============================================================================
+
+- name: Gather control-plane node taints
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - get
+      - node
+      - "{{ item }}"
+      - -o
+      - jsonpath={range .spec.taints[*]}{.key}={.value}:{.effect}{"\n"}{end}
+  loop: "{{ kubernetes_validate_expected_control_plane_names }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  register: kubernetes_validate_control_plane_taints
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Validate control-plane nodes are tainted NoSchedule
+  ansible.builtin.assert:
+    that:
+      - "'node-role.kubernetes.io/control-plane=true:NoSchedule' in (item.stdout_lines | default([]))"
+    fail_msg: >-
+      Control-plane node {{ item.item }} is missing required NoSchedule taint.
+      taints={{ item.stdout_lines | default([]) }}
+    success_msg: "Control-plane node {{ item.item }} has the required NoSchedule taint."
+  loop: "{{ kubernetes_validate_control_plane_taints.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Gather control-plane node labels
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - get
+      - node
+      - "{{ item }}"
+      - -o
+      - jsonpath={.metadata.labels.sinlessgames\.com/role}{"\n"}{.metadata.labels.sinlessgames\.com/environment}{"\n"}{.metadata.labels.sinlessgames\.com/cluster}{"\n"}{.metadata.labels.node\.sinlessgames\.io/role}{"\n"}
+  loop: "{{ kubernetes_validate_expected_control_plane_names }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  register: kubernetes_validate_control_plane_labels
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Validate control-plane node labels
+  ansible.builtin.assert:
+    that:
+      - item.stdout_lines[0] | default('') == 'control-plane'
+      - item.stdout_lines[1] | default('') == 'prod'
+      - item.stdout_lines[2] | default('') == 'rke2-prod'
+      - item.stdout_lines[3] | default('') == 'control-plane'
+    fail_msg: >-
+      Control-plane node {{ item.item }} is missing required production labels.
+      label_values={{ item.stdout_lines | default([]) }}
+    success_msg: "Control-plane node {{ item.item }} has required production labels."
+  loop: "{{ kubernetes_validate_control_plane_labels.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+# =============================================================================
+# Worker Validation
+# =============================================================================
+
+- name: Gather worker node labels
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - get
+      - node
+      - "{{ item }}"
+      - -o
+      - jsonpath={.metadata.labels.sinlessgames\.com/role}{"\n"}{.metadata.labels.sinlessgames\.com/environment}{"\n"}{.metadata.labels.sinlessgames\.com/cluster}{"\n"}{.metadata.labels.node\.sinlessgames\.io/role}{"\n"}
+  loop: "{{ kubernetes_validate_expected_worker_names }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  register: kubernetes_validate_worker_labels
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Validate worker node labels
+  ansible.builtin.assert:
+    that:
+      - item.stdout_lines[0] | default('') == 'worker'
+      - item.stdout_lines[1] | default('') == 'prod'
+      - item.stdout_lines[2] | default('') == 'rke2-prod'
+      - item.stdout_lines[3] | default('') == 'worker'
+    fail_msg: >-
+      Worker node {{ item.item }} is missing required production labels.
+      label_values={{ item.stdout_lines | default([]) }}
+    success_msg: "Worker node {{ item.item }} has required production labels."
+  loop: "{{ kubernetes_validate_worker_labels.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+# =============================================================================
+# GPU Worker Validation
+# =============================================================================
+
+- name: Show expected GPU workers
+  ansible.builtin.debug:
+    var: kubernetes_validate_expected_gpu_worker_names
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_validate_expected_gpu_worker_names | length > 0
+
+- name: Gather GPU worker labels
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - get
+      - node
+      - "{{ item }}"
+      - -o
+      - jsonpath={.metadata.labels.accelerator\.nvidia\.com/gpu}{"\n"}{.metadata.labels.node\.kubernetes\.io/gpu}{"\n"}{.metadata.labels.node\.sinlessgames\.io/pool}{"\n"}
+  loop: "{{ kubernetes_validate_expected_gpu_worker_names }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  register: kubernetes_validate_gpu_worker_labels
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_validate_expected_gpu_worker_names | length > 0
+
+- name: Validate GPU worker labels
+  ansible.builtin.assert:
+    that:
+      - item.stdout_lines[0] | default('') == 'true'
+      - item.stdout_lines[1] | default('') == 'true'
+      - item.stdout_lines[2] | default('') == 'gpu'
+    fail_msg: >-
+      GPU worker {{ item.item }} is missing required GPU labels.
+      label_values={{ item.stdout_lines | default([]) }}
+    success_msg: "GPU worker {{ item.item }} has required GPU labels."
+  loop: "{{ kubernetes_validate_gpu_worker_labels.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_validate_expected_gpu_worker_names | length > 0
+
+- name: Gather GPU worker taints
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - get
+      - node
+      - "{{ item }}"
+      - -o
+      - jsonpath={range .spec.taints[*]}{.key}={.value}:{.effect}{"\n"}{end}
+  loop: "{{ kubernetes_validate_expected_gpu_worker_names }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  register: kubernetes_validate_gpu_worker_taints
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_validate_expected_gpu_worker_names | length > 0
+
+- name: Validate GPU workers are tainted NoSchedule
+  ansible.builtin.assert:
+    that:
+      - "'nvidia.com/gpu=true:NoSchedule' in (item.stdout_lines | default([]))"
+    fail_msg: >-
+      GPU worker {{ item.item }} is missing required GPU NoSchedule taint.
+      taints={{ item.stdout_lines | default([]) }}
+    success_msg: "GPU worker {{ item.item }} has required GPU NoSchedule taint."
+  loop: "{{ kubernetes_validate_gpu_worker_taints.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - inventory_hostname == kubernetes_control_plane_first_host
+    - kubernetes_validate_expected_gpu_worker_names | length > 0
+
+# =============================================================================
+# kube-system Health
+# =============================================================================
+
+- name: Gather unhealthy kube-system pods
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    /var/lib/rancher/rke2/bin/kubectl \
+      --kubeconfig=/etc/rancher/rke2/rke2.yaml \
+      get pods -n kube-system --no-headers \
+      | awk '$4 != "Running" && $4 != "Completed" && $4 != "Succeeded" { print $0 }'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: kubernetes_validate_unhealthy_kube_system_pods
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Validate kube-system pods are healthy
+  ansible.builtin.assert:
+    that:
+      - kubernetes_validate_unhealthy_kube_system_pods.stdout_lines | default([]) | length == 0
+    fail_msg: >-
+      One or more kube-system pods are unhealthy:
+      {{ kubernetes_validate_unhealthy_kube_system_pods.stdout_lines | default([]) }}
+    success_msg: "All kube-system pods are Running or Completed."
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+# =============================================================================
+# API Health
+# =============================================================================
+
+- name: Validate Kubernetes API health endpoint
+  ansible.builtin.command:
+    argv:
+      - /var/lib/rancher/rke2/bin/kubectl
+      - --kubeconfig=/etc/rancher/rke2/rke2.yaml
+      - get
+      - --raw=/readyz
+  changed_when: false
+  register: kubernetes_validate_apiserver_readyz
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+- name: Assert Kubernetes API readyz reports ok
+  ansible.builtin.assert:
+    that:
+      - kubernetes_validate_apiserver_readyz.stdout | trim == 'ok'
+    fail_msg: >-
+      Kubernetes API /readyz did not return ok:
+      {{ kubernetes_validate_apiserver_readyz.stdout | default('') }}
+    success_msg: "Kubernetes API /readyz returned ok."
+  when: inventory_hostname == kubernetes_control_plane_first_host
+
+# =============================================================================
+# Final Summary
+# =============================================================================
+
+- name: Show production validation summary
+  ansible.builtin.debug:
+    msg:
+      - "Kubernetes production validation complete."
+      - "Expected control planes: {{ kubernetes_validate_expected_control_plane_names | join(', ') }}"
+      - "Expected workers: {{ kubernetes_validate_expected_worker_names | join(', ') }}"
+      - "Expected GPU workers: {{ kubernetes_validate_expected_gpu_worker_names | default([]) | join(', ') }}"
+      - "Total expected nodes: {{ kubernetes_validate_expected_node_count }}"
+  when: inventory_hostname == kubernetes_control_plane_first_host

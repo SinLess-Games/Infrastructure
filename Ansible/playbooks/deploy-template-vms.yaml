@@ -1,0 +1,9 @@
+- name: Deploy Packer template VMs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/packer/main.yaml
+
+  roles:
+    - role: packer

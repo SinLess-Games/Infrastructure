@@ -2,8 +2,20 @@
 # =============================================================================
 # Configure Localhost
 # -----------------------------------------------------------------------------
-# Prepares the local control node (dev-01) for infrastructure automation.
-# This playbook ONLY runs roles that are safe for localhost execution.
+# Prepares the local control node for infrastructure automation.
+#
+# Scope:
+#   - Safe localhost-only setup
+#   - Packages and shell tooling
+#   - Local users
+#   - Controller-side SSH CA/user key material
+#   - User SSH client files
+#
+# Safety:
+#   - Does not apply Proxmox-specific SSH tasks.
+#   - Does not harden/reload the local sshd daemon by default.
+#   - Does not copy private identity keys into user homes unless explicitly
+#     enabled in SSH role variables.
 # =============================================================================
 
 - name: Configure local Ansible control node
@@ -13,19 +25,80 @@
   become: true
 
   vars_files:
-    - ../group_vars/all/users.yaml
     - ../group_vars/all/groups.yaml
-    - ../group_vars/all/zsh.yaml
+    - ../group_vars/all/users.yaml
     - ../group_vars/all/packages.yaml
+    - ../group_vars/all/zsh.yaml
     - ../group_vars/all/ssh.yaml
 
   vars:
     infrastructure_repo_root: "{{ playbook_dir | dirname | dirname }}"
+
+    # Package role
+    packages_enabled_groups:
+      - production
+      - development
+      - shell
     packages_install_homebrew: true
     packages_role_brew_packages: "{{ shell_brew_packages }}"
 
+    # Shell role
+    shell_install_zsh: true
+    shell_install_oh_my_zsh: true
+    shell_set_default_shell: true
+
+    # SSH role - localhost-safe mode
+    ssh_role_manage_controller_materials: true
+    ssh_role_manage_ca: true
+    ssh_role_manage_user_materials: true
+
+    ssh_role_manage_user_authorized_keys: true
+    ssh_role_manage_user_principals: true
+    ssh_role_manage_user_client_config: true
+    ssh_role_manage_user_known_hosts: true
+
+    # Do not mutate local sshd from the localhost bootstrap playbook.
+    ssh_role_manage_daemon: false
+
+    # Never run Proxmox-specific SSH tasks on localhost.
+    ssh_role_manage_proxmox: false
+    ssh_use_proxmox_specialized_daemon_config: false
+
+    # Keep private key installation opt-in only.
+    ssh_install_identity_keys: false
+
+    # Avoid unnecessary handler flushes during local bootstrap.
+    ssh_role_flush_handlers: false
+
   pre_tasks:
-    - name: Ensure repo root .env exists for local Terraform secrets
+    - name: Localhost | Assert play is running with local connection
+      ansible.builtin.assert:
+        that:
+          - ansible_connection == "local"
+        fail_msg: "configure-localhost.yaml must run with connection=local."
+        success_msg: "Localhost play is using local connection."
+
+    - name: Localhost | Assert repo root was resolved
+      ansible.builtin.assert:
+        that:
+          - infrastructure_repo_root is defined
+          - infrastructure_repo_root is string
+          - infrastructure_repo_root | length > 1
+        fail_msg: "Unable to resolve infrastructure_repo_root."
+
+    - name: Localhost | Ensure repo output directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
+        group: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
+        mode: "0700"
+      loop:
+        - "{{ infrastructure_repo_root }}/.outputs"
+        - "{{ infrastructure_repo_root }}/.outputs/ssh"
+        - "{{ infrastructure_repo_root }}/.outputs/ssh_ca"
+
+    - name: Localhost | Ensure repo root .env exists for local Terraform secrets
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/env/root.env.j2"
         dest: "{{ infrastructure_repo_root }}/.env"
@@ -34,7 +107,18 @@
         mode: "0600"
 
   roles:
-    - users
-    - ssh
-    - shell-config
-    - packages
+    - role: packages
+      tags:
+        - packages
+
+    - role: users
+      tags:
+        - users
+
+    - role: ssh
+      tags:
+        - ssh
+
+    - role: shell-config
+      tags:
+        - shell

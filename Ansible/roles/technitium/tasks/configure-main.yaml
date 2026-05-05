@@ -1,46 +1,244 @@
 ---
 # =============================================================================
-# Technitium DNS – Main Role Entrypoint
+# Technitium DNS - Configure Main Role Entrypoint
 # -----------------------------------------------------------------------------
-# This task list orchestrates:
-#   * OS preparation
-#   * Technitium installation
-#   * Waiting for API to be ready
-#   * Password detection (stores in technitium_actual_password fact)
-#   * DNS server settings (forwarders, block lists, recursion ACLs)
-#   * Zone creation (on primary or standalone)
-#   * Records creation (A, AAAA, CNAME, TXT - on primary or standalone)
-#   * Cluster initialization and join (if enabled)
-#   * Reverse zones / PTR records
-#   * Firewall setup
+# Purpose:
+#   Orchestrates Technitium DNS host preparation, installation, authentication,
+#   DNS configuration, clustering, records, block lists, reverse DNS, and firewall
+#   hardening.
+#
+# Execution model:
+#   - OS prep runs on every Technitium node.
+#   - Docker/Technitium install runs on every Technitium node.
+#   - API wait runs on every Technitium node.
+#   - Admin initialization runs on every Technitium node.
+#   - Cluster initialization/join runs once when clustering is enabled.
+#   - DNS writes run only on the primary node when clustering is enabled.
+#   - DNS writes run on the current host when clustering is disabled.
+#   - Firewall hardening runs on every Technitium node.
+#
+# Companion task files:
+#   - os.yaml
+#   - install.yaml
+#   - firewall.yaml
+#   - wait_for_api.yaml
+#   - init_admin.yaml
+#   - server_settings.yaml
+#   - zones.yaml
+#   - records.yaml
+#   - cluster.yaml
+#   - reverse_zones.yaml
+#   - block-lists.yaml
 # =============================================================================
 
-- import_tasks: os.yaml
-- import_tasks: install.yaml
-- import_tasks: wait_for_api.yaml
-- import_tasks: init_admin.yaml
-- import_tasks: server_settings.yaml
+# -----------------------------------------------------------------------------
+# Preflight
+# -----------------------------------------------------------------------------
 
-- import_tasks: zones.yaml
-  when: not (technitium_cluster_enabled | default(false) | bool)
-        or inventory_hostname == technitium_cluster_primary_host
+- name: Configure | Normalize Technitium orchestration facts
+  ansible.builtin.set_fact:
+    technitium_configure_cluster_enabled: "{{ technitium_cluster_enabled | default(false) | bool }}"
+    technitium_configure_primary_host: "{{ technitium_cluster_primary_host | default(inventory_hostname) }}"
+    technitium_configure_is_primary_writer: >-
+      {{
+        not (technitium_cluster_enabled | default(false) | bool)
+        or inventory_hostname == (technitium_cluster_primary_host | default(inventory_hostname))
+      }}
+    technitium_configure_is_secondary: >-
+      {{
+        technitium_cluster_enabled | default(false) | bool
+        and inventory_hostname != (technitium_cluster_primary_host | default(inventory_hostname))
+      }}
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-preflight
 
-- import_tasks: records.yaml
-  when: not (technitium_cluster_enabled | default(false) | bool)
-        or inventory_hostname == technitium_cluster_primary_host
+- name: Configure | Assert cluster primary is defined when clustering is enabled
+  ansible.builtin.assert:
+    that:
+      - technitium_cluster_primary_host is defined
+      - technitium_cluster_primary_host | length > 0
+    fail_msg: "technitium_cluster_primary_host must be defined when Technitium clustering is enabled."
+    success_msg: "Technitium cluster primary host is defined."
+  when: technitium_configure_cluster_enabled | bool
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-preflight
 
-- import_tasks: cluster.yaml
-  when: technitium_cluster_enabled | default(false) | bool
+- name: Configure | Show Technitium orchestration context
+  ansible.builtin.debug:
+    msg:
+      - "Technitium configure orchestration starting."
+      - "Host: {{ inventory_hostname }}"
+      - "Cluster enabled: {{ technitium_configure_cluster_enabled }}"
+      - "Primary host: {{ technitium_configure_primary_host }}"
+      - "Primary writer on this host: {{ technitium_configure_is_primary_writer }}"
+      - "Secondary node: {{ technitium_configure_is_secondary }}"
+  when: technitium_configure_show_context | default(true)
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-preflight
 
-- import_tasks: reverse_zones.yaml
+# -----------------------------------------------------------------------------
+# Host preparation
+# -----------------------------------------------------------------------------
+
+- name: Configure | Prepare operating system
+  ansible.builtin.import_tasks: os.yaml
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-os
+
+# -----------------------------------------------------------------------------
+# Install Technitium
+# -----------------------------------------------------------------------------
+
+- name: Configure | Install Technitium DNS Server
+  ansible.builtin.import_tasks: install.yaml
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-install
+
+# -----------------------------------------------------------------------------
+# Firewall hardening
+# -----------------------------------------------------------------------------
+# This runs after Docker exists so DOCKER-USER and the dedicated Technitium
+# Docker firewall chain can be created safely.
+# -----------------------------------------------------------------------------
+
+- name: Configure | Apply Technitium firewall policy
+  ansible.builtin.import_tasks: firewall.yaml
+  when: technitium_firewall_enabled | default(true) | bool
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-firewall
+
+# -----------------------------------------------------------------------------
+# API readiness and authentication
+# -----------------------------------------------------------------------------
+
+- name: Configure | Wait for Technitium API
+  ansible.builtin.import_tasks: wait_for_api.yaml
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-api
+
+- name: Configure | Initialize Technitium admin authentication
+  ansible.builtin.import_tasks: init_admin.yaml
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-admin
+
+# -----------------------------------------------------------------------------
+# Primary / standalone server settings
+# -----------------------------------------------------------------------------
+# In clustered mode, configuration writes should occur on the primary only.
+# Secondary nodes receive configuration through Technitium cluster replication.
+# -----------------------------------------------------------------------------
+
+- name: Configure | Apply Technitium server settings
+  ansible.builtin.import_tasks: server_settings.yaml
+  when: technitium_configure_is_primary_writer | bool
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-settings
+
+# -----------------------------------------------------------------------------
+# Forward zones and records
+# -----------------------------------------------------------------------------
+
+- name: Configure | Apply Technitium zones
+  ansible.builtin.import_tasks: zones.yaml
   when:
+    - technitium_configure_is_primary_writer | bool
+    - technitium_dns_zones is defined or technitium_domains is defined
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-zones
+
+- name: Configure | Apply Technitium records
+  ansible.builtin.import_tasks: records.yaml
+  when:
+    - technitium_configure_is_primary_writer | bool
+    - technitium_dns_zone_records is defined or technitium_domain_records is defined
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-records
+
+# -----------------------------------------------------------------------------
+# Cluster initialization / join
+# -----------------------------------------------------------------------------
+# Cluster task is internally run_once/delegated and expects all nodes to have
+# already completed API/auth initialization in the current play.
+# -----------------------------------------------------------------------------
+
+- name: Configure | Configure Technitium cluster
+  ansible.builtin.import_tasks: cluster.yaml
+  when: technitium_configure_cluster_enabled | bool
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-cluster
+
+# -----------------------------------------------------------------------------
+# Reverse zones / PTR records
+# -----------------------------------------------------------------------------
+
+- name: Configure | Apply Technitium reverse zones and PTR records
+  ansible.builtin.import_tasks: reverse_zones.yaml
+  when:
+    - technitium_configure_is_primary_writer | bool
     - technitium_reverse_zones is defined
     - technitium_reverse_zones | length > 0
-    - not (technitium_cluster_enabled | default(false) | bool)
-      or inventory_hostname == technitium_cluster_primary_host
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-reverse-zones
 
-- import_tasks: block-lists.yaml
-  when: not (technitium_cluster_enabled | default(false) | bool)
-        or inventory_hostname == technitium_cluster_primary_host
+# -----------------------------------------------------------------------------
+# Block lists
+# -----------------------------------------------------------------------------
 
-- import_tasks: firewall.yaml
+- name: Configure | Apply Technitium block lists
+  ansible.builtin.import_tasks: block-lists.yaml
+  when:
+    - technitium_configure_is_primary_writer | bool
+    - technitium_block_lists_enabled | default(true) | bool
+    - technitium_block_list_sources is defined or technitium_block_list_urls is defined
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-block-lists
+
+# -----------------------------------------------------------------------------
+# Final summary
+# -----------------------------------------------------------------------------
+
+- name: Configure | Show Technitium configure summary
+  ansible.builtin.debug:
+    msg:
+      - "Technitium configure orchestration complete."
+      - "Host: {{ inventory_hostname }}"
+      - "Cluster enabled: {{ technitium_configure_cluster_enabled }}"
+      - "Primary host: {{ technitium_configure_primary_host }}"
+      - "Primary writer on this host: {{ technitium_configure_is_primary_writer }}"
+      - "Firewall enabled: {{ technitium_firewall_enabled | default(true) | bool }}"
+      - "Zones managed on this host: {{ technitium_configure_is_primary_writer | bool }}"
+      - "Records managed on this host: {{ technitium_configure_is_primary_writer | bool }}"
+      - "Block lists managed on this host: {{ technitium_configure_is_primary_writer | bool }}"
+  when: technitium_configure_show_summary | default(true)
+  tags:
+    - technitium
+    - technitium-configure
+    - technitium-summary

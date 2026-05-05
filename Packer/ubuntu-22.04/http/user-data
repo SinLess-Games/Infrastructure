@@ -1,0 +1,167 @@
+#cloud-config
+# Ansible/templates/packer/http/user-data.j2
+#
+# Ubuntu autoinstall config for ubuntu-22.04-template-pve-01.
+#
+# Rendered by Ansible into:
+#   Packer/ubuntu-22.04/http/user-data
+#
+# Packer expects to SSH into the installed guest as:
+#   username: packer
+#   password: packer
+#
+# This file must ensure:
+#   - Ubuntu autoinstall runs non-interactively.
+#   - openssh-server is installed.
+#   - password SSH auth is temporarily enabled for Packer.
+#   - the packer user exists and has sudo.
+#   - qemu-guest-agent and cloud-init are installed for Proxmox clones.
+
+autoinstall:
+  version: 1
+
+  locale: en_US.UTF-8
+
+  keyboard:
+    layout: us
+    variant: ""
+
+  timezone: UTC
+
+  interactive-sections: []
+
+  refresh-installer:
+    update: false
+
+  apt:
+    preserve_sources_list: false
+    primary:
+      - arches:
+          - amd64
+        uri: "http://archive.ubuntu.com/ubuntu"
+      - arches:
+          - default
+        uri: "http://archive.ubuntu.com/ubuntu"
+
+  network:
+    network:
+      version: 2
+      ethernets:
+        all-en:
+          match:
+            name: "en*"
+          dhcp4: true
+          dhcp6: false
+        all-eth:
+          match:
+            name: "eth*"
+          dhcp4: true
+          dhcp6: false
+
+  storage:
+    layout:
+      name: direct
+
+  identity:
+    hostname: "ubuntu-22.04-template-pve-01"
+    username: "packer"
+    realname: "Packer Template User"
+
+    # Autoinstall requires this to be a hashed password.
+    #
+    # Default password source:
+    #   packer_ssh_password -> preseed_root_password -> packer
+    #
+    # To override with a precomputed hash, define:
+    #   autoinstall_user_password_hash
+    password: "$6$rounds=656000$packer$w4c0CwFwsB/hMZtEyWnBgb82gt0sET5fBr0TdPQJGvM35CnADTmKHxvWWbomNeGBAmIfCYSDehayyei1PaTAk1"
+
+  ssh:
+    install-server: true
+    allow-pw: true
+    authorized-keys: []
+
+  packages:
+    - apt-transport-https
+    - bash-completion
+    - build-essential
+    - ca-certificates
+    - cloud-guest-utils
+    - cloud-init
+    - cloud-initramfs-growroot
+    - curl
+    - dbus
+    - gnupg
+    - jq
+    - less
+    - lsb-release
+    - net-tools
+    - openssh-server
+    - qemu-guest-agent
+    - rsync
+    - sudo
+    - unzip
+    - vim
+    - wget
+
+  user-data:
+    disable_root: false
+    package_update: false
+    package_upgrade: false
+    timezone: UTC
+
+    chpasswd:
+      expire: false
+      users:
+        - name: root
+          password: "packer"
+          type: text
+        - name: "packer"
+          password: "packer"
+          type: text
+
+    users:
+      - default
+      - name: "packer"
+        gecos: Packer Template User
+        groups:
+          - adm
+          - cdrom
+          - dip
+          - lxd
+          - plugdev
+          - sudo
+        shell: /bin/bash
+        sudo: "ALL=(ALL) NOPASSWD:ALL"
+        lock_passwd: false
+
+  late-commands:
+    # Ensure the packer user exists, has sudo, and can authenticate before
+    # Packer starts waiting for SSH.
+    - curtin in-target --target=/target -- id "packer" || curtin in-target --target=/target -- useradd -m -s /bin/bash "packer"
+    - curtin in-target --target=/target -- usermod -aG sudo "packer"
+    - curtin in-target --target=/target -- sh -c "printf '%s:%s\n' 'packer' 'packer' | chpasswd"
+    - curtin in-target --target=/target -- sh -c "printf '%s:%s\n' 'root' 'packer' | chpasswd"
+
+    # Keep SSH permissive only for the Packer build phase.
+    # Your cleanup/hardening automation can replace this later for deployed VMs.
+    - curtin in-target --target=/target -- mkdir -p /etc/ssh/sshd_config.d
+    - curtin in-target --target=/target -- sh -c "printf '%s\n' 'PermitRootLogin yes' 'PasswordAuthentication yes' 'PubkeyAuthentication yes' 'KbdInteractiveAuthentication no' > /etc/ssh/sshd_config.d/99-packer.conf"
+    - curtin in-target --target=/target -- systemctl enable ssh.service
+    - curtin in-target --target=/target -- systemctl enable qemu-guest-agent.service || true
+
+    # Proxmox cloud-init datasource preference.
+    - curtin in-target --target=/target -- mkdir -p /etc/cloud/cloud.cfg.d
+    - curtin in-target --target=/target -- sh -c "printf '%s\n' 'datasource_list: [ NoCloud, ConfigDrive ]' > /etc/cloud/cloud.cfg.d/99-packer-proxmox.cfg"
+
+    # Avoid cloud-init fighting the DHCP config used during install.
+    - curtin in-target --target=/target -- sh -c "printf '%s\n' 'network:' '  config: disabled' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg"
+
+    # Improve console visibility in Proxmox.
+    - curtin in-target --target=/target -- sh -c "sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"console=tty0 console=ttyS0,115200n8\"/' /etc/default/grub"
+    - curtin in-target --target=/target -- update-grub
+
+    # Clean cloud-init state so clones initialize cleanly.
+    - curtin in-target --target=/target -- cloud-init clean --logs --seed || true
+
+  shutdown: reboot
