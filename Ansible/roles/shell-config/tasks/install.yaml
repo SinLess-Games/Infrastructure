@@ -6,16 +6,17 @@
 #
 # Installs:
 #   - zsh system package
-#   - Oh My Zsh per interactive user
-#
-# Removes by default:
-#   - starship package/binaries/configs
+#   - Oh My Zsh per interactive zsh user
 #
 # Safety:
 #   - Skips users without valid homes.
 #   - Skips non-zsh users for Oh My Zsh.
 #   - Refuses symlinked Oh My Zsh paths.
 #   - Runs user-owned git clones as the target user.
+#
+# Notes:
+#   - Starship is intentionally not managed by this task file.
+#   - Starship install/remove controls are ignored here.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -27,24 +28,10 @@
     shell__install_users: "{{ shell__home_users | default(shell__resolved_users | default([])) }}"
     shell__install_zsh_enabled: "{{ shell_install_zsh | default(true) | bool }}"
     shell__install_oh_my_zsh_enabled: "{{ shell_install_oh_my_zsh | default(true) | bool }}"
-    shell__install_starship_enabled: "{{ shell_install_starship | default(false) | bool }}"
-    shell__remove_starship_enabled: "{{ shell_remove_starship | default(true) | bool }}"
   changed_when: false
   tags:
     - shell
     - shell-install
-
-- name: Shell Config | Install | Validate Starship install/remove controls
-  ansible.builtin.assert:
-    that:
-      - not (shell__install_starship_enabled | bool and
-        shell__remove_starship_enabled | bool)
-    fail_msg: "shell_install_starship and shell_remove_starship cannot both be true."
-    success_msg: "Starship install/remove controls are valid."
-  tags:
-    - shell
-    - shell-install
-    - shell-validate
 
 # -----------------------------------------------------------------------------
 # Zsh
@@ -68,7 +55,8 @@
 - name: Shell Config | Install | Build Oh My Zsh user list
   ansible.builtin.set_fact:
     shell__oh_my_zsh_users: >-
-      {%- set out = [] -%} {%- for user in shell__install_users -%}
+      {%- set out = [] -%} {%- for user in shell__install_users | default([])
+      -%}
         {%- set shell_path = user.shell | default('') -%}
         {%- if shell_path.endswith('zsh') -%}
           {%- set _ = out.append(user) -%}
@@ -155,56 +143,6 @@
     - shell-oh-my-zsh
 
 # -----------------------------------------------------------------------------
-# Starship cleanup
-# -----------------------------------------------------------------------------
-
-- name: Shell Config | Install | Remove starship package when requested
-  ansible.builtin.package:
-    name: starship
-    state: absent
-  become: true
-  register: shell__starship_package_remove
-  failed_when: false
-  when: shell__remove_starship_enabled | bool
-  tags:
-    - shell
-    - shell-install
-    - shell-starship
-
-- name: Shell Config | Install | Remove starship binaries from common locations
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  become: true
-  loop:
-    - /usr/local/bin/starship
-    - /usr/bin/starship
-    - /home/linuxbrew/.linuxbrew/bin/starship
-    - /opt/homebrew/bin/starship
-  loop_control:
-    label: "{{ item }}"
-  when: shell__remove_starship_enabled | bool
-  tags:
-    - shell
-    - shell-install
-    - shell-starship
-
-- name: Shell Config | Install | Remove starship user config paths
-  ansible.builtin.file:
-    path: "{{ item.0.home_directory }}/{{ item.1 }}"
-    state: absent
-  become: true
-  loop: "{{ shell__install_users | product(['.config/starship',
-    '.config/starship.toml']) | list }}"
-  loop_control:
-    label: "{{ item.0.name }} -> {{ item.1 }}"
-  when: shell__remove_starship_enabled | bool
-  tags:
-    - shell
-    - shell-install
-    - shell-starship
-
-# -----------------------------------------------------------------------------
 # Summary
 # -----------------------------------------------------------------------------
 
@@ -214,10 +152,16 @@
       - "shell-config install phase complete."
       - "zsh installed: {{ shell__install_zsh_enabled | bool }}"
       - "Oh My Zsh enabled: {{ shell__install_oh_my_zsh_enabled | bool }}"
-      - "Oh My Zsh users: {{ shell__oh_my_zsh_users | default([]) |
-        map(attribute='name') | list | join(', ') if shell__oh_my_zsh_users |
-        default([]) | length > 0 else 'none' }}"
-      - "Starship removed: {{ shell__remove_starship_enabled | bool }}"
+      - >-
+        Oh My Zsh users: {{
+          shell__oh_my_zsh_users
+          | default([])
+          | map(attribute='name')
+          | list
+          | join(', ')
+          if shell__oh_my_zsh_users | default([]) | length > 0
+          else 'none'
+        }}
   when: shell_config_show_summary | default(true) | bool
   tags:
     - shell

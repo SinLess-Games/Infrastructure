@@ -154,12 +154,12 @@ users:
   # ---------------------------------------------------------------------------
 
   - name: root
+    comment: Root account
     state: present
-    comment: "Root account"
-    shell: /bin/bash
-    home_directory: /root
-    create_home: false
     system: true
+    create_home: false
+    home_directory: /root
+    shell: /bin/bash
     password_lock: false
 
     groups:
@@ -167,17 +167,21 @@ users:
       - certs
       - shared-certs
       - sudo
-
     append_groups: true
-
-    sudo: true
-    sudo_nopasswd: true
-    manage_sudoers: false
 
     ssh_principals:
       - root
       - admin
       - infrastructure-root
+
+    sudo: true
+    sudo_nopasswd: true
+    sudo_commands:
+      - ALL
+
+    # Root is special. Keep sudoers unmanaged, but define sudo_commands so
+    # validation has an explicit privilege model.
+    manage_sudoers: false
 
     tags:
       - root

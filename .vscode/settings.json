@@ -2,7 +2,6 @@
   "chat.tools.terminal.autoApprove": {
     "task": true
   },
-
   "files.associations": {
     "mkdocs.yml": "yaml",
     "mkdocs.yaml": "yaml",
@@ -15,7 +14,6 @@
     "Brewfile": "ruby",
     ".envrc": "shellscript"
   },
-
   "files.exclude": {
     "**/.git": true,
     "**/.terraform": true,
@@ -27,9 +25,8 @@
     "Ansible/.venv": true,
     "Ansible/.ansible": true,
     "Ansible/.collections": true,
-    ".outputs": true
+    ".outputs": false
   },
-
   "search.exclude": {
     "**/.terraform": true,
     "**/__pycache__": true,
@@ -40,10 +37,9 @@
     "Ansible/.venv": true,
     "Ansible/.ansible": true,
     "Ansible/.collections": true,
-    ".outputs": true,
+    ".outputs": false,
     "site": true
   },
-
   "editor.formatOnSave": true,
   "editor.renderWhitespace": "boundary",
   "editor.rulers": [
@@ -51,18 +47,15 @@
     100,
     120
   ],
-
   "files.eol": "\n",
   "files.insertFinalNewline": true,
   "files.trimTrailingWhitespace": true,
-
   "yaml.validate": true,
   "yaml.format.enable": true,
   "yaml.hover": true,
   "yaml.completion": true,
   "yaml.schemaStore.enable": true,
   "yaml.maxItemsComputed": 10000,
-
   "yaml.schemas": {
     "https://squidfunk.github.io/mkdocs-material/schema.json": [
       "mkdocs.yml",
@@ -113,7 +106,6 @@
       "**/galaxy.yaml"
     ]
   },
-
   "yaml.customTags": [
     "!ENV scalar",
     "!ENV sequence",
@@ -123,21 +115,17 @@
     "tag:yaml.org,2002:python/name:pymdownx.superfences.fence_code_format",
     "tag:yaml.org,2002:python/object/apply:pymdownx.slugs.slugify mapping"
   ],
-
   "ansible.python.interpreterPath": "${workspaceFolder}/Ansible/.venv/bin/python",
   "ansible.ansible.path": "${workspaceFolder}/Ansible/.venv/bin/ansible",
   "ansible.ansibleLint.path": "${workspaceFolder}/Ansible/.venv/bin/ansible-lint",
   "ansible.validation.enabled": true,
   "ansible.validation.lint.enabled": true,
-
   "python.defaultInterpreterPath": "${workspaceFolder}/Ansible/.venv/bin/python",
   "python.terminal.activateEnvironment": true,
   "python.analysis.typeCheckingMode": "basic",
-
   "terraform.languageServer.enable": true,
   "terraform.languageServer.path": "terraform-ls",
   "terraform.format.enable": true,
-
   "markdownlint.config": {
     "MD013": false,
     "MD024": false,
@@ -161,25 +149,21 @@
       "style": "fenced"
     }
   },
-
   "[yaml]": {
     "editor.defaultFormatter": "redhat.vscode-yaml",
     "editor.tabSize": 2,
     "editor.insertSpaces": true
   },
-
   "[json]": {
     "editor.defaultFormatter": "vscode.json-language-features",
     "editor.tabSize": 2,
     "editor.insertSpaces": true
   },
-
   "[jsonc]": {
     "editor.defaultFormatter": "vscode.json-language-features",
     "editor.tabSize": 2,
     "editor.insertSpaces": true
   },
-
   "[markdown]": {
     "editor.wordWrap": "on",
     "editor.quickSuggestions": {
@@ -188,22 +172,18 @@
       "other": true
     }
   },
-
   "[shellscript]": {
     "editor.tabSize": 2,
     "editor.insertSpaces": true
   },
-
   "[terraform]": {
     "editor.defaultFormatter": "hashicorp.terraform",
     "editor.formatOnSave": true
   },
-
   "terminal.integrated.cwd": "${workspaceFolder}",
   "terminal.integrated.env.linux": {
     "ANSIBLE_CONFIG": "${workspaceFolder}/Ansible/ansible.cfg"
   },
-
   "git.autofetch": true,
   "git.confirmSync": false
 }

@@ -1,3 +1,0 @@
-# Ansible/templates/packer/http/meta-data.j2
-instance-id: ubuntu-22.04-template-pve-01
-local-hostname: ubuntu-22.04-template-pve-01

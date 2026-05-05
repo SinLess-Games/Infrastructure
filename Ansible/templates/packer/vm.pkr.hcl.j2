@@ -223,24 +223,6 @@ source "proxmox-iso" "vm_template" {
   bios      = "seabios"
   boot_wait = "{{ distro_item.boot_wait | default(packer_boot_wait | default('15s')) }}"
 
-{% if installer_type | default('preseed') == 'autoinstall' or distro_family | default('debian') == 'ubuntu' %}
-  # Ubuntu live-server / Subiquity autoinstall.
-  #
-  # This enters the GRUB command line and boots the live-server kernel directly.
-  # The escaped semicolon in ds=nocloud-net\;s= is required.
-  #
-  # HTTP server content expected:
-  #   http/user-data
-  #   http/meta-data
-  #   http/vendor-data
-  boot_command = [
-    "<wait5>",
-    "c<wait>",
-    "linux /casper/vmlinuz autoinstall ip=dhcp ds=nocloud-net\\;s=http://{{ '{{ .HTTPIP }}' }}:{{ '{{ .HTTPPort }}' }}/ ---<enter><wait>",
-    "initrd /casper/initrd<enter><wait>",
-    "boot<enter>"
-  ]
-{% else %}
   # Debian installer / preseed.
   boot_command = [
     "<esc><wait>",
@@ -256,7 +238,6 @@ source "proxmox-iso" "vm_template" {
     "debconf/frontend=noninteractive ",
     "--- <enter>"
   ]
-{% endif %}
 
   http_directory = "${path.root}/http"
   http_port_min  = {{ distro_item.http_port_min | default(packer_http_port_min | default(8802)) }}

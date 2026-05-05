@@ -7,7 +7,6 @@
 #   - Zsh environment files
 #   - Native prompt
 #   - Aliases
-#   - Optional Starship config
 #   - User-local ~/bin commands from Ansible/files/bin_commands
 #
 # Safety:
@@ -16,6 +15,11 @@
 #   - Skips non-zsh users for zsh dotfiles.
 #   - Refuses symlinked managed files before overwriting.
 #   - Preserves relative bin command paths.
+#
+# Notes:
+#   - Starship is intentionally not managed here.
+#   - Prompt and aliases are copied as literal shell files because they may
+#     contain valid Zsh syntax that conflicts with Jinja parsing.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -27,8 +31,6 @@
     shell__configure_users: "{{ shell__home_users | default(shell__resolved_users | default([])) }}"
     shell__configure_bin_enabled: "{{ shell_bin_commands_enabled | default(true) | bool }}"
     shell__configure_prompt_enabled: "{{ shell_prompt_enabled | default(true) | bool }}"
-    shell__configure_starship_enabled: "{{ shell_install_starship | default(false) | bool }}"
-    shell__configure_starship_remove_enabled: "{{ shell_remove_starship | default(true) | bool }}"
     shell__configure_bin_src: "{{ shell_bin_commands_src }}"
     shell__configure_bin_dest: "{{ shell_bin_commands_dest | default('bin') }}"
   changed_when: false
@@ -60,11 +62,11 @@
       - shell__configure_users is sequence
       - shell__configure_users is not string
       - shell__configure_users is not mapping
+      - shell__configure_bin_src is string
+      - shell__configure_bin_src | length > 0
       - shell__configure_bin_dest is string
       - shell__configure_bin_dest | length > 0
       - shell__configure_bin_dest is not search('^/')
-      - not (shell__configure_starship_enabled | bool and
-        shell__configure_starship_remove_enabled | bool)
     fail_msg: "shell-config configure inputs are invalid."
     success_msg: "shell-config configure inputs are valid."
   tags:
@@ -73,7 +75,7 @@
     - shell-validate
 
 # -----------------------------------------------------------------------------
-# Template source paths
+# Template/source paths
 # -----------------------------------------------------------------------------
 
 - name: Shell Config | Configure | Set template source paths
@@ -86,15 +88,13 @@
       '/../templates/zsh/prompt.zsh.j2') }}"
     shell__template_aliases: "{{ shell_aliases_template_src | default(playbook_dir ~
       '/../templates/zsh/aliases.zsh.j2') }}"
-    shell__template_starship: "{{ shell_starship_config_template_src |
-      default(playbook_dir ~ '/../templates/starship/starship.toml.j2') }}"
   changed_when: false
   tags:
     - shell
     - shell-configure
     - shell-templates
 
-- name: Shell Config | Configure | Stat required zsh templates
+- name: Shell Config | Configure | Stat required zsh sources
   ansible.builtin.stat:
     path: "{{ item.path }}"
     follow: false
@@ -111,9 +111,6 @@
     - name: aliases
       path: "{{ shell__template_aliases }}"
       required: true
-    - name: starship
-      path: "{{ shell__template_starship }}"
-      required: "{{ shell__configure_starship_enabled | bool }}"
   loop_control:
     label: "{{ item.name }} -> {{ item.path }}"
   register: shell__template_stats
@@ -125,13 +122,13 @@
     - shell-configure
     - shell-templates
 
-- name: Shell Config | Configure | Assert required templates exist
+- name: Shell Config | Configure | Assert required sources exist
   ansible.builtin.assert:
     that:
       - item.stat.exists | default(false) | bool
       - item.stat.isreg | default(false) | bool
       - not (item.stat.islnk | default(false) | bool)
-    fail_msg: "Required shell template is missing, not a file, or symlinked: {{
+    fail_msg: "Required shell source is missing, not a file, or symlinked: {{
       item.item.path }}"
   loop: "{{ shell__template_stats.results | default([]) }}"
   loop_control:
@@ -196,18 +193,20 @@
           'group': group_name,
           'home': user.home_directory,
           'path': user.home_directory ~ '/.zshenv',
-          'template': shell__template_zshenv,
+          'src': shell__template_zshenv,
           'mode': shell_zshrc_mode | default('0644'),
-          'name': '.zshenv'
+          'name': '.zshenv',
+          'render_template': true
         }) -%}
         {%- set _ = out.append({
           'user': user.name,
           'group': group_name,
           'home': user.home_directory,
           'path': user.home_directory ~ '/.zshrc',
-          'template': shell__template_zshrc,
+          'src': shell__template_zshrc,
           'mode': shell_zshrc_mode | default('0644'),
-          'name': '.zshrc'
+          'name': '.zshrc',
+          'render_template': true
         }) -%}
         {%- if shell__configure_prompt_enabled | bool -%}
           {%- set _ = out.append({
@@ -215,9 +214,10 @@
             'group': group_name,
             'home': user.home_directory,
             'path': user.home_directory ~ '/' ~ (shell_prompt_file | default('.zsh_prompt')),
-            'template': shell__template_prompt,
+            'src': shell__template_prompt,
             'mode': shell_prompt_mode | default('0644'),
-            'name': shell_prompt_file | default('.zsh_prompt')
+            'name': shell_prompt_file | default('.zsh_prompt'),
+            'render_template': false
           }) -%}
         {%- endif -%}
         {%- set _ = out.append({
@@ -225,9 +225,10 @@
           'group': group_name,
           'home': user.home_directory,
           'path': user.home_directory ~ '/.zsh_aliases',
-          'template': shell__template_aliases,
+          'src': shell__template_aliases,
           'mode': shell_zshrc_mode | default('0644'),
-          'name': '.zsh_aliases'
+          'name': '.zsh_aliases',
+          'render_template': false
         }) -%}
       {%- endfor -%} {{ out }}
   changed_when: false
@@ -271,105 +272,46 @@
 # Zsh environment files
 # -----------------------------------------------------------------------------
 
-- name: Shell Config | Configure | Install managed zsh files
+- name: Shell Config | Configure | Install templated zsh files
   ansible.builtin.template:
-    src: "{{ item.template }}"
+    src: "{{ item.src }}"
     dest: "{{ item.path }}"
     owner: "{{ item.user }}"
     group: "{{ item.group }}"
     mode: "{{ item.mode }}"
     backup: "{{ shell_dotfile_backup | default(false) }}"
   become: true
-  loop: "{{ shell__managed_zsh_files | default([]) }}"
+  loop: "{{ shell__managed_zsh_files | default([]) | selectattr('render_template',
+    'equalto', true) | list }}"
   loop_control:
     label: "{{ item.user }} -> {{ item.name }}"
   vars:
     user:
       name: "{{ item.user }}"
       home_directory: "{{ item.home }}"
-    ansible_template_src: "{{ item.template }}"
+    ansible_template_src: "{{ item.src }}"
   tags:
     - shell
     - shell-configure
     - shell-zsh
 
-# -----------------------------------------------------------------------------
-# Optional Starship config
-# -----------------------------------------------------------------------------
-
-- name: Shell Config | Configure | Ensure Starship config directory exists
-  ansible.builtin.file:
-    path: "{{ item.home_directory }}/.config"
-    state: directory
-    owner: "{{ item.name }}"
-    group: "{{ item.shell_config_group | default(item.primary_group |
-      default(item.name)) }}"
-    mode: "0755"
+- name: Shell Config | Configure | Install literal zsh files
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.path }}"
+    owner: "{{ item.user }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+    backup: "{{ shell_dotfile_backup | default(false) }}"
   become: true
-  loop: "{{ shell__configure_users }}"
+  loop: "{{ shell__managed_zsh_files | default([]) | selectattr('render_template',
+    'equalto', false) | list }}"
   loop_control:
-    label: "{{ item.name }}"
-  when: shell__configure_starship_enabled | bool
+    label: "{{ item.user }} -> {{ item.name }}"
   tags:
     - shell
     - shell-configure
-    - shell-starship
-
-- name: Shell Config | Configure | Stat Starship config files
-  ansible.builtin.stat:
-    path: "{{ item.home_directory }}/.config/starship.toml"
-    follow: false
-  register: shell__starship_config_stats
-  loop: "{{ shell__configure_users }}"
-  loop_control:
-    label: "{{ item.name }}"
-  changed_when: false
-  become: true
-  when: shell__configure_starship_enabled | bool
-  tags:
-    - shell
-    - shell-configure
-    - shell-starship
-    - shell-validate
-
-- name: Shell Config | Configure | Refuse symlinked Starship config files
-  ansible.builtin.fail:
-    msg: >-
-      Refusing to overwrite symlinked Starship config for {{ item.item.name }}:
-      {{ item.item.home_directory }}/.config/starship.toml
-  loop: "{{ shell__starship_config_stats.results | default([]) }}"
-  loop_control:
-    label: "{{ item.item.name }}"
-  when:
-    - shell__configure_starship_enabled | bool
-    - item.stat.islnk | default(false) | bool
-  tags:
-    - shell
-    - shell-configure
-    - shell-starship
-    - shell-validate
-
-- name: Shell Config | Configure | Install Starship config
-  ansible.builtin.template:
-    src: "{{ shell__template_starship }}"
-    dest: "{{ item.home_directory }}/.config/starship.toml"
-    owner: "{{ item.name }}"
-    group: "{{ item.shell_config_group | default(item.primary_group |
-      default(item.name)) }}"
-    mode: "{{ shell_starship_config_mode | default('0644') }}"
-    backup: "{{ shell_starship_config_backup | default(false) }}"
-  become: true
-  loop: "{{ shell__configure_users }}"
-  loop_control:
-    label: "{{ item.name }}"
-  vars:
-    user: "{{ item }}"
-    ansible_template_src: "{{ shell__template_starship }}"
-  when: shell__configure_starship_enabled | bool
-  tags:
-    - shell
-    - shell-configure
-    - shell-starship
+    - shell-zsh
 
 # -----------------------------------------------------------------------------
 # Default shell
@@ -535,15 +477,32 @@
   ansible.builtin.debug:
     msg:
       - "shell-config configure phase complete."
-      - "Users configured: {{ shell__configure_users | map(attribute='name') |
-        list | join(', ') if shell__configure_users | length > 0 else 'none' }}"
-      - "Zsh users: {{ shell__configure_zsh_users | map(attribute='name') | list
-        | join(', ') if shell__configure_zsh_users | length > 0 else 'none' }}"
+      - >-
+        Users configured: {{
+          shell__configure_users
+          | map(attribute='name')
+          | list
+          | join(', ')
+          if shell__configure_users | length > 0
+          else 'none'
+        }}
+      - >-
+        Zsh users: {{
+          shell__configure_zsh_users
+          | map(attribute='name')
+          | list
+          | join(', ')
+          if shell__configure_zsh_users | length > 0
+          else 'none'
+        }}
       - "Prompt enabled: {{ shell__configure_prompt_enabled | bool }}"
-      - "Starship config enabled: {{ shell__configure_starship_enabled | bool }}"
       - "Bin commands enabled: {{ shell__configure_bin_enabled | bool }}"
-      - "Bin command count: {{ shell_bin_command_files.files | default([]) |
-        length if shell__configure_bin_enabled | bool else 0 }}"
+      - >-
+        Bin command count: {{
+          shell_bin_command_files.files | default([]) | length
+          if shell__configure_bin_enabled | bool
+          else 0
+        }}
   when: shell_config_show_summary | default(true) | bool
   tags:
     - shell

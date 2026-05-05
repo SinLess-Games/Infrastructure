@@ -7,9 +7,16 @@
 # Design:
 #   - Builds a deterministic package list from enabled groups.
 #   - Supports extra APT packages.
+#   - Supports optional NodeSource Node.js major-version installation.
+#   - Removes old apt-managed Node.js packages before installing requested major.
 #   - Filters empty/null rendered values.
+#   - Normalizes Ubuntu regional mirrors when needed.
 #   - Updates apt cache with retry handling.
 #   - Installs packages non-interactively.
+#   - Adds APT retry/timeout configuration for unreliable mirrors.
+#   - Waits for APT/dpkg locks before package operations.
+#   - Cleans partial archives before install to avoid repeated bad downloads.
+#   - Falls back to apt-get --fix-missing when ansible.builtin.apt fails.
 #   - Supports explicit package removal.
 # =============================================================================
 
@@ -47,7 +54,9 @@
       {%- endfor -%} {%- for package_name in packages_extra_apt_packages |
       default([]) -%}
         {%- set _ = packages.append(package_name) -%}
-      {%- endfor -%} {{ packages }}
+      {%- endfor -%} {%- if packages_nodejs_enabled | default(false) | bool -%}
+        {%- set _ = packages.append(packages_nodejs_package_name | default('nodejs')) -%}
+      {%- endif -%} {{ packages }}
   changed_when: false
   tags:
     - packages
@@ -97,6 +106,58 @@
     - packages
     - packages-apt
 
+- name: Packages | Normalize APT operation settings
+  ansible.builtin.set_fact:
+    packages__apt_retries: "{{ packages_apt_retries | default(5) | int }}"
+    packages__apt_delay: "{{ packages_apt_delay | default(15) | int }}"
+    packages__apt_lock_timeout: "{{ packages_apt_lock_timeout | default(600) | int }}"
+    packages__apt_acquire_retries: "{{ packages_apt_acquire_retries | default(5) | int }}"
+    packages__apt_http_timeout: "{{ packages_apt_http_timeout | default(30) | int }}"
+    packages__apt_clean_before_install: "{{ packages_apt_clean_before_install | default(true) | bool }}"
+    packages__apt_force_ipv4: "{{ packages_apt_force_ipv4 | default(false) | bool }}"
+    packages__apt_install_recommends_value: >-
+      {{
+        'true'
+        if packages_install_recommends | default(false) | bool
+        else 'false'
+      }}
+  changed_when: false
+  tags:
+    - packages
+    - packages-apt
+
+- name: Packages | Normalize Node.js settings
+  ansible.builtin.set_fact:
+    packages__nodejs_enabled: "{{ packages_nodejs_enabled | default(false) | bool }}"
+    packages__nodejs_major: "{{ packages_nodejs_major | default('25') | string }}"
+    packages__nodejs_package_name: "{{ packages_nodejs_package_name | default('nodejs') }}"
+    packages__nodejs_remove_old: "{{ packages_nodejs_remove_old | default(true) | bool }}"
+    packages__nodejs_remove_old_packages: >-
+      {{
+        packages_nodejs_remove_old_packages
+        | default([
+            'nodejs',
+            'npm',
+            'libnode-dev',
+            'nodejs-doc'
+          ])
+      }}
+    packages__nodejs_setup_url: >-
+      {{
+        packages_nodejs_setup_url
+        | default('https://deb.nodesource.com/setup_' ~ (packages_nodejs_major | default('25') | string) ~ '.x')
+      }}
+    packages__nodejs_setup_path: >-
+      {{
+        packages_nodejs_setup_path
+        | default('/tmp/nodesource_setup_' ~ (packages_nodejs_major | default('25') | string) ~ '.x')
+      }}
+  changed_when: false
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
 # -----------------------------------------------------------------------------
 # Debug
 # -----------------------------------------------------------------------------
@@ -104,12 +165,33 @@
 - name: Packages | Show resolved APT package plan
   ansible.builtin.debug:
     msg:
-      - "Enabled groups: {{ packages__selected_groups | join(', ') if
-        packages__selected_groups | length > 0 else 'none' }}"
-      - "Packages to install: {{ packages__resolved_apt_packages | join(', ') if
-        packages__resolved_apt_packages | length > 0 else 'none' }}"
-      - "Packages to remove: {{ packages__remove_apt_packages | join(', ') if
-        packages__remove_apt_packages | length > 0 else 'none' }}"
+      - >-
+        Enabled groups: {{
+          packages__selected_groups | join(', ')
+          if packages__selected_groups | length > 0
+          else 'none'
+        }}
+      - >-
+        Packages to install: {{
+          packages__resolved_apt_packages | join(', ')
+          if packages__resolved_apt_packages | length > 0
+          else 'none'
+        }}
+      - >-
+        Packages to remove: {{
+          packages__remove_apt_packages | join(', ')
+          if packages__remove_apt_packages | length > 0
+          else 'none'
+        }}
+      - "Node.js enabled: {{ packages__nodejs_enabled }}"
+      - "Node.js requested major: {{ packages__nodejs_major }}"
+      - "Node.js remove old packages: {{ packages__nodejs_remove_old }}"
+      - "APT retries: {{ packages__apt_retries }}"
+      - "APT retry delay: {{ packages__apt_delay }}s"
+      - "APT lock timeout: {{ packages__apt_lock_timeout }}s"
+      - "APT acquire retries: {{ packages__apt_acquire_retries }}"
+      - "APT HTTP timeout: {{ packages__apt_http_timeout }}s"
+      - "APT force IPv4: {{ packages__apt_force_ipv4 }}"
   when: ansible_verbosity | int >= 1
   tags:
     - packages
@@ -117,16 +199,651 @@
     - packages-summary
 
 # -----------------------------------------------------------------------------
+# APT reliability configuration
+# -----------------------------------------------------------------------------
+
+- name: Packages | Configure APT retry and timeout behavior
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/99sinless-packages-retries
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Managed by Ansible role: packages
+      Acquire::Retries "{{ packages__apt_acquire_retries }}";
+      Acquire::http::Timeout "{{ packages__apt_http_timeout }}";
+      Acquire::https::Timeout "{{ packages__apt_http_timeout }}";
+      Acquire::ftp::Timeout "{{ packages__apt_http_timeout }}";
+      Acquire::http::Pipeline-Depth "0";
+      {% if packages__apt_force_ipv4 | bool %}
+      Acquire::ForceIPv4 "true";
+      {% endif %}
+  become: true
+  when: packages_manage_apt | default(true) | bool
+  tags:
+    - packages
+    - packages-apt
+
+# -----------------------------------------------------------------------------
+# Ubuntu mirror normalization
+# -----------------------------------------------------------------------------
+
+- name: Packages | Normalize Ubuntu APT mirror away from regional mirror
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    changed=0
+
+    while IFS= read -r -d '' apt_file; do
+      if grep -q 'http://us.archive.ubuntu.com/ubuntu' "${apt_file}"; then
+        sed -i 's|http://us.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' "${apt_file}"
+        changed=1
+      fi
+    done < <(find /etc/apt -type f \( -name "*.list" -o -name "*.sources" \) -print0)
+
+    exit "${changed}"
+  args:
+    executable: /bin/bash
+  register: packages__ubuntu_mirror_normalize
+  changed_when: packages__ubuntu_mirror_normalize.rc == 1
+  failed_when: packages__ubuntu_mirror_normalize.rc not in [0, 1]
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - ansible_facts.distribution | default('') == 'Ubuntu'
+  tags:
+    - packages
+    - packages-apt
+
+# -----------------------------------------------------------------------------
+# APT lock helpers
+# -----------------------------------------------------------------------------
+
+- name: Packages | Wait for APT and dpkg locks
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    lock_timeout="{{ packages__apt_lock_timeout | default(600) }}"
+    waited=0
+
+    locks=(
+      /var/lib/dpkg/lock
+      /var/lib/dpkg/lock-frontend
+      /var/lib/apt/lists/lock
+      /var/cache/apt/archives/lock
+    )
+
+    while true; do
+      locked=0
+
+      for lock_file in "${locks[@]}"; do
+        if [ -e "${lock_file}" ] && fuser "${lock_file}" >/dev/null 2>&1; then
+          locked=1
+          break
+        fi
+      done
+
+      if [ "${locked}" -eq 0 ]; then
+        exit 0
+      fi
+
+      if [ "${waited}" -ge "${lock_timeout}" ]; then
+        echo "Timed out waiting for APT/dpkg locks after ${lock_timeout}s" >&2
+
+        for lock_file in "${locks[@]}"; do
+          if [ -e "${lock_file}" ]; then
+            fuser -v "${lock_file}" || true
+          fi
+        done
+
+        exit 1
+      fi
+
+      sleep 5
+      waited=$((waited + 5))
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+  become: true
+  when: packages_manage_apt | default(true) | bool
+  tags:
+    - packages
+    - packages-apt
+
+- name: Packages | Repair interrupted dpkg state before APT operations
+  ansible.builtin.command:
+    argv:
+      - dpkg
+      - --configure
+      - -a
+  register: packages__dpkg_configure
+  changed_when: packages__dpkg_configure.stdout | length > 0
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when: packages_manage_apt | default(true) | bool
+  tags:
+    - packages
+    - packages-apt
+
+- name: Packages | Wait for APT locks before cleanup
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    lock_timeout="{{ packages__apt_lock_timeout | default(600) }}"
+    waited=0
+
+    locks=(
+      /var/lib/dpkg/lock
+      /var/lib/dpkg/lock-frontend
+      /var/lib/apt/lists/lock
+      /var/cache/apt/archives/lock
+    )
+
+    while true; do
+      locked=0
+
+      for lock_file in "${locks[@]}"; do
+        if [ -e "${lock_file}" ] && fuser "${lock_file}" >/dev/null 2>&1; then
+          locked=1
+          break
+        fi
+      done
+
+      if [ "${locked}" -eq 0 ]; then
+        exit 0
+      fi
+
+      if [ "${waited}" -ge "${lock_timeout}" ]; then
+        echo "Timed out waiting for APT/dpkg locks after ${lock_timeout}s" >&2
+
+        for lock_file in "${locks[@]}"; do
+          if [ -e "${lock_file}" ]; then
+            fuser -v "${lock_file}" || true
+          fi
+        done
+
+        exit 1
+      fi
+
+      sleep 5
+      waited=$((waited + 5))
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__apt_clean_before_install | bool
+  tags:
+    - packages
+    - packages-apt
+
+- name: Packages | Clean partial APT archives before install
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    apt-get clean || true
+    rm -rf /var/cache/apt/archives/partial/* || true
+    rm -rf /var/lib/apt/lists/partial/* || true
+  args:
+    executable: /bin/bash
+  changed_when: false
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__apt_clean_before_install | bool
+  tags:
+    - packages
+    - packages-apt
+
+# -----------------------------------------------------------------------------
+# Node.js / NodeSource
+# -----------------------------------------------------------------------------
+
+- name: Packages | Check current system Node.js version
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/node
+      - -p
+      - process.versions.node
+  register: packages__nodejs_current_version
+  changed_when: false
+  failed_when: false
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Set current system Node.js major version
+  ansible.builtin.set_fact:
+    packages__nodejs_current_major: >-
+      {{
+        (
+          packages__nodejs_current_version.stdout
+          | default('')
+          | split('.')
+          | first
+        )
+        | default('', true)
+      }}
+  changed_when: false
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Wait for APT locks before old Node.js removal
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    lock_timeout="{{ packages__apt_lock_timeout | default(600) }}"
+    waited=0
+
+    locks=(
+      /var/lib/dpkg/lock
+      /var/lib/dpkg/lock-frontend
+      /var/lib/apt/lists/lock
+      /var/cache/apt/archives/lock
+    )
+
+    while true; do
+      locked=0
+
+      for lock_file in "${locks[@]}"; do
+        if [ -e "${lock_file}" ] && fuser "${lock_file}" >/dev/null 2>&1; then
+          locked=1
+          break
+        fi
+      done
+
+      if [ "${locked}" -eq 0 ]; then
+        exit 0
+      fi
+
+      if [ "${waited}" -ge "${lock_timeout}" ]; then
+        echo "Timed out waiting for APT/dpkg locks after ${lock_timeout}s" >&2
+        exit 1
+      fi
+
+      sleep 5
+      waited=$((waited + 5))
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+    - packages__nodejs_remove_old | bool
+    - packages__nodejs_current_major != packages__nodejs_major
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Remove old apt-managed Node.js packages
+  ansible.builtin.apt:
+    name: "{{ packages__nodejs_remove_old_packages }}"
+    state: absent
+    purge: true
+    autoremove: true
+    dpkg_options: "force-confdef,force-confold"
+    lock_timeout: "{{ packages__apt_lock_timeout }}"
+  register: packages__nodejs_remove_old_result
+  retries: "{{ packages__apt_retries }}"
+  delay: "{{ packages__apt_delay }}"
+  until: packages__nodejs_remove_old_result is succeeded
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+    - packages__nodejs_remove_old | bool
+    - packages__nodejs_current_major != packages__nodejs_major
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Remove stale NodeSource repository files before setup
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/nodesource.list
+    - /etc/apt/sources.list.d/nodesource.sources
+    - /etc/apt/keyrings/nodesource.gpg
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+    - packages__nodejs_current_major != packages__nodejs_major
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Wait for APT locks before NodeSource prerequisites
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    lock_timeout="{{ packages__apt_lock_timeout | default(600) }}"
+    waited=0
+
+    locks=(
+      /var/lib/dpkg/lock
+      /var/lib/dpkg/lock-frontend
+      /var/lib/apt/lists/lock
+      /var/cache/apt/archives/lock
+    )
+
+    while true; do
+      locked=0
+
+      for lock_file in "${locks[@]}"; do
+        if [ -e "${lock_file}" ] && fuser "${lock_file}" >/dev/null 2>&1; then
+          locked=1
+          break
+        fi
+      done
+
+      if [ "${locked}" -eq 0 ]; then
+        exit 0
+      fi
+
+      if [ "${waited}" -ge "${lock_timeout}" ]; then
+        echo "Timed out waiting for APT/dpkg locks after ${lock_timeout}s" >&2
+        exit 1
+      fi
+
+      sleep 5
+      waited=$((waited + 5))
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+    - packages__nodejs_current_major != packages__nodejs_major
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Ensure NodeSource prerequisites are installed
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    install_recommends: false
+    dpkg_options: "force-confdef,force-confold"
+    lock_timeout: "{{ packages__apt_lock_timeout }}"
+    update_cache: true
+    cache_valid_time: "{{ packages_cache_valid_time | default(3600) | int }}"
+  register: packages__nodejs_prereqs
+  retries: "{{ packages__apt_retries }}"
+  delay: "{{ packages__apt_delay }}"
+  until: packages__nodejs_prereqs is succeeded
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+    - packages__nodejs_current_major != packages__nodejs_major
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Download NodeSource setup script for Node.js {{
+    packages__nodejs_major }}
+  ansible.builtin.get_url:
+    url: "{{ packages__nodejs_setup_url }}"
+    dest: "{{ packages__nodejs_setup_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+    force: true
+    timeout: "{{ packages__apt_http_timeout }}"
+  register: packages__nodejs_setup_download
+  retries: "{{ packages__apt_retries }}"
+  delay: "{{ packages__apt_delay }}"
+  until: packages__nodejs_setup_download is succeeded
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+    - packages__nodejs_current_major != packages__nodejs_major
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Wait for APT locks before NodeSource setup
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    lock_timeout="{{ packages__apt_lock_timeout | default(600) }}"
+    waited=0
+
+    locks=(
+      /var/lib/dpkg/lock
+      /var/lib/dpkg/lock-frontend
+      /var/lib/apt/lists/lock
+      /var/cache/apt/archives/lock
+    )
+
+    while true; do
+      locked=0
+
+      for lock_file in "${locks[@]}"; do
+        if [ -e "${lock_file}" ] && fuser "${lock_file}" >/dev/null 2>&1; then
+          locked=1
+          break
+        fi
+      done
+
+      if [ "${locked}" -eq 0 ]; then
+        exit 0
+      fi
+
+      if [ "${waited}" -ge "${lock_timeout}" ]; then
+        echo "Timed out waiting for APT/dpkg locks after ${lock_timeout}s" >&2
+        exit 1
+      fi
+
+      sleep 5
+      waited=$((waited + 5))
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+    - packages__nodejs_current_major != packages__nodejs_major
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Configure NodeSource repository for Node.js {{
+    packages__nodejs_major }}
+  ansible.builtin.command:
+    argv:
+      - bash
+      - "{{ packages__nodejs_setup_path }}"
+  register: packages__nodejs_setup_result
+  changed_when: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+    - packages__nodejs_current_major != packages__nodejs_major
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Wait for APT locks before Node.js install
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    lock_timeout="{{ packages__apt_lock_timeout | default(600) }}"
+    waited=0
+
+    locks=(
+      /var/lib/dpkg/lock
+      /var/lib/dpkg/lock-frontend
+      /var/lib/apt/lists/lock
+      /var/cache/apt/archives/lock
+    )
+
+    while true; do
+      locked=0
+
+      for lock_file in "${locks[@]}"; do
+        if [ -e "${lock_file}" ] && fuser "${lock_file}" >/dev/null 2>&1; then
+          locked=1
+          break
+        fi
+      done
+
+      if [ "${locked}" -eq 0 ]; then
+        exit 0
+      fi
+
+      if [ "${waited}" -ge "${lock_timeout}" ]; then
+        echo "Timed out waiting for APT/dpkg locks after ${lock_timeout}s" >&2
+        exit 1
+      fi
+
+      sleep 5
+      waited=$((waited + 5))
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+- name: Packages | Install requested Node.js major from NodeSource
+  ansible.builtin.apt:
+    name: "{{ packages__nodejs_package_name }}"
+    state: latest
+    install_recommends: false
+    dpkg_options: "force-confdef,force-confold"
+    lock_timeout: "{{ packages__apt_lock_timeout }}"
+    update_cache: true
+    cache_valid_time: 0
+  register: packages__nodejs_install_result
+  retries: "{{ packages__apt_retries }}"
+  delay: "{{ packages__apt_delay }}"
+  until: packages__nodejs_install_result is succeeded
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+    NEEDRESTART_MODE: a
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+
+# -----------------------------------------------------------------------------
 # APT cache
 # -----------------------------------------------------------------------------
+
+- name: Packages | Wait for APT locks before cache update
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    lock_timeout="{{ packages__apt_lock_timeout | default(600) }}"
+    waited=0
+
+    locks=(
+      /var/lib/dpkg/lock
+      /var/lib/dpkg/lock-frontend
+      /var/lib/apt/lists/lock
+      /var/cache/apt/archives/lock
+    )
+
+    while true; do
+      locked=0
+
+      for lock_file in "${locks[@]}"; do
+        if [ -e "${lock_file}" ] && fuser "${lock_file}" >/dev/null 2>&1; then
+          locked=1
+          break
+        fi
+      done
+
+      if [ "${locked}" -eq 0 ]; then
+        exit 0
+      fi
+
+      if [ "${waited}" -ge "${lock_timeout}" ]; then
+        echo "Timed out waiting for APT/dpkg locks after ${lock_timeout}s" >&2
+        exit 1
+      fi
+
+      sleep 5
+      waited=$((waited + 5))
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+  become: true
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages_update_cache | default(true) | bool
+  tags:
+    - packages
+    - packages-apt
 
 - name: Packages | Update APT cache
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: "{{ packages_cache_valid_time | default(3600) | int }}"
+    lock_timeout: "{{ packages__apt_lock_timeout }}"
   register: packages__apt_cache_update
-  retries: "{{ packages_apt_retries | default(3) | int }}"
-  delay: "{{ packages_apt_delay | default(5) | int }}"
+  retries: "{{ packages__apt_retries }}"
+  delay: "{{ packages__apt_delay }}"
   until: packages__apt_cache_update is succeeded
   environment:
     DEBIAN_FRONTEND: noninteractive
@@ -150,9 +867,10 @@
     purge: "{{ packages_remove_apt_purge | default(false) | bool }}"
     autoremove: "{{ packages_autoremove | default(false) | bool }}"
     dpkg_options: "force-confdef,force-confold"
+    lock_timeout: "{{ packages__apt_lock_timeout }}"
   register: packages__apt_remove
-  retries: "{{ packages_apt_retries | default(3) | int }}"
-  delay: "{{ packages_apt_delay | default(5) | int }}"
+  retries: "{{ packages__apt_retries }}"
+  delay: "{{ packages__apt_delay }}"
   until: packages__apt_remove is succeeded
   environment:
     DEBIAN_FRONTEND: noninteractive
@@ -170,25 +888,232 @@
 # -----------------------------------------------------------------------------
 
 - name: Packages | Install APT packages
-  ansible.builtin.apt:
-    name: "{{ packages__resolved_apt_packages }}"
-    state: "{{ packages_apt_state | default('present') }}"
-    install_recommends: "{{ packages_install_recommends | default(false) | bool }}"
-    dpkg_options: "force-confdef,force-confold"
-  register: packages__apt_install
-  retries: "{{ packages_apt_retries | default(3) | int }}"
-  delay: "{{ packages_apt_delay | default(5) | int }}"
-  until: packages__apt_install is succeeded
-  environment:
-    DEBIAN_FRONTEND: noninteractive
-    NEEDRESTART_MODE: a
-  become: true
   when:
     - packages_manage_apt | default(true) | bool
     - packages__resolved_apt_packages | length > 0
   tags:
     - packages
     - packages-apt
+  block:
+    - name: Packages | Wait for APT locks before package install
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        lock_timeout="{{ packages__apt_lock_timeout | default(600) }}"
+        waited=0
+
+        locks=(
+          /var/lib/dpkg/lock
+          /var/lib/dpkg/lock-frontend
+          /var/lib/apt/lists/lock
+          /var/cache/apt/archives/lock
+        )
+
+        while true; do
+          locked=0
+
+          for lock_file in "${locks[@]}"; do
+            if [ -e "${lock_file}" ] && fuser "${lock_file}" >/dev/null 2>&1; then
+              locked=1
+              break
+            fi
+          done
+
+          if [ "${locked}" -eq 0 ]; then
+            exit 0
+          fi
+
+          if [ "${waited}" -ge "${lock_timeout}" ]; then
+            echo "Timed out waiting for APT/dpkg locks after ${lock_timeout}s" >&2
+            exit 1
+          fi
+
+          sleep 5
+          waited=$((waited + 5))
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      become: true
+
+    - name: Packages | Install APT packages with apt module
+      ansible.builtin.apt:
+        name: "{{ packages__resolved_apt_packages }}"
+        state: "{{ packages_apt_state | default('present') }}"
+        install_recommends: "{{ packages_install_recommends | default(false) | bool }}"
+        dpkg_options: "force-confdef,force-confold"
+        lock_timeout: "{{ packages__apt_lock_timeout }}"
+      register: packages__apt_install
+      retries: "{{ packages__apt_retries }}"
+      delay: "{{ packages__apt_delay }}"
+      until: packages__apt_install is succeeded
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_MODE: a
+      become: true
+
+  rescue:
+    - name: Packages | Show APT module failure before fallback
+      ansible.builtin.debug:
+        msg:
+          - "APT module install failed; running cleanup and apt-get
+            --fix-missing fallback."
+          - "{{ ansible_failed_result.msg | default('No failure message
+            available.') }}"
+
+    - name: Packages | Wait for APT locks before failed-install cleanup
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        lock_timeout="{{ packages__apt_lock_timeout | default(600) }}"
+        waited=0
+
+        locks=(
+          /var/lib/dpkg/lock
+          /var/lib/dpkg/lock-frontend
+          /var/lib/apt/lists/lock
+          /var/cache/apt/archives/lock
+        )
+
+        while true; do
+          locked=0
+
+          for lock_file in "${locks[@]}"; do
+            if [ -e "${lock_file}" ] && fuser "${lock_file}" >/dev/null 2>&1; then
+              locked=1
+              break
+            fi
+          done
+
+          if [ "${locked}" -eq 0 ]; then
+            exit 0
+          fi
+
+          if [ "${waited}" -ge "${lock_timeout}" ]; then
+            echo "Timed out waiting for APT/dpkg locks after ${lock_timeout}s" >&2
+            exit 1
+          fi
+
+          sleep 5
+          waited=$((waited + 5))
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      become: true
+
+    - name: Packages | Clean APT state after failed install
+      ansible.builtin.shell: |
+        set -euo pipefail
+
+        apt-get clean || true
+        rm -rf /var/cache/apt/archives/partial/* || true
+        rm -rf /var/lib/apt/lists/partial/* || true
+        dpkg --configure -a
+      args:
+        executable: /bin/bash
+      changed_when: false
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_MODE: a
+      become: true
+
+    - name: Packages | Refresh APT cache before fallback install
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 0
+        lock_timeout: "{{ packages__apt_lock_timeout }}"
+      register: packages__apt_cache_refresh_after_failure
+      retries: "{{ packages__apt_retries }}"
+      delay: "{{ packages__apt_delay }}"
+      until: packages__apt_cache_refresh_after_failure is succeeded
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_MODE: a
+      become: true
+
+    - name: Packages | Install APT packages with apt-get fix-missing fallback
+      ansible.builtin.command:
+        argv: >-
+          {{
+            [
+              'apt-get',
+              '-y',
+              '-o',
+              'Dpkg::Options::=--force-confdef',
+              '-o',
+              'Dpkg::Options::=--force-confold',
+              '-o',
+              'DPkg::Lock::Timeout=' ~ (packages__apt_lock_timeout | string),
+              '-o',
+              'Acquire::Retries=' ~ (packages__apt_acquire_retries | string),
+              '-o',
+              'Acquire::http::Timeout=' ~ (packages__apt_http_timeout | string),
+              '-o',
+              'Acquire::https::Timeout=' ~ (packages__apt_http_timeout | string),
+              '-o',
+              'APT::Install-Recommends=' ~ packages__apt_install_recommends_value,
+              '--fix-missing',
+              'install'
+            ]
+            + packages__resolved_apt_packages
+          }}
+      register: packages__apt_install_fallback
+      retries: "{{ packages__apt_retries }}"
+      delay: "{{ packages__apt_delay }}"
+      until: packages__apt_install_fallback.rc == 0
+      changed_when: >-
+        '0 upgraded, 0 newly installed' not in
+        packages__apt_install_fallback.stdout
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_MODE: a
+      become: true
+
+# -----------------------------------------------------------------------------
+# Verify Node.js
+# -----------------------------------------------------------------------------
+
+- name: Packages | Verify requested system Node.js major version
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/node
+      - -p
+      - process.versions.node
+  register: packages__nodejs_verify_version
+  changed_when: false
+  failed_when: >-
+    packages__nodejs_verify_version.rc != 0 or not (
+      packages__nodejs_verify_version.stdout
+      | default('')
+      is match('^' ~ packages__nodejs_major ~ '\.')
+    )
+  when:
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+    - packages-verify
+
+- name: Packages | Show Node.js version
+  ansible.builtin.debug:
+    msg:
+      - "System Node.js installed version: {{
+        packages__nodejs_verify_version.stdout }}"
+      - "Requested Node.js major: {{ packages__nodejs_major }}"
+      - "Note: user shell PATH may still prefer nvm/homebrew/local Node.js if
+        configured separately."
+  when:
+    - packages_show_summary | default(true) | bool
+    - packages_manage_apt | default(true) | bool
+    - packages__nodejs_enabled | bool
+  tags:
+    - packages
+    - packages-apt
+    - packages-nodejs
+    - packages-summary
 
 # -----------------------------------------------------------------------------
 # Optional cleanup
@@ -197,9 +1122,10 @@
 - name: Packages | Autoremove unused APT packages
   ansible.builtin.apt:
     autoremove: true
+    lock_timeout: "{{ packages__apt_lock_timeout }}"
   register: packages__apt_autoremove
-  retries: "{{ packages_apt_retries | default(3) | int }}"
-  delay: "{{ packages_apt_delay | default(5) | int }}"
+  retries: "{{ packages__apt_retries }}"
+  delay: "{{ packages__apt_delay }}"
   until: packages__apt_autoremove is succeeded
   environment:
     DEBIAN_FRONTEND: noninteractive
@@ -216,9 +1142,10 @@
 - name: Packages | Autoclean APT cache
   ansible.builtin.apt:
     autoclean: true
+    lock_timeout: "{{ packages__apt_lock_timeout }}"
   register: packages__apt_autoclean
-  retries: "{{ packages_apt_retries | default(3) | int }}"
-  delay: "{{ packages_apt_delay | default(5) | int }}"
+  retries: "{{ packages_apt_retries | default(5) | int }}"
+  delay: "{{ packages_apt_delay | default(15) | int }}"
   until: packages__apt_autoclean is succeeded
   environment:
     DEBIAN_FRONTEND: noninteractive
@@ -243,12 +1170,23 @@
       - "APT enabled: {{ packages_manage_apt | default(true) | bool }}"
       - "Cache update enabled: {{ packages_update_cache | default(true) | bool
         }}"
-      - "Enabled groups: {{ packages__selected_groups | join(', ') if
-        packages__selected_groups | length > 0 else 'none' }}"
+      - >-
+        Enabled groups: {{
+          packages__selected_groups | join(', ')
+          if packages__selected_groups | length > 0
+          else 'none'
+        }}
       - "Installed package count: {{ packages__resolved_apt_packages | length }}"
       - "Removed package count: {{ packages__remove_apt_packages | length }}"
       - "Autoremove enabled: {{ packages_autoremove | default(false) | bool }}"
       - "Autoclean enabled: {{ packages_autoclean | default(false) | bool }}"
+      - "Node.js enabled: {{ packages__nodejs_enabled }}"
+      - "Node.js requested major: {{ packages__nodejs_major }}"
+      - "Node.js old package removal enabled: {{ packages__nodejs_remove_old }}"
+      - "APT retries: {{ packages__apt_retries }}"
+      - "APT retry delay: {{ packages__apt_delay }}s"
+      - "APT acquire retries: {{ packages__apt_acquire_retries }}"
+      - "APT HTTP timeout: {{ packages__apt_http_timeout }}s"
   when: packages_show_summary | default(true) | bool
   tags:
     - packages

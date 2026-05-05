@@ -39,17 +39,22 @@
 - name: SSH | Keys Install | Normalize inputs
   ansible.builtin.set_fact:
     ssh_copy_keys_users_effective: "{{ ssh_role_users | default(users | default([])) }}"
-    ssh_copy_keys_output_base_effective: "{{ ssh_user_materials_output_dir |
-      default(ssh_output_base | default(playbook_dir ~
-      '/../../.outputs/ssh/users')) }}"
+    ssh_copy_keys_output_base_effective: >-
+      {{
+        ssh_user_materials_output_dir
+        | default(ssh_output_base | default(playbook_dir ~ '/../../.outputs/ssh/users'))
+      }}
     ssh_copy_keys_key_type_effective: "{{ ssh_key_type | default('ed25519') }}"
     ssh_copy_keys_ca_enabled_effective: "{{ ssh_ca_enabled | default(false) | bool }}"
     ssh_copy_keys_install_identity_keys_effective: "{{ ssh_install_identity_keys | default(false) | bool }}"
     ssh_copy_keys_identity_force_effective: "{{ ssh_identity_force | default(false) | bool }}"
     ssh_copy_keys_include_certificates_effective: "{{ ssh_authorized_keys_include_certificates | default(false) | bool }}"
     ssh_copy_keys_home_map_effective: "{{ ssh__user_homes | default({}) }}"
-    ssh_copy_keys_authorized_keys_map_effective: "{{ ssh_authorized_keys |
-      default(ssh.authorized_keys | default({}) if ssh is defined else {}) }}"
+    ssh_copy_keys_authorized_keys_map_effective: >-
+      {{
+        ssh_authorized_keys
+        | default(ssh.authorized_keys | default({}) if ssh is defined else {})
+      }}
     ssh_copy_keys_skip_noninteractive_effective: "{{ ssh_copy_keys_skip_noninteractive_users | default(true) | bool }}"
     ssh_copy_keys_noninteractive_shells_effective:
       - /usr/sbin/nologin
@@ -114,9 +119,9 @@
     ssh_copy_keys_candidate_users: >-
       {%- set users_out = [] -%} {%- for user in ssh_copy_keys_users_effective
       -%}
-        {%- set state = user.state | default('present') -%}
-        {%- set manage_ssh = user.manage_ssh | default(users_default_manage_ssh | default(true)) -%}
-        {%- set shell = user.shell | default('') -%}
+        {%- set state = user['state'] | default('present') -%}
+        {%- set manage_ssh = user['manage_ssh'] | default(users_default_manage_ssh | default(true)) -%}
+        {%- set shell = user['shell'] | default('') -%}
         {%- set is_noninteractive = shell in ssh_copy_keys_noninteractive_shells_effective -%}
         {%- if state == 'present' and manage_ssh | bool -%}
           {%- if not (ssh_copy_keys_skip_noninteractive_effective | bool and is_noninteractive) -%}
@@ -181,17 +186,53 @@
     ssh_copy_keys_jobs: >-
       {%- set jobs = [] -%} {%- for user in ssh_copy_keys_candidate_users |
       default([]) -%}
-        {%- set home = ssh_copy_keys_home_map_effective[user.name] | default(user.home_directory | default('')) -%}
+        {%- set username = user['name'] -%}
+        {%- set home = ssh_copy_keys_home_map_effective[username] | default(user['home_directory'] | default('')) -%}
         {%- if home | length > 0 -%}
-          {%- set key_dir = ssh_copy_keys_output_base_effective ~ '/' ~ user.name -%}
+          {%- set key_dir = ssh_copy_keys_output_base_effective ~ '/' ~ username -%}
           {%- set key_name = 'id_' ~ ssh_copy_keys_key_type_effective -%}
-          {%- set shared_certs = user.shared_certs | default(user['shared-certs'] | default([])) -%}
-          {%- set raw_keys = ssh_copy_keys_authorized_keys_map_effective[user.name].keys | default([]) if ssh_copy_keys_authorized_keys_map_effective[user.name] is defined else [] -%}
-          {%- set authorized_enabled = ssh_copy_keys_authorized_keys_map_effective[user.name].enabled | default(ssh_authorized_keys_fallback_enabled | default(true)) if ssh_copy_keys_authorized_keys_map_effective[user.name] is defined else ssh_authorized_keys_fallback_enabled | default(true) -%}
-          {%- set exclusive = ssh_copy_keys_authorized_keys_map_effective[user.name].exclusive | default(ssh_authorized_keys_default_exclusive | default(false)) if ssh_copy_keys_authorized_keys_map_effective[user.name] is defined else ssh_authorized_keys_default_exclusive | default(false) -%}
+
+          {%- if 'shared_certs' in user -%}
+            {%- set shared_certs = user['shared_certs'] | default([]) -%}
+          {%- elif 'shared-certs' in user -%}
+            {%- set shared_certs = user['shared-certs'] | default([]) -%}
+          {%- else -%}
+            {%- set shared_certs = [] -%}
+          {%- endif -%}
+
+          {%- if username in ssh_copy_keys_authorized_keys_map_effective -%}
+            {%- set auth_config = ssh_copy_keys_authorized_keys_map_effective[username] -%}
+          {%- else -%}
+            {%- set auth_config = {} -%}
+          {%- endif -%}
+
+          {# IMPORTANT:
+             Do not use auth_config.keys.
+             "keys" is a dictionary method in Jinja/Python and will resolve to
+             <built-in method keys ...> instead of the configured field.
+             Always use bracket access for a data field named "keys".
+          #}
+          {%- if auth_config is mapping and 'keys' in auth_config -%}
+            {%- set raw_keys = auth_config['keys'] | default([]) -%}
+          {%- else -%}
+            {%- set raw_keys = [] -%}
+          {%- endif -%}
+
+          {%- if auth_config is mapping and 'enabled' in auth_config -%}
+            {%- set authorized_enabled = auth_config['enabled'] | default(ssh_authorized_keys_fallback_enabled | default(true)) -%}
+          {%- else -%}
+            {%- set authorized_enabled = ssh_authorized_keys_fallback_enabled | default(true) -%}
+          {%- endif -%}
+
+          {%- if auth_config is mapping and 'exclusive' in auth_config -%}
+            {%- set exclusive = auth_config['exclusive'] | default(ssh_authorized_keys_default_exclusive | default(false)) -%}
+          {%- else -%}
+            {%- set exclusive = ssh_authorized_keys_default_exclusive | default(false) -%}
+          {%- endif -%}
+
           {%- set _ = jobs.append({
-            'name': user.name,
-            'group': user.primary_group | default(user.name),
+            'name': username,
+            'group': user['primary_group'] | default(username),
             'home': home,
             'ssh_dir': home ~ '/.ssh',
             'authorized_keys_path': home ~ '/.ssh/authorized_keys',
@@ -750,8 +791,9 @@
       - not (item.stat.islnk | default(false) | bool)
       - item.stat.pw_name == item.item.name
       - item.stat.mode == (ssh_authorized_keys_file_mode | default('0600'))
-    fail_msg: "authorized_keys is missing, symlinked, or has incorrect
-      ownership/mode for {{ item.item.name }}."
+    fail_msg: >-
+      authorized_keys is missing, symlinked, or has incorrect ownership/mode for
+      {{ item.item.name }}.
     success_msg: "authorized_keys is valid for {{ item.item.name }}."
   loop: "{{ ssh_copy_keys_rendered_authorized_keys_stats.results | default([]) }}"
   loop_control:
@@ -789,8 +831,9 @@
       - not (item.stat.islnk | default(false) | bool)
       - item.stat.pw_name == item.item.name
       - item.stat.mode == (ssh_key_mode_private | default('0600'))
-    fail_msg: "Installed SSH private identity is missing, symlinked, or has
-      incorrect ownership/mode for {{ item.item.name }}."
+    fail_msg: >-
+      Installed SSH private identity is missing, symlinked, or has incorrect
+      ownership/mode for {{ item.item.name }}.
     success_msg: "Installed SSH private identity is valid for {{ item.item.name }}."
   loop: "{{ ssh_copy_keys_installed_identity_stats.results | default([]) }}"
   loop_control:

@@ -32,7 +32,9 @@
 - name: SSH | known_hosts | Normalize inputs
   ansible.builtin.set_fact:
     ssh_known_hosts_users_effective: "{{ ssh_role_users | default(users | default([])) }}"
-    ssh_known_hosts_enabled_effective: "{{ ssh_known_hosts_enabled | default(ssh.known_hosts.enabled | default(true) if ssh is defined and ssh.known_hosts is defined else true) }}"
+    ssh_known_hosts_enabled_effective: "{{ ssh_known_hosts_enabled |
+      default(ssh.known_hosts.enabled | default(true) if ssh is defined and
+      ssh.known_hosts is defined else true) }}"
     ssh_known_hosts_home_map_effective: "{{ ssh__user_homes | default({}) }}"
     ssh_known_hosts_patterns_effective: >-
       {{
@@ -73,7 +75,7 @@
       - ssh_known_hosts_entries_effective is not mapping
       - ssh_known_hosts_file_name_effective is string
       - ssh_known_hosts_file_name_effective | length > 0
-      - "/" not in ssh_known_hosts_file_name_effective
+      - "'/' not in ssh_known_hosts_file_name_effective"
     fail_msg: "SSH known_hosts inputs are invalid."
     success_msg: "SSH known_hosts inputs are valid."
   when: ssh_known_hosts_enabled_effective | bool
@@ -93,7 +95,8 @@
     fail_msg: "Each SSH user entry must be a mapping with a valid Linux username."
   loop: "{{ ssh_known_hosts_users_effective }}"
   loop_control:
-    label: "{{ item.name | default('undefined-user') if item is mapping else 'invalid-entry' }}"
+    label: "{{ item.name | default('undefined-user') if item is mapping else
+      'invalid-entry' }}"
   when: ssh_known_hosts_enabled_effective | bool
   tags:
     - ssh
@@ -123,8 +126,8 @@
 - name: SSH | known_hosts | Build candidate user list
   ansible.builtin.set_fact:
     ssh_known_hosts_candidate_users: >-
-      {%- set users_out = [] -%}
-      {%- for user in ssh_known_hosts_users_effective -%}
+      {%- set users_out = [] -%} {%- for user in ssh_known_hosts_users_effective
+      -%}
         {%- set state = user.state | default('present') -%}
         {%- set manage_ssh = user.manage_ssh | default(users_default_manage_ssh | default(true)) -%}
         {%- set shell = user.shell | default('') -%}
@@ -134,8 +137,7 @@
             {%- set _ = users_out.append(user) -%}
           {%- endif -%}
         {%- endif -%}
-      {%- endfor -%}
-      {{ users_out }}
+      {%- endfor -%} {{ users_out }}
   changed_when: false
   when: ssh_known_hosts_enabled_effective | bool
   tags:
@@ -266,8 +268,8 @@
       - ssh_known_hosts_ca_pub_path_effective is defined
       - ssh_known_hosts_ca_pub_path_effective | length > 0
     fail_msg: >-
-      SSH CA public key not found on controller. Checked:
-      {{ ssh_known_hosts_ca_pub_candidates_effective | default([]) | join(', ') }}
+      SSH CA public key not found on controller. Checked: {{
+      ssh_known_hosts_ca_pub_candidates_effective | default([]) | join(', ') }}
     success_msg: "SSH CA public key exists on controller."
   delegate_to: localhost
   become: false
@@ -298,9 +300,9 @@
 - name: SSH | known_hosts | Refuse symlinked CA public key
   ansible.builtin.fail:
     msg: >-
-      SSH CA public key path is a symlink:
-      {{ ssh_known_hosts_ca_pub_path_effective }}.
-      Refusing to read it to avoid ELOOP or stale CA trust material.
+      SSH CA public key path is a symlink: {{
+      ssh_known_hosts_ca_pub_path_effective }}. Refusing to read it to avoid
+      ELOOP or stale CA trust material.
   delegate_to: localhost
   become: false
   when:
@@ -344,8 +346,10 @@
   ansible.builtin.assert:
     that:
       - not (ssh_ca_enabled | default(false) | bool) or ssh_ca_pub | length > 0
-      - not (ssh_ca_enabled | default(false) | bool) or ssh_ca_pub is match('^ssh-(ed25519|rsa)|^ecdsa-sha2-')
-      - not (ssh_ca_enabled | default(false) | bool) or ssh_ca_pub.split() | length >= 2
+      - not (ssh_ca_enabled | default(false) | bool) or ssh_ca_pub is
+        match('^ssh-(ed25519|rsa)|^ecdsa-sha2-')
+      - not (ssh_ca_enabled | default(false) | bool) or ssh_ca_pub.split() |
+        length >= 2
     fail_msg: "Decoded SSH CA public key is empty or invalid."
     success_msg: "Decoded SSH CA public key is valid."
   when: ssh_known_hosts_enabled_effective | bool
@@ -361,8 +365,8 @@
 - name: SSH | known_hosts | Build render jobs
   ansible.builtin.set_fact:
     ssh_known_hosts_render_jobs: >-
-      {%- set jobs = [] -%}
-      {%- for user in ssh_known_hosts_candidate_users | default([]) -%}
+      {%- set jobs = [] -%} {%- for user in ssh_known_hosts_candidate_users |
+      default([]) -%}
         {%- set home = ssh_known_hosts_home_map_effective[user.name] | default(user.home_directory | default('')) -%}
         {%- if home | length > 0 -%}
           {%- set _ = jobs.append({
@@ -373,8 +377,7 @@
             'known_hosts_path': home ~ '/.ssh/' ~ ssh_known_hosts_file_name_effective
           }) -%}
         {%- endif -%}
-      {%- endfor -%}
-      {{ jobs }}
+      {%- endfor -%} {{ jobs }}
   changed_when: false
   when: ssh_known_hosts_enabled_effective | bool
   tags:
@@ -466,16 +469,15 @@
   ansible.builtin.assert:
     that:
       - >-
-        ssh_known_hosts_template_src is defined
-        or ssh_known_hosts_role_template_stat.stat.exists | default(false)
-        or ssh_known_hosts_role_alt_template_stat.stat.exists | default(false)
-        or ssh_known_hosts_legacy_template_stat.stat.exists | default(false)
+        ssh_known_hosts_template_src is defined or
+        ssh_known_hosts_role_template_stat.stat.exists | default(false) or
+        ssh_known_hosts_role_alt_template_stat.stat.exists | default(false) or
+        ssh_known_hosts_legacy_template_stat.stat.exists | default(false)
     fail_msg: >-
-      No known_hosts template was found. Expected one of:
-      - {{ role_path }}/templates/known_hosts.j2
-      - {{ role_path }}/templates/ssh_known_hosts.j2
-      - {{ playbook_dir }}/../templates/ssh/known_hosts.j2
-      Or set ssh_known_hosts_template_src to a valid template path.
+      No known_hosts template was found. Expected one of: - {{ role_path
+      }}/templates/known_hosts.j2 - {{ role_path }}/templates/ssh_known_hosts.j2
+      - {{ playbook_dir }}/../templates/ssh/known_hosts.j2 Or set
+      ssh_known_hosts_template_src to a valid template path.
     success_msg: "known_hosts template source is available."
   delegate_to: localhost
   become: false
@@ -528,9 +530,9 @@
 - name: SSH | known_hosts | Refuse symlinked known_hosts files
   ansible.builtin.fail:
     msg: >-
-      Remote known_hosts for {{ item.item.name }} is a symlink:
-      {{ item.item.known_hosts_path }}.
-      Refusing to overwrite symlinked known_hosts.
+      Remote known_hosts for {{ item.item.name }} is a symlink: {{
+      item.item.known_hosts_path }}. Refusing to overwrite symlinked
+      known_hosts.
   loop: "{{ ssh_known_hosts_remote_file_stats.results | default([]) }}"
   loop_control:
     label: "{{ item.item.name }}"
@@ -611,7 +613,8 @@
       - not (item.stat.islnk | default(false) | bool)
       - item.stat.pw_name == item.item.name
       - item.stat.mode == ssh_known_hosts_mode_effective
-    fail_msg: "known_hosts is missing, symlinked, or has incorrect ownership/mode for {{ item.item.name }}."
+    fail_msg: "known_hosts is missing, symlinked, or has incorrect ownership/mode
+      for {{ item.item.name }}."
     success_msg: "known_hosts is valid for {{ item.item.name }}."
   loop: "{{ ssh_known_hosts_rendered_file_stats.results | default([]) }}"
   loop_control:
@@ -634,13 +637,15 @@
     msg:
       - "SSH known_hosts deployment complete."
       - "Enabled: {{ ssh_known_hosts_enabled_effective | bool }}"
-      - "Template: {{ ssh_known_hosts_template_src_effective | default('none') }}"
+      - "Template: {{ ssh_known_hosts_template_src_effective | default('none')
+        }}"
       - "CA enabled: {{ ssh_ca_enabled | default(false) | bool }}"
-      - "CA public key path: {{ ssh_known_hosts_ca_pub_path_effective | default('none') }}"
-      - "CA authority patterns: {{ ssh_known_hosts_patterns_effective | join(', ') if ssh_known_hosts_patterns_effective | length > 0 else 'none' }}"
+      - "CA public key path: {{ ssh_known_hosts_ca_pub_path_effective |
+        default('none') }}"
+      - "CA authority patterns: {{ ssh_known_hosts_patterns_effective | join(',
+        ') if ssh_known_hosts_patterns_effective | length > 0 else 'none' }}"
       - >-
-        Users configured:
-        {{
+        Users configured: {{
           ssh_known_hosts_render_jobs
           | default([])
           | map(attribute='name')

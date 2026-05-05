@@ -10,12 +10,16 @@
 #   - Local users
 #   - Controller-side SSH CA/user key material
 #   - User SSH client files
+#   - Local-only runtime secret env file rendering
 #
 # Safety:
 #   - Does not apply Proxmox-specific SSH tasks.
 #   - Does not harden/reload the local sshd daemon by default.
 #   - Does not copy private identity keys into user homes unless explicitly
 #     enabled in SSH role variables.
+#   - Renders secret env files with mode 0600.
+#   - Renders secrets only into local gitignored files.
+#   - Does not configure HashiCorp Vault or Ansible Vault in this phase.
 # =============================================================================
 
 - name: Configure local Ansible control node
@@ -23,6 +27,22 @@
   connection: local
   gather_facts: true
   become: true
+
+  vars_prompt:
+    - name: proxmox_ssh_password_prompt
+      prompt: "Enter PROXMOX_SSH_PASSWORD"
+      private: true
+      default: ""
+
+    - name: proxmox_cluster_join_password_prompt
+      prompt: "Enter PROXMOX_CLUSTER_JOIN_PASSWORD"
+      private: true
+      default: ""
+
+    - name: ansible_become_password_prompt
+      prompt: "Enter ANSIBLE_BECOME_PASSWORD"
+      private: true
+      default: ""
 
   vars_files:
     - ../group_vars/all/groups.yaml
@@ -33,8 +53,26 @@
 
   vars:
     infrastructure_repo_root: "{{ playbook_dir | dirname | dirname }}"
+    infrastructure_owner: >-
+      {{
+        lookup('env', 'SUDO_USER')
+        | default(lookup('env', 'USER'), true)
+        | default(ansible_facts.get('user_id', 'root'), true)
+      }}
+    infrastructure_group: >-
+      {{
+        lookup('env', 'SUDO_USER')
+        | default(lookup('env', 'USER'), true)
+        | default(infrastructure_owner, true)
+      }}
 
+    # Use prompted become password for this localhost run.
+    # Empty is allowed when the local user has passwordless sudo.
+    ansible_become_password: "{{ ansible_become_password_prompt | default('', true) }}"
+
+    # -------------------------------------------------------------------------
     # Package role
+    # -------------------------------------------------------------------------
     packages_enabled_groups:
       - production
       - development
@@ -42,12 +80,16 @@
     packages_install_homebrew: true
     packages_role_brew_packages: "{{ shell_brew_packages }}"
 
+    # -------------------------------------------------------------------------
     # Shell role
+    # -------------------------------------------------------------------------
     shell_install_zsh: true
     shell_install_oh_my_zsh: true
     shell_set_default_shell: true
 
+    # -------------------------------------------------------------------------
     # SSH role - localhost-safe mode
+    # -------------------------------------------------------------------------
     ssh_role_manage_controller_materials: true
     ssh_role_manage_ca: true
     ssh_role_manage_user_materials: true
@@ -70,7 +112,61 @@
     # Avoid unnecessary handler flushes during local bootstrap.
     ssh_role_flush_handlers: false
 
+    # -------------------------------------------------------------------------
+    # Local secret env rendering
+    # -------------------------------------------------------------------------
+    root_env_template: "{{ playbook_dir }}/../templates/env/root.env.j2"
+
+    # Main local secret env file used by direnv / local shell automation.
+    root_env_file: "{{ infrastructure_repo_root }}/.env"
+
+    # Optional generated artifact copy.
+    root_env_output_file: "{{ infrastructure_repo_root }}/.outputs/env/root.env"
+
+    root_env_files:
+      - "{{ root_env_file }}"
+      - "{{ root_env_output_file }}"
+
+    # Generated Proxmox token file used as a local secret source.
+    packer_proxmox_api_token_file: "{{ infrastructure_repo_root
+      }}/.outputs/api-tokens/packer-prov-api-token.txt"
+
+    # Secret variables currently rendered by Ansible/templates/env/root.env.j2.
+    #
+    # Keep this list in sync with the template.
+    #
+    # Vault-related values are intentionally excluded for now:
+    #   - ANSIBLE_VAULT_PASSWORD
+    #   - ANSIBLE_VAULT_PASSWORD_FILE
+    #   - VAULT_TOKEN
+    #   - VAULT_ADDR
+    #   - VAULT_NAMESPACE
+    root_env_secret_names:
+      # Terraform / Proxmox
+      - TF_VAR_proxmox_api_token_id
+      - TF_VAR_proxmox_api_token_secret
+      - PROXMOX_VE_API_TOKEN
+      - PROXMOX_API_TOKEN_ID
+      - PROXMOX_API_TOKEN_SECRET
+      - PROXMOX_SSH_PASSWORD
+      - PROXMOX_CLUSTER_JOIN_PASSWORD
+
+      # Packer / Proxmox template builds
+      - PKR_VAR_proxmox_api_token_id
+      - PKR_VAR_proxmox_api_token_secret
+
+      # Ansible privilege escalation only
+      - ANSIBLE_BECOME_PASSWORD
+
+    # Node.js is required for some local development tools like direnv and asdf.
+    packages_nodejs_enabled: true
+    packages_nodejs_major: "25"
+
   pre_tasks:
+    # -------------------------------------------------------------------------
+    # Safety checks
+    # -------------------------------------------------------------------------
+
     - name: Localhost | Assert play is running with local connection
       ansible.builtin.assert:
         that:
@@ -86,25 +182,323 @@
           - infrastructure_repo_root | length > 1
         fail_msg: "Unable to resolve infrastructure_repo_root."
 
+    - name: Localhost | Check root env template exists
+      ansible.builtin.stat:
+        path: "{{ root_env_template }}"
+        follow: false
+      register: localhost_root_env_template_stat
+      changed_when: false
+      become: false
+
+    - name: Localhost | Validate root env template exists
+      ansible.builtin.assert:
+        that:
+          - localhost_root_env_template_stat.stat.exists | default(false) | bool
+          - localhost_root_env_template_stat.stat.isreg | default(false) | bool
+          - not (localhost_root_env_template_stat.stat.islnk | default(false) |
+            bool)
+        fail_msg: "Missing, invalid, or symlinked root env template: {{
+          root_env_template }}"
+        success_msg: "Root env template exists and is safe to render."
+
+    # -------------------------------------------------------------------------
+    # Directory layout
+    # -------------------------------------------------------------------------
+
     - name: Localhost | Ensure repo output directories exist
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
-        owner: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
-        group: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
+        owner: "{{ infrastructure_owner }}"
+        group: "{{ infrastructure_group }}"
         mode: "0700"
       loop:
         - "{{ infrastructure_repo_root }}/.outputs"
+        - "{{ infrastructure_repo_root }}/.outputs/env"
         - "{{ infrastructure_repo_root }}/.outputs/ssh"
         - "{{ infrastructure_repo_root }}/.outputs/ssh_ca"
+        - "{{ infrastructure_repo_root }}/.outputs/api-tokens"
 
-    - name: Localhost | Ensure repo root .env exists for local Terraform secrets
+    # -------------------------------------------------------------------------
+    # Render local secret env files from controller environment
+    # -------------------------------------------------------------------------
+
+    - name: Localhost | Render local secret env files
       ansible.builtin.template:
-        src: "{{ playbook_dir }}/../templates/env/root.env.j2"
-        dest: "{{ infrastructure_repo_root }}/.env"
-        owner: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
-        group: "{{ ansible_env.SUDO_USER | default(ansible_env.USER, true) }}"
+        src: "{{ root_env_template }}"
+        dest: "{{ item }}"
+        owner: "{{ infrastructure_owner }}"
+        group: "{{ infrastructure_group }}"
         mode: "0600"
+      loop: "{{ root_env_files }}"
+      loop_control:
+        label: "{{ item }}"
+      no_log: true
+
+    # -------------------------------------------------------------------------
+    # Overlay prompted local bootstrap secrets
+    # -------------------------------------------------------------------------
+    #
+    # These are intentionally prompted because they are local bootstrap secrets:
+    #   export PROXMOX_SSH_PASSWORD=''
+    #   export PROXMOX_CLUSTER_JOIN_PASSWORD=''
+    #   export ANSIBLE_BECOME_PASSWORD=''
+    #
+    # Blank values are written deliberately when left blank so stale secrets do
+    # not remain in .env from previous renders.
+
+    - name: Localhost | Build prompted local bootstrap secret overlay
+      ansible.builtin.set_fact:
+        root_env_prompted_secret_values:
+          PROXMOX_SSH_PASSWORD: "{{ proxmox_ssh_password_prompt | default('', true) }}"
+          PROXMOX_CLUSTER_JOIN_PASSWORD: "{{ proxmox_cluster_join_password_prompt | default('', true) }}"
+          ANSIBLE_BECOME_PASSWORD: "{{ ansible_become_password_prompt | default('', true) }}"
+      changed_when: false
+      no_log: true
+
+    - name: Localhost | Overlay prompted local bootstrap secrets into env files
+      ansible.builtin.lineinfile:
+        path: "{{ item.0 }}"
+        regexp: "^export {{ item.1.key }}="
+        line: "export {{ item.1.key }}={{ item.1.value | string | quote }}"
+        owner: "{{ infrastructure_owner }}"
+        group: "{{ infrastructure_group }}"
+        mode: "0600"
+        create: false
+      loop: "{{ root_env_files | product(root_env_prompted_secret_values | dict2items)
+        | list }}"
+      loop_control:
+        label: "{{ item.0 }} :: {{ item.1.key }}"
+      no_log: true
+
+    # -------------------------------------------------------------------------
+    # Overlay generated Proxmox / Packer token material when available
+    # -------------------------------------------------------------------------
+    #
+    # root.env.j2 intentionally reads from lookup('env', name).
+    # This playbook can still fill generated token values by rendering the file
+    # first and then replacing only the matching export lines.
+    #
+    # Source file format expected:
+    #   FULL_TOKENID=packer-prov@pve!packer-automation
+    #   TOKEN_SECRET=<secret>
+    #
+    # Optional:
+    #   PROXMOX_VE_API_TOKEN=packer-prov@pve!packer-automation=<secret>
+
+    - name: Localhost | Check generated Packer Proxmox API token file
+      ansible.builtin.stat:
+        path: "{{ packer_proxmox_api_token_file }}"
+        follow: false
+      register: localhost_packer_proxmox_token_file_stat
+      changed_when: false
+      become: false
+
+    - name: Localhost | Read generated Packer Proxmox API token file
+      ansible.builtin.slurp:
+        src: "{{ packer_proxmox_api_token_file }}"
+      register: localhost_packer_proxmox_token_file_slurp
+      changed_when: false
+      become: false
+      no_log: true
+      when:
+        - localhost_packer_proxmox_token_file_stat.stat.exists | default(false)
+          | bool
+        - localhost_packer_proxmox_token_file_stat.stat.isreg | default(false) |
+          bool
+        - not (localhost_packer_proxmox_token_file_stat.stat.islnk |
+          default(false) | bool)
+
+    - name: Localhost | Decode generated Packer Proxmox API token file
+      ansible.builtin.set_fact:
+        localhost_packer_proxmox_token_file_content: "{{ localhost_packer_proxmox_token_file_slurp.content | b64decode }}"
+      changed_when: false
+      no_log: true
+      when:
+        - localhost_packer_proxmox_token_file_slurp is defined
+        - localhost_packer_proxmox_token_file_slurp.content is defined
+
+    - name: Localhost | Extract generated Packer Proxmox token ID
+      ansible.builtin.set_fact:
+        localhost_packer_proxmox_token_id: >-
+          {{
+            (
+              localhost_packer_proxmox_token_file_content
+              | regex_findall('(?m)^FULL_TOKENID=(.+)$')
+              | first
+            )
+            | default('', true)
+            | trim
+          }}
+      changed_when: false
+      no_log: true
+      when: localhost_packer_proxmox_token_file_content is defined
+
+    - name: Localhost | Extract generated Packer Proxmox token secret
+      ansible.builtin.set_fact:
+        localhost_packer_proxmox_token_secret: >-
+          {{
+            (
+              localhost_packer_proxmox_token_file_content
+              | regex_findall('(?m)^TOKEN_SECRET=(.+)$')
+              | first
+            )
+            | default('', true)
+            | trim
+          }}
+      changed_when: false
+      no_log: true
+      when: localhost_packer_proxmox_token_file_content is defined
+
+    - name: Localhost | Extract optional generated Proxmox full API token
+      ansible.builtin.set_fact:
+        localhost_packer_proxmox_full_token_from_file: >-
+          {{
+            (
+              localhost_packer_proxmox_token_file_content
+              | regex_findall('(?m)^PROXMOX_VE_API_TOKEN=(.+)$')
+              | first
+            )
+            | default('', true)
+            | trim
+          }}
+      changed_when: false
+      no_log: true
+      when: localhost_packer_proxmox_token_file_content is defined
+
+    - name: Localhost | Build generated Proxmox full API token fallback
+      ansible.builtin.set_fact:
+        localhost_packer_proxmox_full_token: >-
+          {{
+            localhost_packer_proxmox_full_token_from_file
+            | default('', true)
+            if (localhost_packer_proxmox_full_token_from_file | default('', true) | length > 0)
+            else (
+              localhost_packer_proxmox_token_id ~ '=' ~ localhost_packer_proxmox_token_secret
+              if (
+                localhost_packer_proxmox_token_id | default('', true) | length > 0
+                and localhost_packer_proxmox_token_secret | default('', true) | length > 0
+              )
+              else ''
+            )
+          }}
+      changed_when: false
+      no_log: true
+      when: localhost_packer_proxmox_token_file_content is defined
+
+    - name: Localhost | Build generated Proxmox token env overlay
+      ansible.builtin.set_fact:
+        root_env_generated_secret_values:
+          TF_VAR_proxmox_api_token_id: >-
+            {{
+              lookup('env', 'TF_VAR_proxmox_api_token_id')
+              | default(localhost_packer_proxmox_token_id | default(''), true)
+            }}
+          TF_VAR_proxmox_api_token_secret: >-
+            {{
+              lookup('env', 'TF_VAR_proxmox_api_token_secret')
+              | default(localhost_packer_proxmox_token_secret | default(''), true)
+            }}
+          PROXMOX_VE_API_TOKEN: >-
+            {{
+              lookup('env', 'PROXMOX_VE_API_TOKEN')
+              | default(localhost_packer_proxmox_full_token | default(''), true)
+            }}
+          PROXMOX_API_TOKEN_ID: >-
+            {{
+              lookup('env', 'PROXMOX_API_TOKEN_ID')
+              | default(localhost_packer_proxmox_token_id | default(''), true)
+            }}
+          PROXMOX_API_TOKEN_SECRET: >-
+            {{
+              lookup('env', 'PROXMOX_API_TOKEN_SECRET')
+              | default(localhost_packer_proxmox_token_secret | default(''), true)
+            }}
+          PKR_VAR_proxmox_api_token_id: >-
+            {{
+              lookup('env', 'PKR_VAR_proxmox_api_token_id')
+              | default(localhost_packer_proxmox_token_id | default(''), true)
+            }}
+          PKR_VAR_proxmox_api_token_secret: >-
+            {{
+              lookup('env', 'PKR_VAR_proxmox_api_token_secret')
+              | default(localhost_packer_proxmox_token_secret | default(''), true)
+            }}
+      changed_when: false
+      no_log: true
+      when: localhost_packer_proxmox_token_file_content is defined
+
+    - name: Localhost | Overlay generated Proxmox token values into env files
+      ansible.builtin.lineinfile:
+        path: "{{ item.0 }}"
+        regexp: "^export {{ item.1.key }}="
+        line: "export {{ item.1.key }}={{ item.1.value | string | quote }}"
+        owner: "{{ infrastructure_owner }}"
+        group: "{{ infrastructure_group }}"
+        mode: "0600"
+        create: false
+      loop: "{{ root_env_files | product(root_env_generated_secret_values |
+        default({}) | dict2items) | list }}"
+      loop_control:
+        label: "{{ item.0 }} :: {{ item.1.key }}"
+      no_log: true
+      when:
+        - root_env_generated_secret_values is defined
+        - item.1.value is defined
+        - item.1.value | string | length > 0
+
+    # -------------------------------------------------------------------------
+    # Validate rendered env files
+    # -------------------------------------------------------------------------
+
+    - name: Localhost | Stat rendered env files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop: "{{ root_env_files }}"
+      loop_control:
+        label: "{{ item }}"
+      register: localhost_rendered_env_file_stats
+      changed_when: false
+      become: false
+
+    - name: Localhost | Assert rendered env files are protected
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false) | bool
+          - item.stat.isreg | default(false) | bool
+          - not (item.stat.islnk | default(false) | bool)
+          - item.stat.mode == "0600"
+        fail_msg: "Rendered env file is missing, symlinked, or has unsafe permissions:
+          {{ item.stat.path | default('unknown') }}"
+        success_msg: "Rendered env file is present and protected."
+      loop: "{{ localhost_rendered_env_file_stats.results | default([]) }}"
+      loop_control:
+        label: "{{ item.stat.path | default('unknown') }}"
+
+    - name: Localhost | Validate root env file contains all expected export names
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -E
+          - "^export {{ item }}="
+          - "{{ root_env_file }}"
+      loop: "{{ root_env_secret_names }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: false
+      no_log: true
+
+    - name: Localhost | Show local env render summary
+      ansible.builtin.debug:
+        msg:
+          - "Local secret env files rendered."
+          - "Repo .env: {{ root_env_file }}"
+          - "Output env: {{ root_env_output_file }}"
+          - "Secret names rendered: {{ root_env_secret_names | length }}"
+          - "Generated Proxmox token file present: {{
+            localhost_packer_proxmox_token_file_stat.stat.exists |
+            default(false) | bool }}"
 
   roles:
     - role: packages

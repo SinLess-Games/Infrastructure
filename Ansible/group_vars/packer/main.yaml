@@ -358,7 +358,8 @@ packer_distros:
     family: debian
     release: bookworm
     installer_type: preseed
-    iso_url: "https://cloudfront.debian.net/cdimage/archive/latest-oldstable/amd64/iso-cd/debian-12.13.0-amd64-netinst.iso"
+    iso_url: "https://cloudfront.debian.net/cdimage/archive/latest-oldstable/amd64/\
+      iso-cd/debian-12.13.0-amd64-netinst.iso"
 
     # Debian preseed metadata.
     preseed_comment: "Minimal Debian 12 preseed - ultra-clean for reliability"
@@ -367,7 +368,6 @@ packer_distros:
     preseed_mirror_host: "deb.debian.org"
     preseed_mirror_directory: "/debian"
     preseed_security_path: "/debian-security"
-
     # Optional per-distro VM sizing.
     # Uncomment if Debian 12 needs different resources from the global defaults.
     # vm_memory: 2048
@@ -381,7 +381,8 @@ packer_distros:
     family: debian
     release: trixie
     installer_type: preseed
-    iso_url: "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.4.0-amd64-netinst.iso"
+    iso_url: "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.4\
+      .0-amd64-netinst.iso"
     # Debian preseed metadata.
     preseed_comment: "Minimal Debian 13 preseed - ultra-clean for reliability"
 
@@ -389,39 +390,9 @@ packer_distros:
     preseed_mirror_host: "deb.debian.org"
     preseed_mirror_directory: "/debian"
     preseed_security_path: "/debian-security"
-
     # Optional per-distro VM sizing.
     # vm_memory: 2048
     # vm_cores: 2
     # vm_sockets: 1
     # vm_disk_size: "20G"
     # vm_bridge: "vmbr0"
-
-  - name: ubuntu-22.04
-    display_name: "Ubuntu 22.04"
-    family: ubuntu
-    release: jammy
-    installer_type: autoinstall
-    iso_url: "https://releases.ubuntu.com/22.04/ubuntu-22.04.5-live-server-amd64.iso"
-
-    # Ubuntu autoinstall metadata.
-    #
-    # The role renders:
-    #   http/user-data
-    #   http/meta-data
-    #   http/vendor-data
-    #
-    # These fields are still named preseed_* for shared template compatibility,
-    # but for Ubuntu they feed the autoinstall/cloud-init templates.
-    preseed_comment: "Minimal Ubuntu 22.04 installer config - ultra-clean for reliability"
-    preseed_mirror_host: "archive.ubuntu.com"
-    preseed_mirror_directory: "/ubuntu"
-    preseed_security_path: "/ubuntu"
-
-    # Ubuntu live-server generally benefits from a little more memory during
-    # autoinstall than Debian netinst.
-    vm_memory: 4096
-    vm_cores: 2
-    vm_sockets: 1
-    vm_disk_size: "25G"
-    vm_bridge: "vmbr0"
