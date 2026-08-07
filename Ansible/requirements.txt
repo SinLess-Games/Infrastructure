@@ -93,7 +93,7 @@ docker==7.1.0
 # bcrypt 5 behavior where passwords longer than 72 bytes raise ValueError.
 # =============================================================================
 
-cryptography==48.0.0
+cryptography==50.0.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.3.0
 
