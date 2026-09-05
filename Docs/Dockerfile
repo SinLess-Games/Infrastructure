@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.27
 
 # ==============================================================================
 # Builder stage
@@ -11,7 +11,7 @@
 # Nginx runtime image.
 # ==============================================================================
 
-FROM python:3.12-alpine AS builder
+FROM python:3.14-alpine AS builder
 
 # Keep Python/Pip behavior predictable in CI and Docker builds.
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -65,7 +65,7 @@ RUN mkdocs build --clean --strict
 # tooling, or compiler packages.
 # ==============================================================================
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 
 # Document the port used by nginx-unprivileged and Docs/nginx.conf.
 EXPOSE 8080
