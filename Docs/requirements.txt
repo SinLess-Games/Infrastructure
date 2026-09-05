@@ -33,7 +33,7 @@ mkdocs>=1.6,<2.0
 # ------------------------------------------------------------------------------
 # Material provides the UI, navigation, search integration, Mermaid support,
 # tables styling, admonitions, icons, tabs, code blocks, dark mode, and more.
-mkdocs-material>=9.7,<10.0
+mkdocs-material>=9.7.7,<10.0
 
 # ------------------------------------------------------------------------------
 # Markdown feature extensions
