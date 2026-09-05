@@ -48,19 +48,19 @@ pymdown-extensions>=10.21,<11.0
 # ------------------------------------------------------------------------------
 # Adds click-to-zoom/lightbox behavior for embedded images such as screenshots,
 # architecture diagrams, PNG diagrams, and SVG exports.
-mkdocs-glightbox>=0.4,<1.0
+mkdocs-glightbox>=0.5.2,<1.0
 
 # ------------------------------------------------------------------------------
 # Git metadata
 # ------------------------------------------------------------------------------
 # Shows useful "last updated" metadata on documentation pages based on Git history.
-mkdocs-git-revision-date-localized-plugin>=1.5,<2.0
+mkdocs-git-revision-date-localized-plugin>=1.5.4,<2.0
 
 # ------------------------------------------------------------------------------
 # Redirects
 # ------------------------------------------------------------------------------
 # Lets you move or rename docs pages without breaking old URLs.
-mkdocs-redirects>=1.2,<2.0
+mkdocs-redirects>=1.2.3,<2.0
 
 # ------------------------------------------------------------------------------
 # Build optimization
@@ -78,4 +78,4 @@ mkdocs-macros-plugin>=1.5,<2.0
 
 # Lets pages include reusable Markdown snippets or partial files.
 # Useful for shared warnings, command blocks, install steps, or architecture notes.
-mkdocs-include-markdown-plugin>=7.1,<8.0
+mkdocs-include-markdown-plugin>=7.3.0,<8.0
