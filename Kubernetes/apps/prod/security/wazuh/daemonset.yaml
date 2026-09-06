@@ -42,7 +42,7 @@ spec:
 
       initContainers:
         - name: cleanup-ossec-stale
-          image: busybox:1.36
+          image: busybox:1.38
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
@@ -61,7 +61,7 @@ spec:
               mountPath: /agent
 
         - name: seed-ossec-tree
-          image: wazuh/wazuh-agent:4.14.3
+          image: wazuh/wazuh-agent:4.14.7
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
@@ -84,7 +84,7 @@ spec:
               mountPath: /agent
 
         - name: write-ossec-config
-          image: busybox:1.36
+          image: busybox:1.38
           imagePullPolicy: IfNotPresent
           env:
             - name: WAZUH_MANAGER
@@ -194,7 +194,7 @@ spec:
               mountPath: /agent
 
         - name: install-authd-pass
-          image: busybox:1.36
+          image: busybox:1.38
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
@@ -218,7 +218,7 @@ spec:
               readOnly: true
 
         - name: fix-ossec-permissions
-          image: busybox:1.36
+          image: busybox:1.38
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
@@ -245,7 +245,7 @@ spec:
 
       containers:
         - name: wazuh-agent
-          image: wazuh/wazuh-agent:4.14.3
+          image: wazuh/wazuh-agent:4.14.7
           imagePullPolicy: IfNotPresent
 
           command:
