@@ -47,7 +47,7 @@ spec:
 
       containers:
         - name: bootstrap
-          image: alpine/k8s:1.30.2
+          image: alpine/k8s:1.37.0
           imagePullPolicy: IfNotPresent
 
           command:
