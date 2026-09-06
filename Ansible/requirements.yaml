@@ -43,14 +43,14 @@ collections:
   #   - firewalld
   #   - profile tasks used across Linux hosts
   - name: ansible.posix
-    version: "2.1.0"
+    version: "2.2.2"
 
   # Data manipulation helpers:
   #   - ipaddr / network filters
   #   - validation helpers
   #   - CLI parsing helpers
   - name: ansible.utils
-    version: "6.0.0"
+    version: "6.1.0"
 
   # Broad community modules and plugins:
   #   - filesystem helpers
@@ -66,7 +66,7 @@ collections:
   #   - SSH key operations
   #   - local CA workflows
   - name: community.crypto
-    version: "3.2.0"
+    version: "3.4.0"
 
   # ---------------------------------------------------------------------------
   # Docker / Container Runtime
@@ -82,7 +82,7 @@ collections:
   #   - Technitium Docker deployment
   #   - Local service/container roles
   - name: community.docker
-    version: "5.2.0"
+    version: "5.3.0"
 
   # ---------------------------------------------------------------------------
   # Databases
@@ -114,7 +114,7 @@ collections:
   #
   # Prefer this over the older community.kubernetes collection.
   - name: kubernetes.core
-    version: "6.4.0"
+    version: "6.5.0"
 
   # ---------------------------------------------------------------------------
   # DNS Management - Technitium
@@ -180,7 +180,7 @@ roles:
   #   - Keep this pinned.
   #   - Upgrade only with RKE2 version testing.
   - name: lablabs.rke2
-    version: "1.51.0"
+    version: "1.53.1"
 
   # ---------------------------------------------------------------------------
   # Proxmox VE: node / cluster configuration
@@ -201,7 +201,7 @@ roles:
   - name: lae.proxmox
     src: git+https://github.com/lae/ansible-role-proxmox.git
     scm: git
-    version: "v1.9.0"
+    version: "v1.10.1"
 
 # =============================================================================
 # Removed / Replaced
