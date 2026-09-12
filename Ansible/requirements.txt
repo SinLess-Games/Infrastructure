@@ -126,7 +126,7 @@ PyYAML==6.0.3
 mkdocs==1.6.1
 mkdocs-material==9.7.6
 mkdocs-mermaid2-plugin==1.2.3
-pymdown-extensions==10.21.2
+pymdown-extensions==11.0.1
 
 # =============================================================================
 # CI / Quality Gates
