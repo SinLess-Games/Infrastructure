@@ -107,7 +107,7 @@ extraVolumes:
 # Keep the UI asset directory writable before the UI entrypoint patches BASE_URL.
 extraInitContainers:
   - name: prepare-opencost-ui-assets
-    image: ghcr.io/opencost/opencost-ui:1.120.0@sha256:2a2ed5d423402b1d3f104398971191618a91bfc293f53c704606bbbd39b2652c
+    image: ghcr.io/opencost/opencost-ui:1.121.3@sha256:65dca449aef1fd8fdacca5988ffdbdea015663d3f710a4c3f3af30abb3630fe1
     command:
       - sh
       - -c
