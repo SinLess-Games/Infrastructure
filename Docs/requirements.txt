@@ -41,7 +41,7 @@ mkdocs-material>=9.7,<10.0
 # Adds advanced Markdown syntax used heavily by Material:
 # admonitions, collapsible details, task lists, superfences, Mermaid fences,
 # tabbed content, highlights, keyboard keys, emoji/icons, captions, etc.
-pymdown-extensions>=10.21,<11.0
+pymdown-extensions>=11.0.1,<11.1
 
 # ------------------------------------------------------------------------------
 # Images
