@@ -63,7 +63,10 @@ wazuh_domain: "local.sinlessgames.com"
 
 wazuh_default_user: "{{ infra_bootstrap_default_user }}"
 wazuh_ansible_user: "{{ infra_bootstrap_ansible_user }}"
-wazuh_default_password: "Shellshocker93!"
+# Cloud-init password. Never commit a value. Supply WAZUH_VM_CIPASSWORD from
+# Vault or the operator environment. The password previously stored here must
+# be rotated; it remains in git history.
+wazuh_default_password: "{{ lookup('env', 'WAZUH_VM_CIPASSWORD') | mandatory('Set WAZUH_VM_CIPASSWORD from Vault. Rotate the previously committed cloud-init password.') }}"
 wazuh_ssh_keys: "{{ infra_bootstrap_ssh_keys }}"
 
 wazuh_version_major: "4.x"

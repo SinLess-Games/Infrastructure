@@ -65,7 +65,8 @@ RUN mkdocs build --clean --strict
 # tooling, or compiler packages.
 # ==============================================================================
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+# Exact patch. Do not float the minor tag.
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine AS runtime
 
 # Document the port used by nginx-unprivileged and Docs/nginx.conf.
 EXPOSE 8080

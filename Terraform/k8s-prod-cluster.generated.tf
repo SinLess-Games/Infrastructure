@@ -79,7 +79,9 @@ module "kubernetes_prod_control_plane" {
   cicustom_user_snippet_enabled = false
   tags                          = ["kubernetes", "rke2", "prod", "control-plane"]
   startup_order                 = 10
-  force_create                  = true
+  # Telmate force_create recycles a VMID that is already in use.
+  # Leave this false so a routine apply does not recreate production VMs.
+  force_create                  = false
 }
 
 module "kubernetes_prod_workers" {
@@ -175,5 +177,7 @@ module "kubernetes_prod_workers" {
   cicustom_user_snippet_enabled = false
   tags                          = ["kubernetes", "rke2", "prod", "worker"]
   startup_order                 = 20
-  force_create                  = true
+  # Telmate force_create recycles a VMID that is already in use.
+  # Leave this false so a routine apply does not recreate production VMs.
+  force_create                  = false
 }

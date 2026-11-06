@@ -136,7 +136,10 @@ vault_tls_ca_path: "/opt/vault/tls/ca.crt"
 # =============================================================================
 
 vault_default_user: "{{ infra_bootstrap_default_user }}"
-vault_default_password: "Shellshocker93!"
+# Cloud-init password. Never commit a value. Supply VAULT_VM_CIPASSWORD from
+# Vault or the operator environment. The password previously stored here must
+# be rotated; it remains in git history.
+vault_default_password: "{{ lookup('env', 'VAULT_VM_CIPASSWORD') | mandatory('Set VAULT_VM_CIPASSWORD from Vault. Rotate the previously committed cloud-init password.') }}"
 vault_ansible_user: "ansible"
 
 # SSH keys from .outputs/ssh/ directories
