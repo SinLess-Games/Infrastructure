@@ -98,6 +98,8 @@ flowchart LR
 | [Decisions](Architecture/DECISIONS.md)                 | Architecture decision summary and ADR index.                                              |
 | [Network](Network/Layer_2-3_diagram.md)                | Network layout, rack diagram, and port mapping.                                           |
 | [Resources](Resources/Kubernetes.md)                   | Reference material for Kubernetes, cloud platforms, security, compliance, and operations. |
+| [Credential rotation](Security/credential-rotation.md) | Exposed cloud-init, Argo CD, and HAProxy credentials that must be rotated.                |
+| [Upgrade plan](Security/upgrade-plan.md)               | Stepwise cluster upgrade gates. Not an approval to upgrade.                               |
 
 ---
 

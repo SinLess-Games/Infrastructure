@@ -337,6 +337,10 @@ nav:
       - Rack Plan: Network/Rack-Plan.md
       - Items and Prices: Network/Items-prices.md
 
+  - Security:
+      - Credential rotation: Security/credential-rotation.md
+      - Upgrade plan: Security/upgrade-plan.md
+
   - Resources:
       - Chaos Engineering: Resources/chaos-engineering.md
       - Cloud Platforms: Resources/cloud-platforms.md

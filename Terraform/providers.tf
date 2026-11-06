@@ -75,8 +75,15 @@ provider "proxmox" {
   pm_timeout  = 1800 # 30 minutes to accommodate long-running operations
   pm_parallel = 3
 
-  # Debugging / provider logs
+  # Debugging / provider logs.
+  # pm_debug is left off. The Telmate 3.0.2-rc07 provider can emit API
+  # details when debug logging is enabled. The provider pin itself is
+  # unchanged: 3.0 has no stable release, and a newer rc does not fix
+  # force_create, debug, or TLS verification settings.
+  # pm_tls_insecure follows var.proxmox_tls_insecure. main.auto.tfvars
+  # still sets that to true because flipping it is not safe until the
+  # Proxmox API certificate is trusted by Terraform.
   pm_log_enable = false
   pm_log_file   = "../.logs/terraform-plugin-proxmox.log"
-  pm_debug      = true
+  pm_debug      = false
 }

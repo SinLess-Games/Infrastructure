@@ -96,6 +96,7 @@ listen stats
     stats enable
     stats uri /
     stats realm Haproxy\ Statistics
+    stats auth {{ haproxy_stats_user }}:{{ haproxy_stats_password }}
     stats refresh 30s
 
 frontend pgadmin
@@ -157,6 +158,7 @@ listen stats
   bind 0.0.0.0:8404
   stats enable
   stats uri /stats
+  stats auth {{ haproxy_stats_user }}:{{ haproxy_stats_password }}
   stats refresh 30s
   stats show-legends
 

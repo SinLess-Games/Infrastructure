@@ -1,0 +1,9 @@
+---
+# HAProxy stats credentials.
+#
+# The username may default. The password must come from Vault or the
+# operator environment and must never be committed. HAPROXY_STATS_PASSWORD
+# is required wherever the HAProxy template renders stats auth.
+
+haproxy_stats_user: "{{ lookup('env', 'HAPROXY_STATS_USER') | default('stats', true) }}"
+haproxy_stats_password: "{{ lookup('env', 'HAPROXY_STATS_PASSWORD') | mandatory('Set HAPROXY_STATS_PASSWORD from Vault. Do not commit it.') }}"

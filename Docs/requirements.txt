@@ -33,7 +33,8 @@ mkdocs>=1.6,<2.0
 # ------------------------------------------------------------------------------
 # Material provides the UI, navigation, search integration, Mermaid support,
 # tables styling, admonitions, icons, tabs, code blocks, dark mode, and more.
-mkdocs-material>=9.7,<10.0
+# 9.7.7 is the floor for CVE-2026-73295. Stay below 10.
+mkdocs-material>=9.7.7,<10.0
 
 # ------------------------------------------------------------------------------
 # Markdown feature extensions
@@ -41,7 +42,8 @@ mkdocs-material>=9.7,<10.0
 # Adds advanced Markdown syntax used heavily by Material:
 # admonitions, collapsible details, task lists, superfences, Mermaid fences,
 # tabbed content, highlights, keyboard keys, emoji/icons, captions, etc.
-pymdown-extensions>=10.21,<11.0
+# 11.0.1 is the floor for CVE-2026-67422. The previous <11 cap kept that fix out.
+pymdown-extensions>=11.0.1,<12.0
 
 # ------------------------------------------------------------------------------
 # Images

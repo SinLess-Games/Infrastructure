@@ -420,12 +420,9 @@ spec:
             chart: argo-cd
             targetRevision: 7.7.11
             valuesPath: Kubernetes/apps/prod/gitops/argo-cd/values.yaml
-            inlineValues: |
-              configs:
-                params:
-                  server.insecure: true
-                secret:
-                  argocdServerAdminPassword: '$2b$10$vJGbHySXxfGK96qjNX5aeO8GcoQm3Db.RAJs7yF3QgqoLqG4FuCMK'
+            # TLS and the admin password live in argo-cd/values.yaml and
+            # externalsecret-argocd-admin.yaml. Do not inline a bcrypt hash.
+            inlineValues: ""
             syncWave: "13"
           - name: argo-rollouts
             namespace: gitops

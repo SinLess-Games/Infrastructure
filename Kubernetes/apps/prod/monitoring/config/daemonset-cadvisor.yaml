@@ -41,7 +41,12 @@ spec:
 
       containers:
         - name: cadvisor
-          image: gcr.io/cadvisor/cadvisor:v0.52.1
+          # v0.60.6 exists as a GitHub release but has no manifest on
+# gcr.io/cadvisor/cadvisor or registry.k8s.io (MANIFEST_UNKNOWN).
+# Newest tag confirmed on gcr.io in this pass is v0.55.1, which is
+# already proposed by open PR #16. Left unchanged so this branch does
+# not pin a tag the cluster cannot pull.
+image: gcr.io/cadvisor/cadvisor:v0.52.1
           imagePullPolicy: IfNotPresent
           args:
             - --housekeeping_interval=30s

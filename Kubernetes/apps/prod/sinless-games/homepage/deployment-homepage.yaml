@@ -69,6 +69,9 @@ spec:
 
       containers:
         - name: homepage
+          # Stays on v1.5.0. Homepage 2.7.0 was not applied: the v1 config
+          # files in configmap-homepage.yaml were not checked against the
+          # v2 schema. CVE-2025-55182 in this image is still unresolved.
           image: ghcr.io/gethomepage/homepage:v1.5.0
           imagePullPolicy: IfNotPresent
 
