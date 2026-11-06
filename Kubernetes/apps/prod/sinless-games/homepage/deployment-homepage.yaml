@@ -69,7 +69,7 @@ spec:
 
       containers:
         - name: homepage
-          image: ghcr.io/gethomepage/homepage:v1.5.0
+          image: ghcr.io/gethomepage/homepage:v1.13.2
           imagePullPolicy: IfNotPresent
 
           env:
