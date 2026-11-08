@@ -82,4 +82,4 @@ ssh_username = "{{ packer_ssh_username | default('packer') }}"
 ssh_username = "{{ packer_ssh_username | default('root') }}"
 {% endif %}
 
-ssh_password = "{{ packer_ssh_password | default(packer_preseed_root_password | default('packer')) }}"
+ssh_password = "{{ packer_ssh_password }}"

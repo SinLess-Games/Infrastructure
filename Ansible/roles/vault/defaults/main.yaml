@@ -39,7 +39,9 @@ vault_leader_api_addr: "{{ vault_api_addr_protocol }}://{{ hostvars[vault_primar
 
 vault_keepalived_vrid: 51
 vault_keepalived_priority_step: 10
-vault_keepalived_password: "vaultha01"
+# VRRP PASS auth is at most 8 characters. Never commit a value. The previous
+# literal must be rotated; it remains in git history.
+vault_keepalived_password: "{{ lookup('env', 'VAULT_KEEPALIVED_PASSWORD') | default('', true) }}"
 vault_haproxy_bind_address: "0.0.0.0"
 vault_haproxy_frontend_port: "{{ vault_api_addr_port }}"
 vault_haproxy_stats_port: 8404

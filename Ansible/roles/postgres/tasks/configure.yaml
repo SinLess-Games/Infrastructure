@@ -287,6 +287,25 @@
   when: postgres_pgadmin_enabled | bool
   notify: Restart pgadmin
 
+- name: Assert pgAdmin password is set
+  ansible.builtin.assert:
+    that:
+      - postgres_pgadmin_password | length > 0
+    fail_msg: >-
+      postgres_pgadmin_password is empty. Load it from Vault before rendering pgAdmin.
+  when: postgres_pgadmin_enabled | bool
+
+- name: Render pgAdmin environment file
+  ansible.builtin.template:
+    src: "{{ role_path }}/../../templates/postgres/pgadmin.env.j2"
+    dest: "{{ postgres_pgadmin_config_dir }}/pgadmin.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: postgres_pgadmin_enabled | bool
+  notify: Restart pgadmin
+
 - name: Render pgAdmin container service
   ansible.builtin.template:
     src: "{{ role_path }}/../../templates/postgres/pgadmin.service.j2"
@@ -305,7 +324,7 @@
     dest: /etc/haproxy/haproxy.cfg
     owner: root
     group: root
-    mode: "0644"
+    mode: "0600"
   vars:
     routing_profile: postgres
   notify: Restart haproxy
@@ -316,7 +335,7 @@
     dest: /usr/local/bin/check-haproxy.sh
     owner: root
     group: root
-    mode: "0755"
+    mode: "0700"
   vars:
     routing_profile: postgres
 
@@ -326,7 +345,7 @@
     dest: /etc/keepalived/keepalived.conf
     owner: root
     group: root
-    mode: "0644"
+    mode: "0600"
   vars:
     routing_profile: postgres
   notify: Restart keepalived

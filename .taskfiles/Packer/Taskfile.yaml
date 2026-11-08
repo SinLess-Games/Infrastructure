@@ -5,6 +5,10 @@ vars:
   DEBIAN_DIR: "{{.PACKER_DIR}}/debian"
   PACKER_LOG: "{{.PACKER_DIR}}/packer-build.log"
 
+# ssh_password has no committed default. Put it in the gitignored credentials
+# var-file or export PKR_VAR_ssh_password. Ansible reads PACKER_ROOT_PASSWORD
+# when it renders preseed and user-data.
+
 tasks:
 
   default:

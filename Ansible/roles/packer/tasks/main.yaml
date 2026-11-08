@@ -162,6 +162,16 @@
     loop_var: node_item
     label: "{{ node_item }}"
 
+- name: Require Packer build password from the environment
+  ansible.builtin.assert:
+    that:
+      - packer_preseed_root_password | length > 0
+      - packer_ssh_password | length > 0
+    fail_msg: >-
+      Set PACKER_ROOT_PASSWORD. PACKER_SSH_PASSWORD, when set, is installed
+      and used for Packer's SSH connection. Do not commit either value.
+      Rotate any template that still accepts the previously committed build password.
+
 - name: Build templates for selected distros and nodes
   ansible.builtin.include_tasks: render-and-build.yaml
   loop: "{{ packer_distros | product(packer_target_nodes) | list }}"

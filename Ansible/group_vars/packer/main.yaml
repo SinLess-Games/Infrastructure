@@ -307,20 +307,15 @@ packer_preseed_bootdev: "/dev/vda"
 # This is separate from the public domain and should match your local lab domain.
 packer_preseed_domain: "local.sinlessgamesllc.com"
 
-# Temporary password used during the Packer build.
+# Build password. Never commit a value.
 #
-# Debian preseed uses this as the root password.
-# Ubuntu autoinstall uses this for the packer/root provisioning password flow.
-#
-# This is acceptable for short-lived template build automation, but long-term it
-# should move to Ansible Vault or another protected secret source.
-packer_preseed_root_password: "packer"
-
-# SSH password Packer uses after the OS installer finishes.
-#
-# Defaults to the same value as packer_preseed_root_password.
-# Keep this aligned with preseed/autoinstall user-data.
-packer_ssh_password: "packer"
+# The password Packer uses for SSH is also the password installed for that
+# account. Debian preseed installs it for root, and Packer then connects as
+# root. Ubuntu autoinstall installs it for root and the packer user.
+# PACKER_SSH_PASSWORD replaces PACKER_ROOT_PASSWORD for both install and SSH.
+# The previous committed value must be rotated on any template still using it.
+packer_preseed_root_password: "{{ lookup('env', 'PACKER_ROOT_PASSWORD') | default('', true) }}"
+packer_ssh_password: "{{ lookup('env', 'PACKER_SSH_PASSWORD') | default(packer_preseed_root_password, true) }}"
 
 # -----------------------------------------------------------------------------
 # Distro definitions

@@ -255,7 +255,7 @@
     dest: /etc/haproxy/haproxy.cfg
     owner: root
     group: root
-    mode: "0644"
+    mode: "0600"
   vars:
     routing_profile: vault
   when: vault_haproxy_enabled | bool
@@ -285,13 +285,24 @@
     - vault-vip-fault.sh.j2
   when: vault_keepalived_enabled | bool
 
+- name: Require Vault Keepalived auth password
+  ansible.builtin.assert:
+    that:
+      - vault_keepalived_password | length > 0
+      - vault_keepalived_password | length <= 8
+    fail_msg: >-
+      Set VAULT_KEEPALIVED_PASSWORD to 1-8 characters. Keepalived PASS auth
+      ignores anything longer. Do not commit the password. Rotate the
+      previously committed value.
+  when: vault_keepalived_enabled | bool
+
 - name: Render Vault Keepalived configuration
   ansible.builtin.template:
     src: "{{ playbook_dir }}/../templates/haproxy/keepalived.conf.j2"
     dest: /etc/keepalived/keepalived.conf
     owner: root
     group: root
-    mode: "0644"
+    mode: "0600"
   vars:
     routing_profile: vault
     vault_keepalived_priority: "{{ vault_keepalived_priority_effective }}"

@@ -63,7 +63,7 @@
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/packer/http/preseed.cfg.j2"
         dest: "{{ pkr_dir }}/http/preseed.cfg"
-        mode: "0644"
+        mode: "0600"
       vars:
         distro: "{{ distro_item.name }}"
         distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
@@ -84,7 +84,7 @@
         preseed_security_path: "{{ distro_item.preseed_security_path | default('/debian-security') }}"
         preseed_disk: "{{ packer_preseed_disk }}"
         preseed_bootdev: "{{ packer_preseed_bootdev }}"
-        preseed_root_password: "{{ packer_preseed_root_password }}"
+        preseed_root_password: "{{ packer_ssh_password }}"
       when: packer_installer_type == "preseed"
 
     - name: Remove stale Ubuntu autoinstall files for preseed build {{ distro_item.name }}
@@ -103,7 +103,7 @@
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/packer/http/user-data.j2"
         dest: "{{ pkr_dir }}/http/user-data"
-        mode: "0644"
+        mode: "0600"
       vars:
         distro: "{{ distro_item.name }}"
         distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
@@ -122,7 +122,7 @@
         preseed_security_path: "{{ distro_item.preseed_security_path | default('/ubuntu') }}"
         preseed_disk: "{{ packer_preseed_disk }}"
         preseed_bootdev: "{{ packer_preseed_bootdev }}"
-        preseed_root_password: "{{ packer_preseed_root_password }}"
+        preseed_root_password: "{{ packer_ssh_password }}"
       when: packer_installer_type == "autoinstall"
 
     - name: Render Ubuntu autoinstall meta-data for {{ distro_item.name }}
@@ -199,7 +199,7 @@
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/packer/template.pkrvars.hcl.j2"
         dest: "{{ varfile_path }}"
-        mode: "0644"
+        mode: "0600"
       vars:
         distro: "{{ distro_item.name }}"
         distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"

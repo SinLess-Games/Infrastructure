@@ -157,7 +157,8 @@ variable "ssh_username" {
 variable "ssh_password" {
   type      = string
   sensitive = true
-  default   = "packer"
+  # Supplied by the gitignored var-file or PKR_VAR_ssh_password. Do not commit a value.
+  default   = ""
 }
 
 variable "ssh_timeout" {
