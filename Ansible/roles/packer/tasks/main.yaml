@@ -168,9 +168,9 @@
       - packer_preseed_root_password | length > 0
       - packer_ssh_password | length > 0
     fail_msg: >-
-      Set PACKER_ROOT_PASSWORD. Set PACKER_SSH_PASSWORD only when SSH must use
-      a different password. Do not commit either value. Rotate any template
-      that still accepts the previously committed build password.
+      Set PACKER_ROOT_PASSWORD. PACKER_SSH_PASSWORD, when set, is installed
+      and used for Packer's SSH connection. Do not commit either value.
+      Rotate any template that still accepts the previously committed build password.
 
 - name: Build templates for selected distros and nodes
   ansible.builtin.include_tasks: render-and-build.yaml
