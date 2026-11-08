@@ -63,7 +63,7 @@
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/packer/http/preseed.cfg.j2"
         dest: "{{ pkr_dir }}/http/preseed.cfg"
-        mode: "0644"
+        mode: "0600"
       vars:
         distro: "{{ distro_item.name }}"
         distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
@@ -103,7 +103,7 @@
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/packer/http/user-data.j2"
         dest: "{{ pkr_dir }}/http/user-data"
-        mode: "0644"
+        mode: "0600"
       vars:
         distro: "{{ distro_item.name }}"
         distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"
@@ -199,7 +199,7 @@
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/packer/template.pkrvars.hcl.j2"
         dest: "{{ varfile_path }}"
-        mode: "0644"
+        mode: "0600"
       vars:
         distro: "{{ distro_item.name }}"
         distro_display_name: "{{ distro_item.display_name | default(distro_item.name) }}"

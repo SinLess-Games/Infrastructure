@@ -11,8 +11,8 @@ ExecStartPre=-/usr/bin/docker rm -f {{ postgres_pgadmin_container_name }}
 ExecStart=/usr/bin/docker run --rm \
   --name {{ postgres_pgadmin_container_name }} \
   --network host \
+  --env-file {{ postgres_pgadmin_config_dir }}/pgadmin.env \
   -e PGADMIN_DEFAULT_EMAIL={{ postgres_pgadmin_default_email }} \
-  -e PGADMIN_DEFAULT_PASSWORD={{ postgres_pgadmin_password }} \
   -e PGADMIN_LISTEN_PORT={{ postgres_pgadmin_backend_port }} \
   -e PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION=True \
   -e PGADMIN_CONFIG_LOGIN_BANNER='"Managed by Ansible"' \

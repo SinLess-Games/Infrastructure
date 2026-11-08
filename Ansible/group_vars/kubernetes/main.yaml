@@ -210,7 +210,8 @@ kubernetes_rke2_ingress_controller: "none"
 kubernetes_rke2_disable:
   - rke2-ingress-nginx
 kubernetes_rke2_disable_kube_proxy: false
-kubernetes_rke2_write_kubeconfig_mode: "0644"
+# RKE2 writes the admin kubeconfig with this mode. 0644 made it world-readable.
+kubernetes_rke2_write_kubeconfig_mode: "0600"
 kubernetes_rke2_additional_sans:
   - "{{ kubernetes_rke2_api_ip }}"
   - "{{ kubernetes_control_plane_first_host }}"

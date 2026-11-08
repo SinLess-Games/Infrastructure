@@ -45,6 +45,5 @@ packer_preseed_disk: "/dev/vda"
 packer_preseed_bootdev: "/dev/vda"
 packer_preseed_domain: "local.sinlessgamesllc.com"
 
-# Temporary default for template automation.
-# Override with Ansible Vault or a protected var in real use.
-packer_preseed_root_password: "packer"
+# group_vars reads PACKER_ROOT_PASSWORD. Do not put a password here.
+packer_preseed_root_password: ""

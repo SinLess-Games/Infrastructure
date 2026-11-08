@@ -8,7 +8,7 @@
 #
 # Packer expects to SSH into the installed guest as:
 #   username: {{ packer_ssh_username | default('packer') }}
-#   password: {{ packer_ssh_password | default(preseed_root_password | default('packer')) }}
+#   password: supplied by PACKER_ROOT_PASSWORD or PACKER_SSH_PASSWORD at render time
 #
 # This file must ensure:
 #   - Ubuntu autoinstall runs non-interactively.
@@ -68,13 +68,9 @@ autoinstall:
     realname: "Packer Template User"
 
     # Autoinstall requires this to be a hashed password.
-    #
-    # Default password source:
-    #   packer_ssh_password -> preseed_root_password -> packer
-    #
-    # To override with a precomputed hash, define:
-    #   autoinstall_user_password_hash
-    password: "{{ autoinstall_user_password_hash | default((packer_ssh_password | default(preseed_root_password | default('packer'))) | password_hash('sha512', 'packer')) }}"
+    # The sha512 salt below is not the login password.
+    # To override with a precomputed hash, define autoinstall_user_password_hash.
+    password: "{{ autoinstall_user_password_hash | default(packer_ssh_password | password_hash('sha512', 'packer')) }}"
 
   ssh:
     install-server: true
@@ -114,10 +110,10 @@ autoinstall:
       expire: false
       users:
         - name: root
-          password: "{{ packer_ssh_password | default(preseed_root_password | default('packer')) }}"
+          password: "{{ packer_ssh_password }}"
           type: text
         - name: "{{ packer_ssh_username | default('packer') }}"
-          password: "{{ packer_ssh_password | default(preseed_root_password | default('packer')) }}"
+          password: "{{ packer_ssh_password }}"
           type: text
 
     users:
@@ -140,8 +136,8 @@ autoinstall:
     # Packer starts waiting for SSH.
     - curtin in-target --target=/target -- id "{{ packer_ssh_username | default('packer') }}" || curtin in-target --target=/target -- useradd -m -s /bin/bash "{{ packer_ssh_username | default('packer') }}"
     - curtin in-target --target=/target -- usermod -aG sudo "{{ packer_ssh_username | default('packer') }}"
-    - curtin in-target --target=/target -- sh -c "printf '%s:%s\n' '{{ packer_ssh_username | default('packer') }}' '{{ packer_ssh_password | default(preseed_root_password | default('packer')) }}' | chpasswd"
-    - curtin in-target --target=/target -- sh -c "printf '%s:%s\n' 'root' '{{ packer_ssh_password | default(preseed_root_password | default('packer')) }}' | chpasswd"
+    - curtin in-target --target=/target -- sh -c "printf '%s:%s\n' '{{ packer_ssh_username | default('packer') }}' '{{ packer_ssh_password }}' | chpasswd"
+    - curtin in-target --target=/target -- sh -c "printf '%s:%s\n' 'root' '{{ packer_ssh_password }}' | chpasswd"
 
     # Keep SSH permissive only for the Packer build phase.
     # Your cleanup/hardening automation can replace this later for deployed VMs.
