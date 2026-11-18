@@ -41,7 +41,7 @@ postgres:
   app: dfir-iris-postgres
   name: dfir-iris-postgres
   image: ghcr.io/dfir-iris/iriswebapp_db
-  tag: v2.4.27
+  tag: v2.4.29
   imagePullPolicy: IfNotPresent
   replicaCount: 1
 
@@ -77,7 +77,7 @@ irisapp:
   app: dfir-iris-app
   name: dfir-iris-app
   image: ghcr.io/dfir-iris/iriswebapp_app
-  tag: v2.4.27
+  tag: v2.4.29
   imagePullPolicy: IfNotPresent
   replicaCount: 1
 
@@ -138,7 +138,7 @@ irisworker:
   app: dfir-iris-worker
   name: dfir-iris-worker
   image: ghcr.io/dfir-iris/iriswebapp_app
-  tag: v2.4.27
+  tag: v2.4.29
   imagePullPolicy: IfNotPresent
   replicaCount: 1
 
