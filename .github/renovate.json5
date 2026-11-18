@@ -1,303 +1,290 @@
 {
-  // JSON schema for editor validation and autocomplete.
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  // Start from Renovate's safe defaults, then layer in repo-specific behavior.
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
-    "config:recommended",
-    ":dependencyDashboard",
-    ":rebaseStalePrs",
-    ":semanticCommits",
-    ":semanticCommitTypeAll(chore)",
-    ":semanticCommitScope(deps)",
+    'config:recommended',
+    ':dependencyDashboard',
+    ':rebaseStalePrs',
+    ':semanticCommits',
+    ':semanticCommitTypeAll(chore)',
+    ':semanticCommitScope(deps)',
   ],
-  // ---------------------------------------------------------------------------
-  // Repository behavior
-  // ---------------------------------------------------------------------------
-  timezone: "America/Boise",
-  dependencyDashboard: true,
-  dependencyDashboardTitle: "Renovate Dependency Dashboard",
+  timezone: 'America/Boise',
+  dependencyDashboard: {
+    enabled: true,
+    title: 'Renovate Dependency Dashboard',
+  },
   labels: [
-    "dependencies",
-    "renovate",
+    'dependencies',
+    'renovate',
   ],
-  commitMessageLowerCase: "never",
-  commitMessageAction: "update",
-  commitMessageTopic: "{{depName}}",
-  commitMessageExtra: "to {{newVersion}}",
-  rebaseWhen: "behind-base-branch",
-  rangeStrategy: "bump",
+  commitMessageLowerCase: 'never',
+  commitMessageAction: 'update',
+  commitMessageTopic: '{{depName}}',
+  commitMessageExtra: 'to {{newVersion}}',
+  rebaseWhen: 'behind-base-branch',
+  rangeStrategy: 'bump',
   prConcurrentLimit: 8,
   prHourlyLimit: 2,
   branchConcurrentLimit: 12,
   dependencyDashboardApproval: false,
   configMigration: true,
-  // ---------------------------------------------------------------------------
-  // Managers
-  // ---------------------------------------------------------------------------
   enabledManagers: [
-    "ansible",
-    "ansible-galaxy",
-    "docker-compose",
-    "dockerfile",
-    "flux",
-    "github-actions",
-    "helm-values",
-    "homebrew",
-    "kubernetes",
-    "kustomize",
-    "pip_requirements",
-    "renovate-config",
-    "terraform",
+    'ansible',
+    'ansible-galaxy',
+    'docker-compose',
+    'dockerfile',
+    'flux',
+    'github-actions',
+    'helm-values',
+    'homebrew',
+    'kubernetes',
+    'kustomize',
+    'pip_requirements',
+    'renovate-config',
+    'terraform',
   ],
   ansible: {
     managerFilePatterns: [
-      "/(^|/)Ansible/roles/.+/tasks/.+\\.ya?ml$/",
-      "/(^|/)Ansible/roles/.+/handlers/.+\\.ya?ml$/",
-      "/(^|/)Ansible/playbooks/.+\\.ya?ml$/",
+      '/(^|/)Ansible/roles/.+/tasks/.+\\.ya?ml$/',
+      '/(^|/)Ansible/roles/.+/handlers/.+\\.ya?ml$/',
+      '/(^|/)Ansible/playbooks/.+\\.ya?ml$/',
     ],
   },
-  "ansible-galaxy": {
+  'ansible-galaxy': {
     managerFilePatterns: [
-      "/(^|/)Ansible/requirements\\.ya?ml$/",
+      '/(^|/)Ansible/requirements\\.ya?ml$/',
     ],
   },
   pip_requirements: {
     managerFilePatterns: [
-      "/(^|/)Ansible/requirements\\.txt$/",
-      "/(^|/)Docs/requirements\\.txt$/",
+      '/(^|/)Ansible/requirements\\.txt$/',
+      '/(^|/)Docs/requirements\\.txt$/',
     ],
   },
   dockerfile: {
     managerFilePatterns: [
-      "/(^|/)Docs/Dockerfile$/",
-      "/(^|/)Kubernetes/.+/Dockerfile$/",
-      "/(^|/)Packer/.+/Dockerfile$/",
+      '/(^|/)Docs/Dockerfile$/',
+      '/(^|/)Kubernetes/.+/Dockerfile$/',
+      '/(^|/)Packer/.+/Dockerfile$/',
     ],
   },
-  "docker-compose": {
+  'docker-compose': {
     managerFilePatterns: [
-      "/(^|/)PXE/docker-compose\\.ya?ml$/",
-      "/(^|/).+/docker-compose\\.ya?ml$/",
-      "/(^|/).+/compose\\.ya?ml$/",
+      '/(^|/)PXE/docker-compose\\.ya?ml$/',
+      '/(^|/).+/docker-compose\\.ya?ml$/',
+      '/(^|/).+/compose\\.ya?ml$/',
     ],
   },
   flux: {
     managerFilePatterns: [
-      "/(^|/)Kubernetes/.+\\.ya?ml$/",
+      '/(^|/)Kubernetes/.+\\.ya?ml$/',
     ],
   },
-  "helm-values": {
+  'helm-values': {
     managerFilePatterns: [
-      "/(^|/)Kubernetes/.+/values\\.ya?ml$/",
-      "/(^|/)Kubernetes/.+\\.values\\.ya?ml$/",
+      '/(^|/)Kubernetes/.+/values\\.ya?ml$/',
+      '/(^|/)Kubernetes/.+\\.values\\.ya?ml$/',
     ],
   },
   homebrew: {
     managerFilePatterns: [
-      "/(^|/)scripts/configs/Brewfile$/",
+      '/(^|/)scripts/configs/Brewfile$/',
     ],
   },
   kubernetes: {
     managerFilePatterns: [
-      "/(^|/)Kubernetes/.+\\.ya?ml$/",
+      '/(^|/)Kubernetes/.+\\.ya?ml$/',
     ],
   },
   kustomize: {
     managerFilePatterns: [
-      "/(^|/)Kubernetes/.+/kustomization\\.ya?ml$/",
+      '/(^|/)Kubernetes/.+/kustomization\\.ya?ml$/',
     ],
   },
   terraform: {
     managerFilePatterns: [
-      "/(^|/)Terraform/.+\\.(tf|tofu)$/",
+      '/(^|/)Terraform/.+\\.(tf|tofu)$/',
     ],
   },
-  // ---------------------------------------------------------------------------
-  // Ignore generated, vendored, runtime, and secret-bearing paths
-  // ---------------------------------------------------------------------------
   ignorePaths: [
-    "**/.ansible/**",
-    "**/.collections/**",
-    "**/.terraform/**",
-    "**/.venv/**",
-    "**/node_modules/**",
-    "**/build.log",
-    "**/*.auto.tfvars",
-    "**/*.auto.tfvars.json",
-    "**/*.pkrvars.hcl",
-    "**/*.tfstate",
-    "**/*.tfstate.*",
-    "**/terraform.tfstate",
-    "**/terraform.tfstate.*",
-    ".outputs/**",
-    ".secrets/**",
-    "Packer/.iso-cache/**",
-    "site/**",
+    '**/.ansible/**',
+    '**/.collections/**',
+    '**/.terraform/**',
+    '**/.venv/**',
+    '**/node_modules/**',
+    '**/build.log',
+    '**/*.auto.tfvars',
+    '**/*.auto.tfvars.json',
+    '**/*.pkrvars.hcl',
+    '**/*.tfstate',
+    '**/*.tfstate.*',
+    '**/terraform.tfstate',
+    '**/terraform.tfstate.*',
+    '.outputs/**',
+    '.secrets/**',
+    'Packer/.iso-cache/**',
+    'site/**',
   ],
-  // Keep Terraform provider lock files maintained.
   lockFileMaintenance: {
     enabled: true,
     schedule: [
-      "before 6am on monday",
+      'before 6am on monday',
     ],
-    commitMessageTopic: "lock files",
+    commitMessageTopic: 'lock files',
   },
-  // ---------------------------------------------------------------------------
-  // Package rules
-  // ---------------------------------------------------------------------------
   packageRules: [
     {
-      description: "Group Ansible Galaxy collections and roles",
+      description: 'Group Ansible Galaxy collections and roles',
       matchManagers: [
-        "ansible-galaxy",
+        'ansible-galaxy',
       ],
-      groupName: "ansible galaxy dependencies",
-      commitMessageTopic: "Ansible Galaxy dependencies",
+      groupName: 'ansible galaxy dependencies',
+      commitMessageTopic: 'Ansible Galaxy dependencies',
       addLabels: [
-        "ansible",
+        'ansible',
       ],
     },
     {
-      description: "Group Python tooling dependencies",
+      description: 'Group Python tooling dependencies',
       matchManagers: [
-        "pip_requirements",
+        'pip_requirements',
       ],
       matchFileNames: [
-        "Ansible/requirements.txt",
-        "Docs/requirements.txt",
+        'Ansible/requirements.txt',
+        'Docs/requirements.txt',
       ],
-      groupName: "python tooling dependencies",
-      commitMessageTopic: "Python tooling dependencies",
+      groupName: 'python tooling dependencies',
+      commitMessageTopic: 'Python tooling dependencies',
       addLabels: [
-        "python",
+        'python',
       ],
     },
     {
-      description: "Group MkDocs documentation dependencies",
+      description: 'Group MkDocs documentation dependencies',
       matchManagers: [
-        "pip_requirements",
+        'pip_requirements',
       ],
       matchFileNames: [
-        "Docs/requirements.txt",
+        'Docs/requirements.txt',
       ],
       matchPackageNames: [
-        "mkdocs",
-        "mkdocs-material",
-        "mkdocs-mermaid2-plugin",
-        "pymdown-extensions",
+        'mkdocs',
+        'mkdocs-material',
+        'mkdocs-mermaid2-plugin',
+        'pymdown-extensions',
       ],
-      groupName: "mkdocs documentation dependencies",
-      commitMessageTopic: "MkDocs documentation dependencies",
+      groupName: 'mkdocs documentation dependencies',
+      commitMessageTopic: 'MkDocs documentation dependencies',
       addLabels: [
-        "docs",
+        'docs',
       ],
     },
     {
-      description: "Group Kubernetes and GitOps manifest updates",
+      description: 'Group Kubernetes and GitOps manifest updates',
       matchManagers: [
-        "flux",
-        "helm-values",
-        "kubernetes",
-        "kustomize",
+        'flux',
+        'helm-values',
+        'kubernetes',
+        'kustomize',
       ],
       matchFileNames: [
-        "Kubernetes/**",
+        'Kubernetes/**',
       ],
-      groupName: "kubernetes gitops manifests",
-      commitMessageTopic: "Kubernetes GitOps manifests",
+      groupName: 'kubernetes gitops manifests',
+      commitMessageTopic: 'Kubernetes GitOps manifests',
       addLabels: [
-        "kubernetes",
-        "gitops",
+        'kubernetes',
+        'gitops',
       ],
     },
     {
-      description: "Group Docker image updates",
+      description: 'Group Docker image updates',
       matchManagers: [
-        "ansible",
-        "docker-compose",
-        "dockerfile",
+        'ansible',
+        'docker-compose',
+        'dockerfile',
       ],
-      groupName: "docker images",
-      commitMessageTopic: "Docker images",
+      groupName: 'docker images',
+      commitMessageTopic: 'Docker images',
       addLabels: [
-        "docker",
+        'docker',
       ],
     },
     {
-      description: "Group Terraform provider and module updates",
+      description: 'Group Terraform provider and module updates',
       matchManagers: [
-        "terraform",
+        'terraform',
       ],
-      groupName: "terraform dependencies",
-      commitMessageTopic: "Terraform dependencies",
+      groupName: 'terraform dependencies',
+      commitMessageTopic: 'Terraform dependencies',
       addLabels: [
-        "terraform",
+        'terraform',
       ],
     },
     {
-      description: "Group GitHub Actions updates",
+      description: 'Group GitHub Actions updates',
       matchManagers: [
-        "github-actions",
+        'github-actions',
       ],
-      groupName: "github actions",
-      commitMessageTopic: "GitHub Actions",
+      groupName: 'github actions',
+      commitMessageTopic: 'GitHub Actions',
       addLabels: [
-        "github-actions",
+        'github-actions',
       ],
     },
     {
-      description: "Group Homebrew Brewfile updates",
+      description: 'Group Homebrew Brewfile updates',
       matchManagers: [
-        "homebrew",
+        'homebrew',
       ],
-      groupName: "homebrew dependencies",
-      commitMessageTopic: "Homebrew dependencies",
+      groupName: 'homebrew dependencies',
+      commitMessageTopic: 'Homebrew dependencies',
       addLabels: [
-        "homebrew",
+        'homebrew',
       ],
     },
     {
-      description: "Keep GitHub Actions digest pinning separate when present",
+      description: 'Keep GitHub Actions digest pinning separate when present',
       matchManagers: [
-        "github-actions",
+        'github-actions',
       ],
       matchUpdateTypes: [
-        "digest",
+        'digest',
       ],
-      groupName: "github actions digests",
-      commitMessageTopic: "GitHub Actions digests",
+      groupName: 'github actions digests',
+      commitMessageTopic: 'GitHub Actions digests',
     },
     {
-      description: "Keep container digest updates grouped",
+      description: 'Keep container digest updates grouped',
       matchManagers: [
-        "docker-compose",
-        "dockerfile",
-        "helm-values",
-        "kubernetes",
+        'docker-compose',
+        'dockerfile',
+        'helm-values',
+        'kubernetes',
       ],
       matchUpdateTypes: [
-        "digest",
+        'digest',
       ],
-      groupName: "container image digests",
-      commitMessageTopic: "container image digests",
+      groupName: 'container image digests',
+      commitMessageTopic: 'container image digests',
     },
     {
-      description: "Mark major updates clearly and require dashboard approval",
+      description: 'Mark major updates clearly and require dashboard approval',
       matchUpdateTypes: [
-        "major",
+        'major',
       ],
       dependencyDashboardApproval: true,
       addLabels: [
-        "major-update",
+        'major-update',
       ],
     },
     {
-      description: "Label patch updates without overriding specific groups",
+      description: 'Label patch updates without overriding specific groups',
       matchUpdateTypes: [
-        "patch",
+        'patch',
       ],
       addLabels: [
-        "patch-update",
+        'patch-update',
       ],
     },
   ],
